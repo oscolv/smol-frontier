@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Annotated
 
 import numpy as np
-import rasterio
 import typer
 
 from smol_frontier import __version__
 from smol_frontier.classify import pipeline
+from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import settings
 from smol_frontier.ingest import ingest_scene
@@ -74,22 +74,7 @@ def classify(
     out_dir = Path("outputs")
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
-    height, width = result.class_map.shape
-    with rasterio.open(
-        path,
-        "w",
-        driver="GTiff",
-        height=height,
-        width=width,
-        count=1,
-        dtype="uint8",
-        crs=ing.crs,
-        transform=ing.transform,
-        nodata=settings.CLASS_NODATA,
-        tiled=True,
-        compress="deflate",
-    ) as dst:
-        dst.write(result.class_map, 1)
+    write_classified_geotiff(path, result.class_map, ing.transform, ing.crs)
     nir_thr = "none" if result.nir_thr_used is None else f"{result.nir_thr_used:.4f}"
     typer.echo(f"scene: {result.scene_id}")
     typer.echo(f"water_ha: {ha[settings.CLASS_WATER]:.2f}")

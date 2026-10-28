@@ -135,6 +135,17 @@ class Settings:
     CLASS_INTERFACE: int = 3
     CLASS_BARE_SOIL: int = 4
 
+    # WHY: display palette for the classified map — single source of truth
+    #   for the GeoTIFF color table, the demo UI, and charts, so every
+    #   surface shows the same class colors. Hex RGB (CSS-style), except
+    #   nodata, which carries an alpha channel (fully transparent).
+    # HOW: fixed palette per project spec.
+    COLOR_NODATA: str = "#00000000"
+    COLOR_WATER: str = "#1d2e42"
+    COLOR_DENSE_HYACINTH: str = "#15c912"
+    COLOR_INTERFACE: str = "#8ed89d"
+    COLOR_BARE_SOIL: str = "#a0783c"
+
     def traffic_light(self, pct: float) -> str:
         """Classify reservoir-area percent into green/yellow/red bands."""
         if pct < self.GREEN_MAX_PCT:

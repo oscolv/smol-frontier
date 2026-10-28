@@ -1,7 +1,6 @@
 """Typer CLI entry point (`smolf`)."""
 
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated
 
 import numpy as np
@@ -11,7 +10,7 @@ from smol_frontier import __version__
 from smol_frontier.classify import pipeline
 from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
-from smol_frontier.config import settings
+from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.sources.stac import search_scenes
 
@@ -71,7 +70,7 @@ def classify(
     ing = ingest_scene(scenes[0])
     result = pipeline.classify(ing)
     ha = result.ha_per_class
-    out_dir = Path("outputs")
+    out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
     write_classified_geotiff(path, result.class_map, ing.transform, ing.crs)

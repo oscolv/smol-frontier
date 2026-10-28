@@ -26,7 +26,7 @@ from shapely.geometry import mapping as shapely_mapping
 from shapely.geometry.base import BaseGeometry
 
 from smol_frontier.aoi import utm_geometry, wgs84_bbox
-from smol_frontier.config import settings
+from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.sources.radiometry import (
     boa_offset,
     dn_to_reflectance,
@@ -41,7 +41,10 @@ __all__ = ["BAND_ORDER", "DEFAULT_CACHE_DIR", "IngestedScene", "ingest_scene"]
 BAND_ORDER = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11", "SCL")
 BANDS_20M = frozenset({"B05", "B8A", "B11", "SCL"})
 REF_GRID_BAND = "B04"
-DEFAULT_CACHE_DIR = Path("data/cache")
+# WHY: shared on-disk cache for ingested scenes, so re-runs never re-download.
+# HOW: repo layout (gitignored data/cache/) anchored at PROJECT_ROOT, so the
+#   caller's cwd cannot scatter or orphan cache copies.
+DEFAULT_CACHE_DIR = PROJECT_ROOT / "data/cache"
 
 
 @dataclass(frozen=True, eq=False)

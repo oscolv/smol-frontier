@@ -8,12 +8,21 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-__all__ = ["Settings", "settings"]
+__all__ = ["PROJECT_ROOT", "Settings", "settings"]
+
+# WHY: anchor for every repo-relative default path, so `smolf` works no matter
+#   which directory it is invoked from (a bare "data/..." path resolves against
+#   the caller's cwd and breaks outside the repo root).
+# HOW: derived from this file's location — src/smol_frontier/config.py, so the
+#   repo root is three levels up.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _default_aoi_path() -> Path:
     """Resolve the AOI path, honoring the SMOLF_AOI env override."""
-    return Path(os.environ.get("SMOLF_AOI", "data/aoi/endho_vaso.shp"))
+    if "SMOLF_AOI" in os.environ:
+        return Path(os.environ["SMOLF_AOI"])
+    return PROJECT_ROOT / "data/aoi/endho_vaso.shp"
 
 
 @dataclass(frozen=True)
@@ -22,7 +31,8 @@ class Settings:
 
     # WHY: path to the Endho reservoir (vaso) polygon; every area computation
     #   starts from this geometry.
-    # HOW: default follows the repo layout; overridable at runtime via
+    # HOW: default follows the repo layout anchored at PROJECT_ROOT (absolute,
+    #   so the caller's cwd cannot break it); overridable at runtime via
     #   SMOLF_AOI so runs can point at another copy without code changes.
     AOI_PATH: Path = field(default_factory=_default_aoi_path)
 

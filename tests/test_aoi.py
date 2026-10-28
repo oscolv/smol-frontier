@@ -1,5 +1,7 @@
 """Tests for the reservoir AOI module."""
 
+from pathlib import Path
+
 import pytest
 
 from smol_frontier.aoi import (
@@ -25,3 +27,11 @@ def test_geometries_valid_single_polygon() -> None:
         assert geom.is_valid
         assert not geom.is_empty
         assert geom.geom_type in ("Polygon", "MultiPolygon")
+
+
+def test_geometry_loads_from_another_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """AOI lookup must not depend on the caller's working directory."""
+    monkeypatch.chdir(tmp_path)
+    assert wgs84_geometry().is_valid

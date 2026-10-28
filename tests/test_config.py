@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from smol_frontier.config import Settings, settings
+from smol_frontier.config import PROJECT_ROOT, Settings, settings
 
 
 def test_settings_are_immutable() -> None:
@@ -15,7 +15,8 @@ def test_settings_are_immutable() -> None:
 
 def test_aoi_path_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SMOLF_AOI", raising=False)
-    assert Settings().AOI_PATH == Path("data/aoi/endho_vaso.shp")
+    assert Settings().AOI_PATH == PROJECT_ROOT / "data/aoi/endho_vaso.shp"
+    assert Settings().AOI_PATH.is_absolute()
 
 
 def test_aoi_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:

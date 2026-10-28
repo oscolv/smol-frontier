@@ -1,0 +1,54 @@
+"""Tests for the frozen settings object."""
+
+import dataclasses
+from pathlib import Path
+
+import pytest
+
+from smol_frontier.config import Settings, settings
+
+
+def test_settings_are_immutable() -> None:
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        settings.TAU_WATER = 0.5  # type: ignore[misc]
+
+
+def test_aoi_path_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SMOLF_AOI", raising=False)
+    assert Settings().AOI_PATH == Path("data/aoi/endho_vaso.shp")
+
+
+def test_aoi_path_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SMOLF_AOI", "elsewhere/custom.shp")
+    assert Settings().AOI_PATH == Path("elsewhere/custom.shp")
+
+
+def test_class_codes_are_unique() -> None:
+    codes = [
+        settings.CLASS_NODATA,
+        settings.CLASS_WATER,
+        settings.CLASS_DENSE_HYACINTH,
+        settings.CLASS_INTERFACE,
+        settings.CLASS_BARE_SOIL,
+    ]
+    assert codes == [0, 1, 2, 3, 4]
+    assert len(set(codes)) == len(codes)
+
+
+def test_thresholds_in_unit_interval() -> None:
+    values = (
+        settings.TAU_WATER,
+        settings.TAU_HYACINTH,
+        settings.FRAC_PUBLISHABLE,
+    )
+    for value in values:
+        assert 0.0 < value < 1.0
+
+
+def test_traffic_light_bands() -> None:
+    assert settings.traffic_light(0.0) == "green"
+    assert settings.traffic_light(29.9) == "green"
+    assert settings.traffic_light(30.0) == "yellow"
+    assert settings.traffic_light(49.9) == "yellow"
+    assert settings.traffic_light(50.0) == "red"
+    assert settings.traffic_light(100.0) == "red"

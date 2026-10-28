@@ -1,0 +1,83 @@
+"""Single source of truth for every smol-frontier parameter.
+
+All paths, thresholds, bands, and class codes live in one frozen
+:class:`Settings` object so no value is ever hard-coded at a call site.
+"""
+
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+
+__all__ = ["Settings", "settings"]
+
+
+def _default_aoi_path() -> Path:
+    """Resolve the AOI path, honoring the SMOLF_AOI env override."""
+    return Path(os.environ.get("SMOLF_AOI", "data/aoi/endho_vaso.shp"))
+
+
+@dataclass(frozen=True)
+class Settings:
+    """Frozen project settings. Construct with no args; env overrides apply."""
+
+    # WHY: path to the Endho reservoir (vaso) polygon; every area computation
+    #   starts from this geometry.
+    # HOW: default follows the repo layout; overridable at runtime via
+    #   SMOLF_AOI so runs can point at another copy without code changes.
+    AOI_PATH: Path = field(default_factory=_default_aoi_path)
+
+    # WHY: projected CRS in metres for the reservoir, so area means hectares.
+    # HOW: fixed by geography — Endho sits in UTM zone 14N.
+    UTM_CRS: str = "EPSG:32614"
+
+    # WHY: GMM posterior cutoff above which a pixel counts as water at all;
+    #   separates the reservoir surface from land before hyacinth mapping.
+    # HOW: calibrated on the author's prior research (Oct 2026, 465
+    #   Sentinel-2 scenes 2017–2026): varying TAU_WATER over 0.50–0.99 moves
+    #   total hyacinth area by at most 7 ha, so 0.80 is a stable choice.
+    TAU_WATER: float = 0.80
+
+    # WHY: GMM posterior cutoff above which water counts as dense hyacinth
+    #   rather than open water / interface; splits the water mask by cover.
+    # HOW: same calibration as TAU_WATER (Oct 2026, 465 scenes): moving
+    #   TAU_HYACINTH only reallocates pixels between dense and interface
+    #   classes without changing the water mask, so 0.55 is a stable split.
+    TAU_HYACINTH: float = 0.55
+
+    # WHY: minimum valid (cloud-free, observed) fraction of the reservoir for
+    #   a scene's percentage to be publishable — clouded area implicitly
+    #   counts as "no hyacinth", so a cloudy scene's percentage understates
+    #   coverage. Below this, hectares are still reported as a lower bound
+    #   but the percentage is withheld.
+    # HOW: fixed policy value per project spec; 0.95 keeps the understatement
+    #   from missing data negligible relative to the reported percent.
+    FRAC_PUBLISHABLE: float = 0.95
+
+    # WHY: traffic-light management bands on percent of reservoir area covered
+    #   by hyacinth: GREEN below GREEN_MAX_PCT, YELLOW up to RED_MIN_PCT,
+    #   RED at or above RED_MIN_PCT.
+    # HOW: fixed policy bands per project spec (GREEN < 30, YELLOW 30–50,
+    #   RED >= 50).
+    GREEN_MAX_PCT: float = 30.0
+    RED_MIN_PCT: float = 50.0
+
+    # WHY: integer raster codes for the classification map; fixed once so
+    #   outputs stay comparable across runs and steps.
+    # HOW: fixed enumeration per project spec (0 nodata, 1 water,
+    #   2 dense hyacinth, 3 interface, 4 bare soil).
+    CLASS_NODATA: int = 0
+    CLASS_WATER: int = 1
+    CLASS_DENSE_HYACINTH: int = 2
+    CLASS_INTERFACE: int = 3
+    CLASS_BARE_SOIL: int = 4
+
+    def traffic_light(self, pct: float) -> str:
+        """Classify reservoir-area percent into green/yellow/red bands."""
+        if pct < self.GREEN_MAX_PCT:
+            return "green"
+        if pct < self.RED_MIN_PCT:
+            return "yellow"
+        return "red"
+
+
+settings = Settings()

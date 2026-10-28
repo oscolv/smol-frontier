@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Independent, auditable verification of water-hyacinth coverage change in Endhó Reservoir, Mexico."
 requires-python = ">=3.11"
 dependencies = [
+    "geopandas==1.2.0",
     "typer==0.27.3",
 ]
 

@@ -59,9 +59,10 @@ GMM_MAX_ITER = 200
 GMM_TOL = 1e-3
 GMM_N_INIT = 3
 
-# WHY: Stage 1 decision cutoffs — separability below 1.5 triggers the
-#   adaptive-NIR second attempt; degenerate fits report infinite separation.
-SEP_ADAPT_MAX = 1.5
+# WHY: degenerate-fit guard — pooled std below this reports infinite
+#   separation instead of dividing by ~zero. (The 1.5 adaptive-NIR cutoff
+#   lives in config.py as SEP_DOUBTFUL, shared with the quality flag so the
+#   two can never drift apart.)
 SEP_EPS = 1e-9
 
 # WHY: no-mat rules — under 2 % high-FAI pixels (≈25 ha) there is no mat to
@@ -290,7 +291,7 @@ def stage1(
         mat_mean_fai = float(means[1 - water_comp, 0])
         if _is_no_mat(features[:, 0], mat_mean_fai):
             return _no_mat_waterless(cur, math.inf)
-        if attempt == 0 and sep < SEP_ADAPT_MAX and nir_thr_used is None:
+        if attempt == 0 and sep < s.SEP_DOUBTFUL and nir_thr_used is None:
             valley = nir_valley(b08[cur])
             if valley > ADAPT_VALLEY_MIN:
                 adapt_water = cur & (b08 < valley) & (fai < s.FAI_FLOAT_MIN)

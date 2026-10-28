@@ -83,6 +83,44 @@ class Settings:
     #   (~12 % cloud, doubtful).
     CLOUD_FRAC_DOUBTFUL: float = 0.10
 
+    # WHY: valid fraction below which a classified scene is doubtful
+    #   (PARTIAL_CLOUDS) — between here and MIN_VALID_FRACTION the scene is
+    #   still classified but too much of the reservoir is unobserved to trust
+    #   the coverage number fully.
+    # HOW: fixed cutoff from the author's prior research (per-scene quality
+    #   traffic light).
+    FRAC_DOUBTFUL: float = 0.85
+
+    # WHY: double-use separability cutoff — below it Stage 1 retries with the
+    #   adaptive NIR threshold AND the scene is flagged doubtful
+    #   (GMM_WATER_OVERLAP). One constant, so the retry rule and the quality
+    #   flag can never drift apart.
+    # HOW: moved from gmm.py (was SEP_ADAPT_MAX); fixed cutoff from the
+    #   author's prior research.
+    SEP_DOUBTFUL: float = 1.5
+
+    # WHY: soil hectares above which the scene is in the EXPOSED_BED regime —
+    #   with exposed bed, Sentinel-2 underestimates hyacinth versus same-day
+    #   PlanetScope (P(|PS − S2| > 100 ha) = 0.62 with exposed bed vs 0.22
+    #   without; 125 pairs ±1 day), and no separability/confidence metric
+    #   predicted that gap. So the regime is reported in its own field and
+    #   does NOT degrade quality.
+    # HOW: fixed cutoff from the author's prior research.
+    REGIME_SOIL_MAX_HA: float = 50.0
+
+    # WHY: nir_water_frac at or above which the scene is in the TURBIDITY
+    #   regime — with turbidity, Sentinel-2 underestimates versus same-day
+    #   PlanetScope (P(|PS − S2| > 100 ha) = 0.91 with turbidity vs 0.25
+    #   without; same 125 pairs). Reported in its own field, never degrades
+    #   quality.
+    # HOW: fixed cutoff from the author's prior research.
+    REGIME_NIR_WATER_MIN: float = 0.60
+
+    # WHY: nir_water_frac above which the HIGH_TURBIDITY informational flag
+    #   fires — notes a strongly turbid scene without changing the light.
+    # HOW: fixed cutoff from the author's prior research.
+    TURBIDITY_HIGH_FRAC: float = 0.70
+
     # WHY: width of the strip near the reservoir edge where exposed bed
     #   appears at low water — the soil pre-mask applies ONLY there, never in
     #   open water.

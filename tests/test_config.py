@@ -43,6 +43,9 @@ def test_thresholds_in_unit_interval() -> None:
         settings.FRAC_PUBLISHABLE,
         settings.MIN_VALID_FRACTION,
         settings.CLOUD_FRAC_DOUBTFUL,
+        settings.FRAC_DOUBTFUL,
+        settings.REGIME_NIR_WATER_MIN,
+        settings.TURBIDITY_HIGH_FRAC,
     )
     for value in values:
         assert 0.0 < value < 1.0
@@ -51,6 +54,11 @@ def test_thresholds_in_unit_interval() -> None:
 def test_quality_constants() -> None:
     assert settings.MIN_VALID_FRACTION == 0.80
     assert settings.CLOUD_FRAC_DOUBTFUL == 0.10
+    assert settings.FRAC_DOUBTFUL == 0.85
+    assert settings.SEP_DOUBTFUL == 1.5
+    assert settings.REGIME_SOIL_MAX_HA == 50.0
+    assert settings.REGIME_NIR_WATER_MIN == 0.60
+    assert settings.TURBIDITY_HIGH_FRAC == 0.70
 
 
 def test_stage1_constants() -> None:

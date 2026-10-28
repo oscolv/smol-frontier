@@ -12,6 +12,7 @@ from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.ingest import ingest_scene
+from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import search_scenes
 
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
@@ -91,6 +92,13 @@ def classify(
     typer.echo(f"nir_water_frac: {result.nir_water_frac:.4f}")
     typer.echo(f"n_rescued: {result.n_rescued}")
     typer.echo(f"n_substrate: {result.n_substrate}")
+    quality = assess_quality(result)
+    typer.echo(f"light: {quality.light}")
+    typer.echo(f"degrading_flags: {','.join(quality.degrading_flags) or 'none'}")
+    typer.echo(f"info_flags: {','.join(quality.info_flags) or 'none'}")
+    typer.echo(f"regime: {quality.regime or 'clean'}")
+    if not quality.publishable_pct:
+        typer.echo("PERCENT NOT PUBLISHABLE")
     typer.echo(f"output: {path}")
 
 

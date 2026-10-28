@@ -8,7 +8,9 @@ dependencies = [
     "numpy==2.4.6",
     "planetary-computer==1.0.0",
     "pystac-client==0.9.1",
+    "rasterio==1.4.4",
     "requests==2.34.2",
+    "shapely==2.2.0",
     "typer==0.27.3",
 ]
 

@@ -69,10 +69,8 @@ def fai(
     series. Pass B8A with ``nir_wavelength_nm=865.0`` for the narrow-NIR
     variant.
 
-    NOTE: the project brief quotes a B08 slope of 0.1759, but the stated
-    formula and wavelengths give (833 − 665) / (1610 − 665) = 168/945 ≈
-    0.17778. The formula is implemented as written; if 0.1759 is the
-    intended constant, this is a one-line change.
+    The slope is always computed from the wavelengths (168/945 ≈ 0.17778
+    for B08), matching the prior pipeline.
     """
     slope = (nir_wavelength_nm - LAMBDA_B04_NM) / (LAMBDA_B11_NM - LAMBDA_B04_NM)
     baseline = np.asanyarray(red) + (np.asanyarray(swir1) - np.asanyarray(red)) * slope

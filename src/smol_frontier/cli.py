@@ -1,5 +1,6 @@
 """Typer CLI entry point (`smolf`)."""
 
+import math
 from datetime import datetime
 from typing import Annotated
 
@@ -11,11 +12,19 @@ from smol_frontier.classify import pipeline
 from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro.levels import (
+    DEFAULT_LEVELS_PATH,
+    LevelsError,
+    load_levels,
+    update_levels,
+)
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import search_scenes
 
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
+levels_app = typer.Typer(help="Reservoir water levels from the SIH record.")
+app.add_typer(levels_app, name="levels")
 
 
 @app.callback()
@@ -100,6 +109,55 @@ def classify(
     if not quality.publishable_pct:
         typer.echo("PERCENT NOT PUBLISHABLE")
     typer.echo(f"output: {path}")
+
+
+@levels_app.command("update")
+def levels_update(
+    check: Annotated[
+        bool, typer.Option("--check", help="Download and validate without writing.")
+    ] = False,
+    force: Annotated[
+        bool, typer.Option("--force", help="Accept level revisions over tolerance.")
+    ] = False,
+) -> None:
+    """Refresh the local SIH water-level record."""
+    try:
+        report = update_levels(check=check, force=force)
+    except LevelsError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
+    typer.echo(f"days: {report.n_days}")
+    typer.echo(f"first_day: {report.first_day}")
+    typer.echo(f"last_day: {report.last_day}")
+    typer.echo(f"last_day_with_level: {report.last_day_with_level or 'none'}")
+    typer.echo(f"bytes: {report.n_bytes}")
+    typer.echo(f"sha256: {report.sha256}")
+    typer.echo(f"level_revisions: {report.level_revisions}")
+    typer.echo(f"volume_revisions: {report.volume_revisions}")
+    if check:
+        typer.echo("check only: not written")
+    else:
+        typer.echo(f"output: {report.path}")
+
+
+@levels_app.command("show")
+def levels_show(
+    day: Annotated[
+        datetime, typer.Argument(..., formats=["%Y-%m-%d"], help="Day (YYYY-MM-DD).")
+    ],
+) -> None:
+    """Print the SIH level for one exact day (no interpolation)."""
+    if not DEFAULT_LEVELS_PATH.exists():
+        typer.echo("no local levels file; run `smolf levels update` first")
+        raise typer.Exit(1)
+    match = next((row for row in load_levels() if row.date == day.date()), None)
+    if match is None or math.isnan(match.level_m):
+        typer.echo(f"no level for {day.date()}")
+        raise typer.Exit(1)
+    volume = "n/a" if math.isnan(match.volume_hm3) else f"{match.volume_hm3}"
+    typer.echo(f"date: {match.date}")
+    typer.echo(f"level_m: {match.level_m:.2f}")
+    typer.echo(f"volume_hm3: {volume}")
 
 
 if __name__ == "__main__":

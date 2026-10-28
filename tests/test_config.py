@@ -61,6 +61,10 @@ def test_quality_constants() -> None:
     assert settings.TURBIDITY_HIGH_FRAC == 0.70
 
 
+def test_hydro_constants() -> None:
+    assert settings.LEVEL_REVISION_TOL_M == 0.05
+
+
 def test_stage1_constants() -> None:
     assert settings.BORDER_ZONE_M == 150.0
     assert settings.SOIL_BSI_MIN == 0.02

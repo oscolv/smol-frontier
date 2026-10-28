@@ -121,6 +121,14 @@ class Settings:
     # HOW: fixed cutoff from the author's prior research.
     TURBIDITY_HIGH_FRAC: float = 0.70
 
+    # WHY: level-change tolerance when refreshing the SIH record — the SIH
+    #   rounds to cm, and between two copies a month apart the 26 645 common
+    #   days had identical levels, so a change over 5 cm is a different
+    #   series, not a correction; refreshes that exceed it are rejected
+    #   unless --force.
+    # HOW: fixed cutoff from the author's prior research (hydrology inputs).
+    LEVEL_REVISION_TOL_M: float = 0.05
+
     # WHY: width of the strip near the reservoir edge where exposed bed
     #   appears at low water — the soil pre-mask applies ONLY there, never in
     #   open water.

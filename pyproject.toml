@@ -1,0 +1,30 @@
+[project]
+name = "smol-frontier"
+version = "0.1.0"
+description = "Independent, auditable verification of water-hyacinth coverage change in Endhó Reservoir, Mexico."
+requires-python = ">=3.11"
+dependencies = [
+    "typer==0.27.3",
+]
+
+[project.scripts]
+smolf = "smol_frontier.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/smol_frontier"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -18,9 +18,14 @@
 
 - Radiometry only in `sources/radiometry.py`; the BOA offset is computed once
   per scene from B02 and applied to every band.
-- Reproduce the prior methodology exactly: an identity gate compares this
-  pipeline against the reference series. When the brief and your instincts
-  disagree, the brief wins — flag the discrepancy instead of "fixing" it.
+- Re-implement the documented methodology (see PRIOR_WORK.md); correctness
+  is validated by an identity gate against the author's reference series.
+  When the brief and your instincts disagree, the brief wins — flag the
+  discrepancy instead of "fixing" it.
+- Core principle for the verification layer and the agent: models never
+  compute a number. Every quantity comes from a deterministic, tested
+  function; the model selects tools, explains results, and abstains when
+  data or quality are insufficient.
 
 ## Dependencies
 
@@ -39,5 +44,6 @@
 ## Before finishing
 
 - Run `ruff check .`, `ruff format --check .`, and `pytest -q`.
-- Create the commit only when asked; conventional commit messages;
-  no co-author or tool-attribution trailers.
+- Commits: create a commit only when the user asks; conventional commit
+  messages; no trailers. All code in this repository is written with Muse
+  Code during the hackathon, as disclosed in README.md and PRIOR_WORK.md.

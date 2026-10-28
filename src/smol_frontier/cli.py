@@ -1,13 +1,17 @@
 """Typer CLI entry point (`smolf`)."""
 
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import numpy as np
+import rasterio
 import typer
 
 from smol_frontier import __version__
+from smol_frontier.classify import pipeline
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
+from smol_frontier.config import settings
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.sources.stac import search_scenes
 
@@ -51,6 +55,59 @@ def fetch(
     typer.echo(f"valid_fraction: {valid_fraction(scl, b02, b11, b04, ing.inside):.4f}")
     typer.echo(f"cloud_fraction: {cloud_fraction(scl, b02, b11, b04, ing.inside):.4f}")
     typer.echo(f"median_b03_water: {median}")
+
+
+@app.command()
+def classify(
+    day: Annotated[
+        datetime, typer.Argument(..., formats=["%Y-%m-%d"], help="Day (YYYY-MM-DD).")
+    ],
+) -> None:
+    """Classify one day's scene, print the summary, write a GeoTIFF."""
+    scenes = search_scenes(day.date(), day.date(), 100.0)
+    if not scenes:
+        typer.echo(f"no scenes found for {day.date()}")
+        raise typer.Exit(1)
+    ing = ingest_scene(scenes[0])
+    result = pipeline.classify(ing)
+    ha = result.ha_per_class
+    out_dir = Path("outputs")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
+    height, width = result.class_map.shape
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=1,
+        dtype="uint8",
+        crs=ing.crs,
+        transform=ing.transform,
+        nodata=settings.CLASS_NODATA,
+        tiled=True,
+        compress="deflate",
+    ) as dst:
+        dst.write(result.class_map, 1)
+    nir_thr = "none" if result.nir_thr_used is None else f"{result.nir_thr_used:.4f}"
+    typer.echo(f"scene: {result.scene_id}")
+    typer.echo(f"water_ha: {ha[settings.CLASS_WATER]:.2f}")
+    typer.echo(f"dense_ha: {ha[settings.CLASS_DENSE_HYACINTH]:.2f}")
+    typer.echo(f"interface_ha: {ha[settings.CLASS_INTERFACE]:.2f}")
+    typer.echo(f"soil_ha: {ha[settings.CLASS_BARE_SOIL]:.2f}")
+    typer.echo(f"hyacinth_total_ha: {result.hyacinth_total_ha:.2f}")
+    typer.echo(f"pct_reservoir: {result.pct_reservoir:.2f}")
+    typer.echo(f"reservoir_area_ha: {result.reservoir_area_ha:.2f}")
+    typer.echo(f"valid_fraction: {result.valid_fraction:.4f}")
+    typer.echo(f"cloud_fraction: {result.cloud_fraction:.4f}")
+    typer.echo(f"gmm1_sep: {result.gmm1_sep:.4f}")
+    typer.echo(f"gmm2_sep: {result.gmm2_sep:.4f}")
+    typer.echo(f"nir_thr_used: {nir_thr}")
+    typer.echo(f"nir_water_frac: {result.nir_water_frac:.4f}")
+    typer.echo(f"n_rescued: {result.n_rescued}")
+    typer.echo(f"n_substrate: {result.n_substrate}")
+    typer.echo(f"output: {path}")
 
 
 if __name__ == "__main__":

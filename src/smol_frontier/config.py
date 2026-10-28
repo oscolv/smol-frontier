@@ -107,6 +107,24 @@ class Settings:
     # HOW: fixed cutoff from the author's prior research.
     FAI_FLOAT_MIN: float = 0.04
 
+    # WHY: rescue water → interface — at high coverage the Stage 1 GMM puts
+    #   mat-edge pixels into water, but water, however turbid, cannot produce
+    #   high NDVI and high NIR together; rescued pixels recover 12–35 % of
+    #   hyacinth at high coverage and 0 ha in clean low-coverage water.
+    # HOW: fixed cutoffs from the author's prior research (see PRIOR_WORK.md).
+    NDVI_RESCUE_WATER: float = 0.30
+    NIR_RESCUE_WATER: float = 0.15
+
+    # WHY: NSD substrate test — in the dry season, vegetation over exposed
+    #   sediment is not floating hyacinth; SWIR sees the substrate (low NSD).
+    #   Gated by sediment proximity (last word, runs after the rescue) so real
+    #   hyacinth over turbid water in a full reservoir (Jul–Dec) is untouched.
+    # HOW: fixed cutoffs from the author's prior research (see PRIOR_WORK.md):
+    #   NSD below 0.10 near (5 px ≈ 50 m) bare sediment (soil with NDVI < 0.20).
+    NSD_SUBSTRATE_SOIL: float = 0.10
+    NDVI_BARE_SEDIMENT: float = 0.20
+    NSD_SEDIMENT_DIST_PX: int = 5
+
     # WHY: integer raster codes for the classification map; fixed once so
     #   outputs stay comparable across runs and steps.
     # HOW: fixed enumeration per project spec (0 nodata, 1 water,

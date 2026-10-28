@@ -5,6 +5,7 @@ description = "Independent, auditable verification of water-hyacinth coverage ch
 requires-python = ">=3.11"
 dependencies = [
     "geopandas==1.2.0",
+    "numpy==2.4.6",
     "planetary-computer==1.0.0",
     "pystac-client==0.9.1",
     "requests==2.34.2",

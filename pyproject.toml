@@ -5,6 +5,9 @@ description = "Independent, auditable verification of water-hyacinth coverage ch
 requires-python = ">=3.11"
 dependencies = [
     "geopandas==1.2.0",
+    "planetary-computer==1.0.0",
+    "pystac-client==0.9.1",
+    "requests==2.34.2",
     "typer==0.27.3",
 ]
 
@@ -14,6 +17,7 @@ smolf = "smol_frontier.cli:app"
 [dependency-groups]
 dev = [
     "pytest==9.2.0",
+    "responses==0.26.3",
     "ruff==0.17.3",
 ]
 

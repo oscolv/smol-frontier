@@ -1,8 +1,18 @@
 """Tests for Stage 1 (synthetic water/mat scenes, pure numpy)."""
 
-import numpy as np
+import math
 
-from smol_frontier.classify.gmm import MAT_PENDING, border_strip, nir_valley, stage1
+import numpy as np
+import pytest
+
+import smol_frontier.classify.gmm as gmm_module
+from smol_frontier.classify.gmm import (
+    MAT_PENDING,
+    _is_no_mat,
+    border_strip,
+    nir_valley,
+    stage1,
+)
 from smol_frontier.config import settings
 
 
@@ -104,6 +114,7 @@ def test_no_mat_all_water() -> None:
     ]
     result = stage1(*arrays, np.ones(shape, dtype=bool), np.zeros(shape, dtype=bool))
     assert result.no_mat is True
+    assert result.gmm1_sep == math.inf
     assert result.mat_mask.sum() == 0
     assert (result.classes == settings.CLASS_WATER).all()
 
@@ -183,7 +194,8 @@ def test_nan_pixels_stay_nodata() -> None:
     assert result.no_mat is False
 
 
-def test_adaptive_nir_second_attempt() -> None:
+def _adaptive_scene():
+    """Scene that reaches attempt 1 (low attempt-0 sep, clear NIR valley)."""
     rng = np.random.default_rng(23)
     shape = (110, 100)
     n_water, n_edge, n_mat = 6000, 1000, 4000
@@ -206,11 +218,87 @@ def test_adaptive_nir_second_attempt() -> None:
     scene = {}
     for key in water:
         scene[key] = np.concatenate([water[key], edge[key], mat[key]]).reshape(shape)
-    result = stage1(
+    return scene, shape
+
+
+def _run_stage1(scene, shape):
+    return stage1(
         *[scene[k] for k in ("fai", "ndvi", "ndre", "mndwi", "bsi", "nsd", "b08")],
         np.ones(shape, dtype=bool),
         np.zeros(shape, dtype=bool),
     )
+
+
+def test_adaptive_nir_second_attempt() -> None:
+    scene, shape = _adaptive_scene()
+    result = _run_stage1(scene, shape)
     assert result.nir_thr_used is not None
     assert result.no_mat is False
     assert result.mat_mask.sum() > 0
+
+
+def test_is_no_mat() -> None:
+    assert _is_no_mat(np.zeros(100), 0.05) is True  # frac 0 < 0.02
+    assert _is_no_mat(np.full(100, 0.06), 0.06) is False
+    assert _is_no_mat(np.full(100, 0.06), 0.004) is True  # mat comp dark
+    boundary_frac = np.concatenate([np.full(2, 0.06), np.zeros(98)])
+    assert _is_no_mat(boundary_frac, 0.06) is False  # frac exactly 0.02
+    assert _is_no_mat(np.full(100, 0.06), 0.005) is False  # mean exactly 0.005
+
+
+def test_attempt1_check_fires(monkeypatch: pytest.MonkeyPatch) -> None:
+    scene, shape = _adaptive_scene()
+    calls = []
+
+    def fire_on_attempt1(fai_values, mat_mean_fai):
+        calls.append(True)
+        return len(calls) == 2
+
+    monkeypatch.setattr(gmm_module, "_is_no_mat", fire_on_attempt1)
+    result = _run_stage1(scene, shape)
+    assert len(calls) == 2  # the check ran on both attempts
+    assert result.nir_thr_used is not None  # adaptive really fired
+    assert result.no_mat is True
+    assert result.gmm1_sep == math.inf
+    assert result.mat_mask.sum() == 0
+
+
+def test_no_mat_check_fires_attempt0() -> None:
+    rng = np.random.default_rng(41)
+    shape = (100, 100)
+    dark = _water(rng, 3000, b08=(0.09, 0.02), nsd=(0.2, 0.05))
+    bright = _water(rng, 7000, b08=(0.14, 0.02), nsd=(0.05, 0.02))
+    scene = {}
+    for key in dark:
+        scene[key] = np.concatenate([dark[key], bright[key]]).reshape(shape)
+    result = _run_stage1(scene, shape)
+    assert result.nir_thr_used is None
+    assert result.no_mat is True
+    assert result.gmm1_sep == math.inf
+    assert result.mat_mask.sum() == 0
+
+
+def test_no_mat_under_20_after_adaptive() -> None:
+    rng = np.random.default_rng(31)
+    n_water, n_high = 600, 18
+    water = _water(rng, n_water, b08=(0.11, 0.015), nsd=(0.10, 0.07))
+    water["fai"] = rng.normal(0.002, 0.003, n_water)
+    water["ndvi"] = rng.normal(0.1, 0.1, n_water)
+    high = {
+        "fai": rng.normal(0.06, 0.01, n_high),
+        "ndvi": rng.normal(0.1, 0.1, n_high),
+        "ndre": rng.normal(0.4, 0.1, n_high),
+        "mndwi": rng.normal(-0.3, 0.1, n_high),
+        "bsi": rng.normal(-0.1, 0.05, n_high),
+        "nsd": rng.normal(0.2, 0.05, n_high),
+        "b08": rng.normal(0.25, 0.02, n_high),
+    }
+    shape = (6, 103)
+    scene = {}
+    for key in water:
+        scene[key] = np.concatenate([water[key], high[key]]).reshape(shape)
+    result = _run_stage1(scene, shape)
+    assert result.nir_thr_used is not None  # adaptive fired, then < 20 left
+    assert result.no_mat is True
+    assert result.gmm1_sep == math.inf
+    assert result.mat_mask.sum() == 0

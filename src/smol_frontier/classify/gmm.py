@@ -137,6 +137,12 @@ def _separability(means: np.ndarray, covariances: np.ndarray) -> float:
     return float(np.linalg.norm(means[0] - means[1]) / pooled_std)
 
 
+def _is_no_mat(fai_values: np.ndarray, mat_mean_fai: float) -> bool:
+    """No-mat rule: too few high-FAI pixels or the mat comp is dark."""
+    frac = float((np.asanyarray(fai_values) > settings.FAI_FLOAT_MIN).mean())
+    return frac < MAT_FAI_FRAC_MIN or float(mat_mean_fai) < MAT_MEAN_FAI_MIN
+
+
 def _fit_water_posterior(
     features: np.ndarray,
 ) -> tuple[np.ndarray, int, np.ndarray, np.ndarray]:
@@ -259,10 +265,11 @@ def stage1(
         )
 
     if int(gmm.sum()) < GMM_MIN_PIXELS:
-        return _no_mat_waterless(gmm, float("nan"))
+        return _no_mat_waterless(gmm, math.inf)
 
-    # Stage 1 — GMM on FAI x NDVI, up to two attempts. No-mat checks run on
-    # attempt 0 only; attempt 1 (post-widening) always assigns.
+    # Stage 1 — GMM on FAI x NDVI, up to two attempts. The no-mat check runs
+    # on every attempt; no-mat results carry sep +inf (clean and confident,
+    # never NaN — NaN stays reserved for GMM failure).
     cur = gmm
     sep = float("nan")
     adapted = False
@@ -270,12 +277,9 @@ def stage1(
         features = np.column_stack([fai[cur], ndvi[cur]])
         p_water, water_comp, means, covs = _fit_water_posterior(features)
         sep = _separability(means, covs)
-        mat_comp = 1 - water_comp
-        if attempt == 0 and (
-            float((features[:, 0] > s.FAI_FLOAT_MIN).mean()) < MAT_FAI_FRAC_MIN
-            or float(means[mat_comp, 0]) < MAT_MEAN_FAI_MIN
-        ):
-            return _no_mat_waterless(cur, sep)
+        mat_mean_fai = float(means[1 - water_comp, 0])
+        if _is_no_mat(features[:, 0], mat_mean_fai):
+            return _no_mat_waterless(cur, math.inf)
         if attempt == 0 and sep < SEP_ADAPT_MAX and nir_thr_used is None:
             valley = nir_valley(b08[cur])
             if valley > ADAPT_VALLEY_MIN:
@@ -286,7 +290,7 @@ def stage1(
                 nir_thr_used = valley
                 adapted = True
                 if int(cur.sum()) < GMM_MIN_PIXELS:
-                    return _no_mat_waterless(cur, sep)
+                    return _no_mat_waterless(cur, math.inf)
                 continue
         pos = np.flatnonzero(cur)
         is_water = p_water >= s.TAU_WATER

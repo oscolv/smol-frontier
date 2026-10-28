@@ -38,8 +38,8 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["BAND_ORDER", "DEFAULT_CACHE_DIR", "IngestedScene", "ingest_scene"]
 
-BAND_ORDER = ("B02", "B03", "B04", "B08", "B8A", "B11", "SCL")
-BANDS_20M = frozenset({"B8A", "B11", "SCL"})
+BAND_ORDER = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11", "SCL")
+BANDS_20M = frozenset({"B05", "B8A", "B11", "SCL"})
 REF_GRID_BAND = "B04"
 DEFAULT_CACHE_DIR = Path("data/cache")
 
@@ -61,14 +61,6 @@ class IngestedScene:
             msg = "SCL is a class map, not DN"
             raise ValueError(msg)
         return dn_to_reflectance(self.bands[band], self.offset)
-
-    def valid_fraction(self) -> float:
-        """Fraction of inside-reservoir pixels with observed (DN > 0) B02."""
-        inside_count = int(self.inside.sum())
-        if inside_count == 0:
-            return 0.0
-        valid = int(((self.bands["B02"] > 0) & self.inside).sum())
-        return valid / inside_count
 
 
 def _covering_window(
@@ -228,12 +220,16 @@ def ingest_scene(
         aoi_geom = utm_geometry()
     path = _cache_path(cache_dir, scene.id)
     if path.exists():
-        logger.info("cache hit: %s", scene.id)
-        scene, bands, transform, crs = _read_cache(path)
-        shape = bands[REF_GRID_BAND].shape
-        inside = _inside_mask(aoi_geom, crs, transform, shape)
-        offset = _scene_offset(scene, bands["B02"])
-        return IngestedScene(scene, bands, inside, transform, str(crs), offset)
+        try:
+            scene, bands, transform, crs = _read_cache(path)
+        except ValueError as exc:
+            logger.info("stale cache %s (%s); re-ingesting", scene.id, exc)
+        else:
+            logger.info("cache hit: %s", scene.id)
+            shape = bands[REF_GRID_BAND].shape
+            inside = _inside_mask(aoi_geom, crs, transform, shape)
+            offset = _scene_offset(scene, bands["B02"])
+            return IngestedScene(scene, bands, inside, transform, str(crs), offset)
     if bbox is None:
         bbox = wgs84_bbox()
     logger.info("cache miss, ingesting: %s", scene.id)

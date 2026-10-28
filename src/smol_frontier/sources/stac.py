@@ -54,6 +54,7 @@ BAND_ALIASES: dict[str, tuple[str, ...]] = {
     "B02": ("B02", "blue"),
     "B03": ("B03", "green"),
     "B04": ("B04", "red"),
+    "B05": ("B05", "rededge1"),
     "B08": ("B08", "nir"),
     "B8A": ("B8A", "nir08"),
     "B11": ("B11", "swir16"),

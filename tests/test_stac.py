@@ -24,12 +24,12 @@ _MISSING = object()
 
 _PC_ASSETS = {
     name: f"https://pc.example/{name}.tif"
-    for name in ("B02", "B03", "B04", "B08", "B8A", "B11", "SCL")
+    for name in ("B02", "B03", "B04", "B05", "B08", "B8A", "B11", "SCL")
 } | {"visual": "https://pc.example/visual.tif"}
 
 _ES_ASSETS = {
     name: f"https://es.example/{name}.tif"
-    for name in ("blue", "green", "red", "nir", "nir08", "swir16", "scl")
+    for name in ("blue", "green", "red", "rededge1", "nir", "nir08", "swir16", "scl")
 } | {"thumbnail": "https://es.example/thumbnail.jpg"}
 
 
@@ -103,6 +103,7 @@ def test_band_normalization_planetary_computer() -> None:
     assert scene is not None
     assert set(scene.assets) == set(REQUIRED_BANDS)
     assert scene.assets["B02"] == "https://pc.example/B02.tif"
+    assert scene.assets["B05"] == "https://pc.example/B05.tif"
     assert scene.assets["SCL"] == "https://pc.example/SCL.tif"
 
 
@@ -112,6 +113,7 @@ def test_band_normalization_earth_search() -> None:
     assert scene is not None
     assert set(scene.assets) == set(REQUIRED_BANDS)
     assert scene.assets["B02"] == "https://es.example/blue.tif"
+    assert scene.assets["B05"] == "https://es.example/rededge1.tif"
     assert scene.assets["B8A"] == "https://es.example/nir08.tif"
     assert scene.assets["B11"] == "https://es.example/swir16.tif"
 

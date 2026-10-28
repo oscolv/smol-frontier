@@ -1,5 +1,7 @@
 """Tests for scene ingest (synthetic rasters, no network)."""
 
+import json
+import logging
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -13,6 +15,7 @@ from rasterio.warp import transform_bounds
 from shapely.geometry import box
 from typer.testing import CliRunner
 
+import smol_frontier.ingest as ingest_mod
 from smol_frontier.cli import app
 from smol_frontier.ingest import BAND_ORDER, IngestedScene, ingest_scene
 from smol_frontier.sources.radiometry import dn_to_reflectance
@@ -53,6 +56,7 @@ def synthetic(tmp_path: Path):
     step = np.where(np.mgrid[0:10, 0:10][1] < 5, 1000, 3000).astype(np.uint16)
     hrefs["B8A"] = _write(tmp_path / "B8A.tif", step, T20)
     hrefs["B11"] = _write(tmp_path / "B11.tif", np.full((10, 10), 1800, np.uint16), T20)
+    hrefs["B05"] = _write(tmp_path / "B05.tif", np.full((10, 10), 1400, np.uint16), T20)
     scl = np.where(np.mgrid[0:10, 0:10][0] < 5, 4, 5).astype(np.uint8)
     hrefs["SCL"] = _write(tmp_path / "SCL.tif", scl, T20)
     scene = SceneMeta(
@@ -96,6 +100,7 @@ def test_resampling_modes(synthetic) -> None:
     scene, bbox, aoi_geom, cache_dir = synthetic
     ing = ingest_scene(scene, bbox=bbox, aoi_geom=aoi_geom, cache_dir=cache_dir)
     assert (ing.bands["B11"][:, :3] == 1800).all()  # bilinear keeps constants
+    assert (ing.bands["B05"][:, :3] == 1400).all()  # B05 resampled like B11
     b8a = set(np.unique(ing.bands["B8A"][:, :3]))
     assert 1000 in b8a and len(b8a) > 1  # bilinear interpolates the step
     assert set(np.unique(ing.bands["SCL"][:, :3])) == {4, 5}  # nearest: values only
@@ -105,7 +110,7 @@ def test_single_offset_for_all_bands(synthetic) -> None:
     scene, bbox, aoi_geom, cache_dir = synthetic
     ing = ingest_scene(scene, bbox=bbox, aoi_geom=aoi_geom, cache_dir=cache_dir)
     assert ing.offset == pytest.approx(-0.1)
-    for band in ("B02", "B03", "B04", "B08", "B8A", "B11"):
+    for band in ("B02", "B03", "B04", "B05", "B08", "B8A", "B11"):
         actual = ing.reflectance(band)
         expected = dn_to_reflectance(ing.bands[band], ing.offset)
         assert np.allclose(actual, expected, equal_nan=True)
@@ -126,6 +131,53 @@ def test_cache_roundtrip_identical(synthetic) -> None:
     assert hit.transform == miss.transform
     assert hit.crs == miss.crs
     assert hit.offset == miss.offset
+
+
+def test_stale_cache_without_b05_reingests(
+    synthetic, caplog: pytest.LogCaptureFixture
+) -> None:
+    scene, bbox, aoi_geom, cache_dir = synthetic
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    old_order = ("B02", "B03", "B04", "B08", "B8A", "B11", "SCL")
+    stale = cache_dir / "TEST_SCENE.tif"
+    with rasterio.open(
+        stale,
+        "w",
+        driver="GTiff",
+        height=6,
+        width=6,
+        count=len(old_order),
+        dtype="uint16",
+        crs=CRS,
+        transform=Affine(10, 0, 440070, 0, -10, 2225930),
+    ) as dst:
+        for index, band in enumerate(old_order, start=1):
+            dst.write(np.zeros((6, 6), dtype=np.uint16), index)
+            dst.set_band_description(index, band)
+        dst.update_tags(
+            item_id=scene.id,
+            source=scene.source,
+            processing_baseline=scene.processing_baseline or "",
+            boa_offset_applied=str(scene.boa_offset_applied),
+            datetime=scene.datetime.isoformat(),
+            assets=json.dumps(scene.assets),
+        )
+    with caplog.at_level(logging.INFO, logger="smol_frontier.ingest"):
+        ing = ingest_scene(scene, bbox=bbox, aoi_geom=aoi_geom, cache_dir=cache_dir)
+    assert "stale cache" in caplog.text
+    assert tuple(ing.bands) == (
+        "B02",
+        "B03",
+        "B04",
+        "B05",
+        "B08",
+        "B8A",
+        "B11",
+        "SCL",
+    )
+    assert (ing.bands["B05"][:, :3] == 1400).all()
+    with rasterio.open(stale) as refreshed:
+        assert refreshed.count == 8
 
 
 def _fake_ingested() -> IngestedScene:
@@ -156,6 +208,7 @@ def test_cli_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "baseline: 05.11" in result.output
     assert "offset: -0.1" in result.output
     assert "valid_fraction: 1.0000" in result.output
+    assert "cloud_fraction: 0.0000" in result.output
     assert "median_b03_water: 0.0500" in result.output
 
 
@@ -174,8 +227,6 @@ def test_cli_fetch_bad_date() -> None:
 def test_cli_fetch_uses_real_cache_dir(synthetic, monkeypatch) -> None:
     """End-to-end wiring: search -> ingest -> cache file on disk."""
     scene, bbox, aoi_geom, cache_dir = synthetic
-    import smol_frontier.ingest as ingest_mod
-
     monkeypatch.setattr("smol_frontier.cli.search_scenes", lambda *a, **k: [scene])
     monkeypatch.setattr(ingest_mod, "DEFAULT_CACHE_DIR", cache_dir)
     monkeypatch.setattr("smol_frontier.ingest.wgs84_bbox", lambda: bbox)

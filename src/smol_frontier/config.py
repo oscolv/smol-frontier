@@ -61,6 +61,18 @@ class Settings:
     GREEN_MAX_PCT: float = 30.0
     RED_MIN_PCT: float = 50.0
 
+    # WHY: minimum valid fraction of the reservoir for a scene to be
+    #   classified at all — below it too little of the reservoir is observed
+    #   to trust any coverage number.
+    # HOW: fixed policy value per project spec.
+    MIN_VALID_FRACTION: float = 0.80
+
+    # WHY: cloud fraction above which a scene's coverage is doubtful even when
+    #   classified — clouds hide hyacinth, biasing coverage downward.
+    # HOW: fixed policy value per project spec, anchored on case 2026-06-14
+    #   (~12 % cloud, doubtful).
+    CLOUD_FRAC_DOUBTFUL: float = 0.10
+
     # WHY: integer raster codes for the classification map; fixed once so
     #   outputs stay comparable across runs and steps.
     # HOW: fixed enumeration per project spec (0 nodata, 1 water,

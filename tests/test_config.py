@@ -40,9 +40,16 @@ def test_thresholds_in_unit_interval() -> None:
         settings.TAU_WATER,
         settings.TAU_HYACINTH,
         settings.FRAC_PUBLISHABLE,
+        settings.MIN_VALID_FRACTION,
+        settings.CLOUD_FRAC_DOUBTFUL,
     )
     for value in values:
         assert 0.0 < value < 1.0
+
+
+def test_quality_constants() -> None:
+    assert settings.MIN_VALID_FRACTION == 0.80
+    assert settings.CLOUD_FRAC_DOUBTFUL == 0.10
 
 
 def test_traffic_light_bands() -> None:

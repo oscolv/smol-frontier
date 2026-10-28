@@ -52,6 +52,18 @@ def test_quality_constants() -> None:
     assert settings.CLOUD_FRAC_DOUBTFUL == 0.10
 
 
+def test_stage1_constants() -> None:
+    assert settings.BORDER_ZONE_M == 150.0
+    assert settings.SOIL_BSI_MIN == 0.02
+    assert settings.SOIL_MNDWI_MAX == -0.12
+    assert settings.SOIL_NDVI_MAX == 0.25
+    assert settings.SOIL_NDRE_MAX == 0.25
+    assert settings.SOIL_NSD_MAX == 0.15
+    assert settings.NIR_WATER_MAX == 0.12
+    assert settings.NSD_VEG_MIN == 0.15
+    assert settings.FAI_FLOAT_MIN == 0.04
+
+
 def test_traffic_light_bands() -> None:
     assert settings.traffic_light(0.0) == "green"
     assert settings.traffic_light(29.9) == "green"

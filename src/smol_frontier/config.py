@@ -73,6 +73,40 @@ class Settings:
     #   (~12 % cloud, doubtful).
     CLOUD_FRAC_DOUBTFUL: float = 0.10
 
+    # WHY: width of the strip near the reservoir edge where exposed bed
+    #   appears at low water — the soil pre-mask applies ONLY there, never in
+    #   open water.
+    # HOW: prior research value; was 500 m, reduced to 150 m so soil does not
+    #   invade the narrow arms in the south of Endho.
+    BORDER_ZONE_M: float = 150.0
+
+    # WHY: joint cutoffs identifying exposed sediment in the border strip:
+    #   bare soil is bright (BSI), not open water (MNDWI), not vegetated
+    #   (NDVI/NDRE), and shows no canopy-over-water SWIR absorption (NSD).
+    # HOW: fixed cutoffs from the author's prior research (Stage 0 pre-mask).
+    SOIL_BSI_MIN: float = 0.02
+    SOIL_MNDWI_MAX: float = -0.12
+    SOIL_NDVI_MAX: float = 0.25
+    SOIL_NDRE_MAX: float = 0.25
+    SOIL_NSD_MAX: float = 0.15
+
+    # WHY: fixed-NIR water rule — pixels this dark in B08 are open water
+    #   without needing the GMM. Endho's clear water has B08 ≈ 0.06–0.14
+    #   (permanent sediment load), so the cutoff sits at the top of that.
+    # HOW: fixed cutoff from the author's prior research (Stage 0b).
+    NIR_WATER_MAX: float = 0.12
+
+    # WHY: NSD guard on the NIR water rules — interface pixels with low B08
+    #   but high NSD are vegetation over water, not open water.
+    # HOW: fixed cutoff from the author's prior research.
+    NSD_VEG_MIN: float = 0.15
+
+    # WHY: FAI floor for floating vegetation; separates the water mode from
+    #   the mat mode in the turbidity pre-screen, the no-mat check, and the
+    #   FAI rescue.
+    # HOW: fixed cutoff from the author's prior research.
+    FAI_FLOAT_MIN: float = 0.04
+
     # WHY: integer raster codes for the classification map; fixed once so
     #   outputs stay comparable across runs and steps.
     # HOW: fixed enumeration per project spec (0 nodata, 1 water,

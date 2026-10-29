@@ -82,7 +82,7 @@ STAGE2_MIN_PIXELS = 4
 
 
 class Stage1Result:
-    """Stage 1 outputs: classes so far, mat mask, diagnostics, confidence."""
+    """Stage 1 outputs: classes, mat mask, diagnostics, confidence, rescue count."""
 
     def __init__(
         self,
@@ -93,6 +93,7 @@ class Stage1Result:
         nir_water_frac: float,
         no_mat: bool,
         confidence: np.ndarray,
+        n_fai_rescued: int,
     ) -> None:
         self.classes = classes
         self.mat_mask = mat_mask
@@ -101,6 +102,9 @@ class Stage1Result:
         self.nir_water_frac = nir_water_frac
         self.no_mat = no_mat
         self.confidence = confidence
+        # Pixels flipped to mat by the FAI rescue (the author's FAI_RESCATE
+        # flag fires when this is > 0).
+        self.n_fai_rescued = n_fai_rescued
 
 
 def nir_valley(b08: np.ndarray) -> float:
@@ -273,6 +277,7 @@ def stage1(
             nir_water_frac=nir_water_frac,
             no_mat=True,
             confidence=confidence,
+            n_fai_rescued=0,
         )
 
     if int(gmm.sum()) < GMM_MIN_PIXELS:
@@ -283,7 +288,7 @@ def stage1(
     # never NaN — NaN stays reserved for GMM failure).
     cur = gmm
     sep = float("nan")
-    adapted = False
+    n_fai_rescued = 0
     for attempt in range(2):
         features = np.column_stack([fai[cur], ndvi[cur]])
         p_water, water_comp, means, covs = _fit_water_posterior(features)
@@ -299,7 +304,6 @@ def stage1(
                 confidence[adapt_water] = 1.0
                 cur = cur & ~adapt_water
                 nir_thr_used = valley
-                adapted = True
                 if int(cur.sum()) < GMM_MIN_PIXELS:
                     return _no_mat_waterless(cur, math.inf)
                 continue
@@ -309,7 +313,11 @@ def stage1(
         flat_classes[pos[~is_water]] = MAT_PENDING
         flat_conf[pos[is_water]] = p_water[is_water]
         flat_conf[pos[~is_water]] = 1.0 - p_water[~is_water]
-        if adapted and nir_thr_used is not None:
+        # FAI rescue: runs whenever the NIR water threshold was widened
+        # at all (nir_thr_used > NIR_WATER_MAX), by the turbidity pre-screen
+        # or the Stage 1 adaptive attempt — pixels the widened threshold
+        # caught that still look vegetated are mat edge, not water.
+        if nir_thr_used is not None and nir_thr_used > s.NIR_WATER_MAX:
             rescue = (
                 cur
                 & (b08 >= s.NIR_WATER_MAX)
@@ -318,6 +326,7 @@ def stage1(
             )
             classes[rescue] = MAT_PENDING
             confidence[rescue] = 1.0
+            n_fai_rescued = int(rescue.sum())
         break
 
     return Stage1Result(
@@ -328,6 +337,7 @@ def stage1(
         nir_water_frac=nir_water_frac,
         no_mat=False,
         confidence=confidence,
+        n_fai_rescued=n_fai_rescued,
     )
 
 

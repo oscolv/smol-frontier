@@ -278,6 +278,63 @@ def test_no_mat_check_fires_attempt0() -> None:
     assert result.mat_mask.sum() == 0
 
 
+def test_fai_rescue_after_prescreen_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The FAI rescue fires when only the pre-screen widened the threshold.
+
+    The GMM is mocked to call everything water, so every MAT_PENDING pixel
+    must come from the rescue; the valley detector is counted to prove the
+    adaptive attempt never ran.
+    """
+    rng = np.random.default_rng(11)
+    shape = (80, 50)
+    water = _water(rng, 40 * shape[1], b08=(0.16, 0.015), nsd=(0.05, 0.02))
+    edge = {
+        "fai": rng.normal(0.07, 0.005, 10 * shape[1]),
+        "ndvi": rng.normal(0.25, 0.05, 10 * shape[1]),
+        "ndre": rng.normal(0.2, 0.05, 10 * shape[1]),
+        "mndwi": rng.normal(0.0, 0.1, 10 * shape[1]),
+        "bsi": rng.normal(-0.05, 0.03, 10 * shape[1]),
+        "nsd": rng.normal(0.20, 0.02, 10 * shape[1]),
+        "b08": rng.normal(0.165, 0.005, 10 * shape[1]),
+    }
+    mat = _mat(rng, 30 * shape[1])
+    mat["b08"] = rng.normal(0.30, 0.03, 30 * shape[1])
+    scene = {}
+    for key in water:
+        scene[key] = np.concatenate([water[key], edge[key], mat[key]]).reshape(shape)
+
+    def _all_water(features):
+        n = len(features)
+        means = np.array([[0.0, 0.0], [0.06, 0.10]])
+        covs = np.array([np.eye(2) * 0.01, np.eye(2) * 0.01])
+        return np.ones(n), 0, means, covs
+
+    monkeypatch.setattr(gmm_module, "_fit_water_posterior", _all_water)
+    real_valley = gmm_module.nir_valley
+    calls = []
+
+    def _counted_valley(b08):
+        calls.append(True)
+        return real_valley(b08)
+
+    monkeypatch.setattr(gmm_module, "nir_valley", _counted_valley)
+    result = _run_stage1(scene, shape)
+
+    assert result.nir_thr_used is not None
+    assert result.nir_thr_used > settings.NIR_WATER_MAX
+    assert len(calls) == 1  # pre-screen only; the adaptive attempt never ran
+    assert result.no_mat is False
+    assert result.n_fai_rescued > 0
+    assert (result.classes[40:50, :] == MAT_PENDING).all()  # the edge rows
+    eligible = (
+        (scene["b08"] >= settings.NIR_WATER_MAX)
+        & (scene["b08"] < result.nir_thr_used)
+        & (scene["fai"] > settings.FAI_FLOAT_MIN)
+    )
+    assert ((result.classes == MAT_PENDING) <= eligible).all()
+    assert result.n_fai_rescued == int(result.mat_mask.sum())
+
+
 def test_no_mat_under_20_after_adaptive() -> None:
     rng = np.random.default_rng(31)
     n_water, n_high = 600, 18

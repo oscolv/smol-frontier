@@ -10,6 +10,7 @@ from smol_frontier.classify.masks import (
     valid_fraction,
     valid_mask,
 )
+from smol_frontier.config import settings
 
 CLEAN_WATER = {"b02": 0.03, "b04": 0.03, "b11": 0.01, "scl": 6}
 TURBID_WATER = {"b02": 0.08, "b04": 0.09, "b11": 0.02, "scl": 6}  # B11 guard saves it
@@ -64,6 +65,21 @@ def test_scl_accepted_classes(scl: int) -> None:
 def test_outside_is_never_valid() -> None:
     px = _pixel(CLEAN_WATER) | {"inside": np.array([False])}
     assert bool(valid_mask(**px)) is False
+
+
+def test_shadow_counts_as_cloud() -> None:
+    """Shadow alone (spectrally clear) pushes the cloud fraction over cutoff."""
+    n = 100
+    px = {
+        "scl": np.array([3] * 12 + [6] * 88),
+        "b02": np.full(n, 0.03),
+        "b11": np.full(n, 0.01),
+        "b04": np.full(n, 0.03),
+        "inside": np.ones(n, dtype=bool),
+    }
+    assert cloud_fraction(**px) == pytest.approx(0.12)
+    assert cloud_fraction(**px) > settings.CLOUD_FRAC_DOUBTFUL
+    assert valid_fraction(**px) == pytest.approx(0.88)  # shadow still invalid
 
 
 def test_fractions() -> None:

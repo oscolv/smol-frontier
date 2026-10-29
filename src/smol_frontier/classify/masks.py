@@ -25,9 +25,12 @@ __all__ = [
 #   is accepted because the spectral cloud test covers that gap.
 SCL_INVALID = frozenset({0, 1, 3, 8, 9, 10})
 
-# WHY: SCL classes counted as cloud for the cloud fraction (medium/high
-#   probability and thin cirrus; shadows are invalid but not cloud).
-SCL_CLOUD = frozenset({8, 9, 10})
+# WHY: SCL classes counted as cloud for the cloud fraction — medium/high
+#   probability and thin cirrus plus cloud shadow (3). The author's method
+#   counts shadow as cloud for the high-cloud doubtful rule, so the identity
+#   gate stays spec-literal. Shadows are still invalid (see SCL_INVALID);
+#   they are just also cloudy.
+SCL_CLOUD = frozenset({3, 8, 9, 10})
 
 # WHY: spectral cloud test, independent of SCL: since Processing Baseline
 #   04.00, Sen2Cor's SCL misses low clouds and haze, labelling them "not

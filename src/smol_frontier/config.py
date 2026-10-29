@@ -171,6 +171,18 @@ class Settings:
     # HOW: fixed grid from the author's prior research (stage–area curve).
     CURVE_GRID_TOP: float = 2018.5
 
+    # WHY: model-error leg of the exposed-bed cushion — V(h) sensitivity to
+    #   the anchor weight (10 vs 200), interpolated by stage, so hyacinth
+    #   hugging the shore is not stripped by curve error.
+    # HOW: author's values, fixed per project spec: 0.29/0.41/0.25/0.66 km²
+    #   at 2005/2010/2015/2018 (8b2 reproduced them), stored in ha.
+    BED_CUSHION_MODEL_HA: tuple[tuple[float, float], ...] = (
+        (2005.0, 29.0),
+        (2010.0, 41.0),
+        (2015.0, 25.0),
+        (2018.0, 66.0),
+    )
+
     # WHY: width of the strip near the reservoir edge where exposed bed
     #   appears at low water — the soil pre-mask applies ONLY there, never in
     #   open water.

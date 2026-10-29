@@ -65,6 +65,15 @@ def test_hydro_constants() -> None:
     assert settings.LEVEL_REVISION_TOL_M == 0.05
 
 
+def test_bed_constants() -> None:
+    assert settings.BED_CUSHION_MODEL_HA == (
+        (2005.0, 29.0),
+        (2010.0, 41.0),
+        (2015.0, 25.0),
+        (2018.0, 66.0),
+    )
+
+
 def test_curve_constants() -> None:
     assert settings.CURVE_DATA_END.isoformat() == "2026-09-20"
     assert settings.CURVE_BIN_M == 0.10

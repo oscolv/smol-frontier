@@ -12,6 +12,7 @@ from smol_frontier.classify import pipeline
 from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import build_curve
 from smol_frontier.hydro.flood_map import FloodMapError, build_flood_map
 from smol_frontier.hydro.levels import (
@@ -84,6 +85,7 @@ def classify(
     ing = ingest_scene(scenes[0])
     result = pipeline.classify(ing)
     ha = result.ha_per_class
+    bed = correct_bed(result.class_map, ing.transform, ing.crs, day.date())
     out_dir = PROJECT_ROOT / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
@@ -94,8 +96,17 @@ def classify(
     typer.echo(f"dense_ha: {ha[settings.CLASS_DENSE_HYACINTH]:.2f}")
     typer.echo(f"interface_ha: {ha[settings.CLASS_INTERFACE]:.2f}")
     typer.echo(f"soil_ha: {ha[settings.CLASS_BARE_SOIL]:.2f}")
-    typer.echo(f"hyacinth_total_ha: {result.hyacinth_total_ha:.2f}")
-    typer.echo(f"pct_reservoir: {result.pct_reservoir:.2f}")
+    if bed.applied:
+        typer.echo(
+            f"hyacinth_total_ha: {bed.hyacinth_corrected_ha:.2f} "
+            f"(raw {result.hyacinth_total_ha:.2f})"
+        )
+        typer.echo(
+            f"pct_reservoir: {bed.pct_corrected:.2f} (raw {result.pct_reservoir:.2f})"
+        )
+    else:
+        typer.echo(f"hyacinth_total_ha: {result.hyacinth_total_ha:.2f}")
+        typer.echo(f"pct_reservoir: {result.pct_reservoir:.2f}")
     typer.echo(f"reservoir_area_ha: {result.reservoir_area_ha:.2f}")
     typer.echo(f"valid_fraction: {result.valid_fraction:.4f}")
     typer.echo(f"cloud_fraction: {result.cloud_fraction:.4f}")
@@ -112,6 +123,18 @@ def classify(
     typer.echo(f"regime: {quality.regime or 'clean'}")
     if not quality.publishable_pct:
         typer.echo("PERCENT NOT PUBLISHABLE")
+    typer.echo("EXPOSED BED")
+    if bed.applied:
+        typer.echo(f"bed_level_m: {bed.level_m:.2f}")
+        typer.echo(f"bed_margin_m: {bed.margin_m:.2f}")
+        typer.echo(f"bed_expected_ha: {bed.expected_bed_ha:.2f}")
+        typer.echo(f"bed_removed_ha: {bed.removed_ha:.2f}")
+        typer.echo(f"bed_corrected_total_ha: {bed.hyacinth_corrected_ha:.2f}")
+        typer.echo(f"bed_corrected_dense_ha: {bed.dense_corrected_ha:.2f}")
+        typer.echo(f"bed_corrected_interface_ha: {bed.interface_corrected_ha:.2f}")
+        typer.echo(f"bed_corrected_pct: {bed.pct_corrected:.2f}")
+    else:
+        typer.echo(f"NO CORRECTION: {bed.reason}")
     typer.echo(f"output: {path}")
 
 

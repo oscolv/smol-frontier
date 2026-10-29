@@ -16,6 +16,15 @@ No code from earlier projects was copied or imported.
 | **Reservoir polygon** (`data/aoi/`) | Created by the author from JRC Global Surface Water v1.4, occurrence ≥ 25 % (Pekel et al., 2016, *Nature* 540:418–422) | Area of interest; reservoir area computed from it |
 | **Reference time series v2026-10-22** (`tests/reference/`) | Dates and hectares from the author's prior, unpublished Sentinel-2 series (465 scenes, 2017–2026; manuscript in preparation) | **Validation only:** the new pipeline is checked against it. Never used as model input |
 
+The reference copy used by the identity gate
+(`tests/reference/serie_2017-01-01_2026-12-31_v2026-10-22.csv`) is the
+author's reduced validation extract: the same 465 scenes with only the
+columns the gate reads — `fecha, item_id, quality, regimen, valid_frac,
+lirio_denso_ha, interfase_ha, lirio_total_ha, agua_ha, suelo_ha`. Areas are
+raw classifier output, without exposed-bed correction. The fixed 30-scene
+gate sample (`tests/reference/gate_scenes.csv`: `date, item_id, stratum`)
+is drawn from it.
+
 ## Third-party data
 - Sentinel-2 L2A: Copernicus Sentinel data (ESA), via Microsoft Planetary Computer / Earth Search.
 - Reservoir water level: public records of CONAGUA's National Hydrometric System (SIH).

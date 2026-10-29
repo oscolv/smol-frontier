@@ -27,6 +27,7 @@ __all__ = [
     "REQUIRED_BANDS",
     "SceneMeta",
     "deduplicate",
+    "get_scene",
     "item_to_scene",
     "search_scenes",
 ]
@@ -168,6 +169,32 @@ def _search_backend(
         if scene is not None:
             scenes.append(scene)
     return scenes
+
+
+def get_scene(backend: str, item_id: str) -> SceneMeta:
+    """Fetch one scene by exact backend + item id (no date search).
+
+    Used by the identity gate, which re-ingests the reference series'
+    Earth Search items one by one. Raises ValueError for an unknown
+    backend, RuntimeError when the item is missing or lacks bands.
+    """
+    if backend not in _BACKENDS:
+        msg = f"unknown STAC backend(s): {backend}"
+        raise ValueError(msg)
+    config = _BACKENDS[backend]
+    client = Client.open(str(config["url"]), timeout=_REQUEST_TIMEOUT_S)
+    item = client.get_collection(str(config["collection"])).get_item(item_id)
+    if item is None:
+        msg = f"item {item_id} not found on {backend}"
+        raise RuntimeError(msg)
+    if config["signed"]:
+        item = _sign_item(item)
+    scene = item_to_scene(item, source=backend)
+    if scene is None:
+        msg = f"item {item_id} on {backend} is missing required bands"
+        raise RuntimeError(msg)
+    logger.info("STAC item %s served by %s", item_id, backend)
+    return scene
 
 
 def search_scenes(

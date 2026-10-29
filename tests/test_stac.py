@@ -10,9 +10,11 @@ import pytest
 import responses
 from requests.exceptions import ConnectTimeout
 
+from smol_frontier.sources import stac as stac_mod
 from smol_frontier.sources.stac import (
     REQUIRED_BANDS,
     deduplicate,
+    get_scene,
     item_to_scene,
     search_scenes,
 )
@@ -205,6 +207,65 @@ def test_all_backends_fail() -> None:
         responses.add(responses.POST, f"{url}/search", status=500)
     with pytest.raises(RuntimeError, match="all STAC backends failed"):
         search_scenes(date(2026, 10, 12), date(2026, 10, 12), 20.0)
+
+
+def _stub_client(monkeypatch: pytest.MonkeyPatch, item) -> None:
+    """Stub Client.open so get_scene never touches the network."""
+
+    class _Collection:
+        def get_item(self, item_id):
+            assert item_id == "es-item"
+            return item
+
+    class _Client:
+        @classmethod
+        def open(cls, url, timeout=None):
+            return cls()
+
+        def get_collection(self, name):
+            assert name == "sentinel-2-l2a"
+            return _Collection()
+
+    monkeypatch.setattr(stac_mod, "Client", _Client)
+
+
+def test_get_scene_by_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = pystac.Item.from_dict(_item_dict("es-item", _ES_ASSETS, boa=True))
+    _stub_client(monkeypatch, item)
+    scene = get_scene("earth-search", "es-item")
+    assert scene.id == "es-item"
+    assert scene.source == "earth-search"
+    assert scene.boa_offset_applied is True
+    assert set(scene.assets) == set(REQUIRED_BANDS)
+
+
+def test_get_scene_signs_planetary_computer(monkeypatch: pytest.MonkeyPatch) -> None:
+    item = pystac.Item.from_dict(_item_dict("es-item", _PC_ASSETS))
+    _stub_client(monkeypatch, item)
+    signed = []
+    monkeypatch.setattr(stac_mod, "_sign_item", lambda it: signed.append(it) or it)
+    scene = get_scene("planetary-computer", "es-item")
+    assert scene.source == "planetary-computer"
+    assert len(signed) == 1
+
+
+def test_get_scene_missing_item(monkeypatch: pytest.MonkeyPatch) -> None:
+    _stub_client(monkeypatch, None)
+    with pytest.raises(RuntimeError, match="not found"):
+        get_scene("earth-search", "es-item")
+
+
+def test_get_scene_missing_bands(monkeypatch: pytest.MonkeyPatch) -> None:
+    assets = dict(_ES_ASSETS)
+    del assets["scl"]
+    _stub_client(monkeypatch, pystac.Item.from_dict(_item_dict("es-item", assets)))
+    with pytest.raises(RuntimeError, match="missing required bands"):
+        get_scene("earth-search", "es-item")
+
+
+def test_get_scene_unknown_backend() -> None:
+    with pytest.raises(ValueError, match="unknown STAC backend"):
+        get_scene("nasa", "es-item")
 
 
 @pytest.mark.skipif(

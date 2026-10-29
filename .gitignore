@@ -16,5 +16,6 @@ dist/
 # Project ignores
 data/cache/
 *.tif
+*.aux.xml
 outputs/
 .env

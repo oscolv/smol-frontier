@@ -13,6 +13,7 @@ from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro.curve import build_curve
+from smol_frontier.hydro.flood_map import FloodMapError, build_flood_map
 from smol_frontier.hydro.levels import (
     DEFAULT_LEVELS_PATH,
     LevelsError,
@@ -180,6 +181,24 @@ def hydro_curve() -> None:
     for stage, err in report.model_errors_km2.items():
         typer.echo(f"model_error_{stage}_km2: {err:.4f}")
     typer.echo(f"output: {report.csv_path}")
+
+
+@hydro_app.command("flood-map")
+def hydro_flood_map() -> None:
+    """Build the per-pixel flood-stage map and write it."""
+    try:
+        report = build_flood_map()
+    except FloodMapError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
+    typer.echo(f"pixels: {report.n_pixels}")
+    typer.echo(f"stage_min: {report.stage_min:.3f}")
+    typer.echo(f"stage_max: {report.stage_max:.3f}")
+    typer.echo(f"frac_at_h_min: {report.frac_at_h_min:.4f}")
+    typer.echo(f"sink_fill_ha: {report.sink_fill_ha:.2f}")
+    for stage, (map_ha, curve_ha) in report.controls.items():
+        typer.echo(f"area_{stage:g}_map_ha: {map_ha:.2f} curve_ha: {curve_ha:.2f}")
+    typer.echo(f"output: {report.tif_path}")
 
 
 if __name__ == "__main__":

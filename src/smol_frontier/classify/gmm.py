@@ -249,19 +249,22 @@ def stage1(
         & np.isfinite(b08)
     )
 
-    # Turbidity pre-screen: a GMM set with no dark mode gets valley-widened.
+    # Turbidity pre-screen: a GMM set with no dark mode gets valley-widened,
+    # but the widening only counts when it moves at least one pixel to water.
     nir_thr_used: float | None = None
     pre_water = np.zeros(shape, dtype=bool)
     if int(gmm.sum()) > 0 and float(np.percentile(b08[gmm], 5)) > s.NIR_WATER_MAX:
         valley = nir_valley(b08[gmm])
         if valley > s.NIR_WATER_MAX + VALLEY_MARGIN:
-            pre_water = (
+            candidate = (
                 gmm & (b08 < valley) & (fai < s.FAI_FLOAT_MIN) & (nsd < s.NSD_VEG_MIN)
             )
-            classes[pre_water] = s.CLASS_WATER
-            confidence[pre_water] = 1.0
-            gmm = gmm & ~pre_water
-            nir_thr_used = valley
+            if int(candidate.sum()) > 0:
+                pre_water = candidate
+                classes[pre_water] = s.CLASS_WATER
+                confidence[pre_water] = 1.0
+                gmm = gmm & ~pre_water
+                nir_thr_used = valley
 
     denom = int((valid & ~soil).sum())
     nir_water_frac = float((water0b | pre_water).sum()) / denom if denom else 0.0
@@ -300,13 +303,16 @@ def stage1(
             valley = nir_valley(b08[cur])
             if valley > ADAPT_VALLEY_MIN:
                 adapt_water = cur & (b08 < valley) & (fai < s.FAI_FLOAT_MIN)
-                classes[adapt_water] = s.CLASS_WATER
-                confidence[adapt_water] = 1.0
-                cur = cur & ~adapt_water
-                nir_thr_used = valley
-                if int(cur.sum()) < GMM_MIN_PIXELS:
-                    return _no_mat_waterless(cur, math.inf)
-                continue
+                # The widening only counts when it moves at least one pixel;
+                # otherwise attempt 0 proceeds as is.
+                if int(adapt_water.sum()) > 0:
+                    classes[adapt_water] = s.CLASS_WATER
+                    confidence[adapt_water] = 1.0
+                    cur = cur & ~adapt_water
+                    nir_thr_used = valley
+                    if int(cur.sum()) < GMM_MIN_PIXELS:
+                        return _no_mat_waterless(cur, math.inf)
+                    continue
         pos = np.flatnonzero(cur)
         is_water = p_water >= s.TAU_WATER
         flat_classes[pos[is_water]] = s.CLASS_WATER

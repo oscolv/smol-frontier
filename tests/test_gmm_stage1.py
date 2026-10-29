@@ -8,6 +8,7 @@ import pytest
 import smol_frontier.classify.gmm as gmm_module
 from smol_frontier.classify.gmm import (
     MAT_PENDING,
+    VALLEY_MARGIN,
     _is_no_mat,
     border_strip,
     nir_valley,
@@ -333,6 +334,79 @@ def test_fai_rescue_after_prescreen_only(monkeypatch: pytest.MonkeyPatch) -> Non
     )
     assert ((result.classes == MAT_PENDING) <= eligible).all()
     assert result.n_fai_rescued == int(result.mat_mask.sum())
+
+
+def test_prescreen_empty_mask_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valley found but pre-screen mask empty → thr stays None, no rescue."""
+    rng = np.random.default_rng(11)
+    shape = (80, 50)
+    water = _water(rng, 50 * shape[1], b08=(0.16, 0.015), nsd=(0.05, 0.02))
+    water["fai"] = rng.normal(0.055, 0.002, 50 * shape[1])  # all above 0.04
+    water["ndvi"] = rng.normal(0.05, 0.03, 50 * shape[1])
+    mat = _mat(rng, 30 * shape[1])
+    mat["b08"] = rng.normal(0.30, 0.03, 30 * shape[1])
+    mat["fai"] = rng.normal(0.15, 0.02, 30 * shape[1])
+    scene = {}
+    for key in water:
+        scene[key] = np.concatenate([water[key], mat[key]]).reshape(shape)
+
+    real_valley = gmm_module.nir_valley
+    found = []
+
+    def _capture_valley(b08):
+        found.append(real_valley(b08))
+        return found[-1]
+
+    monkeypatch.setattr(gmm_module, "nir_valley", _capture_valley)
+    result = _run_stage1(scene, shape)
+
+    assert len(found) == 1  # pre-screen evaluated the valley; adaptive never ran
+    assert found[0] > settings.NIR_WATER_MAX + VALLEY_MARGIN
+    assert result.nir_thr_used is None
+    assert result.n_fai_rescued == 0
+    assert result.no_mat is False
+
+
+def test_adaptive_empty_mask_records_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Valley found but adaptive mask empty → attempt 0 proceeds, no rescue."""
+    rng = np.random.default_rng(11)
+    shape = (80, 50)
+    water = _water(rng, 50 * shape[1], b08=(0.11, 0.015), nsd=(0.20, 0.03))
+    water["fai"] = rng.normal(0.055, 0.002, 50 * shape[1])  # all above 0.04
+    mat = _mat(rng, 30 * shape[1])
+    mat["b08"] = rng.normal(0.30, 0.03, 30 * shape[1])
+    mat["fai"] = rng.normal(0.07, 0.005, 30 * shape[1])
+    scene = {}
+    for key in water:
+        scene[key] = np.concatenate([water[key], mat[key]]).reshape(shape)
+
+    def _weak_sep(features):
+        n = len(features)
+        means = np.array([[0.0, 0.0], [0.05, 0.05]])
+        covs = np.array([np.eye(2) * 0.1, np.eye(2) * 0.1])
+        return np.full(n, 0.5), 0, means, covs
+
+    monkeypatch.setattr(gmm_module, "_fit_water_posterior", _weak_sep)
+    real_valley = gmm_module.nir_valley
+    found = []
+
+    def _capture_valley(b08):
+        found.append(real_valley(b08))
+        return found[-1]
+
+    monkeypatch.setattr(gmm_module, "nir_valley", _capture_valley)
+    result = _run_stage1(scene, shape)
+
+    assert len(found) == 1  # pre-screen short-circuited; only adaptive evaluated
+    assert found[0] > 0.14
+    assert result.nir_thr_used is None
+    assert result.n_fai_rescued == 0
+    assert result.no_mat is False
+    assert result.gmm1_sep < settings.SEP_DOUBTFUL  # adaptive really triggered
 
 
 def test_no_mat_under_20_after_adaptive() -> None:

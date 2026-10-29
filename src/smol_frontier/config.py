@@ -78,6 +78,12 @@ class Settings:
     # HOW: fixed policy value per project spec.
     MIN_VALID_FRACTION: float = 0.80
 
+    # WHY: catalog cloud-cover ceiling when extending the series with new
+    #   scenes — generous on purpose, because the per-pixel SCL mask and the
+    #   spectral cloud test filter clouds later anyway.
+    # HOW: author's catalog value, see PRIOR_WORK.md.
+    MAX_CLOUD_COVER_CATALOG: float = 50.0
+
     # WHY: cloud fraction above which a scene's coverage is doubtful even when
     #   classified — clouds hide hyacinth, biasing coverage downward.
     # HOW: fixed policy value per project spec, anchored on case 2026-06-14

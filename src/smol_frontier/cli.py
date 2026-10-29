@@ -1,6 +1,7 @@
 """Typer CLI entry point (`smolf`)."""
 
 import math
+import sys
 import time
 from datetime import datetime
 from typing import Annotated
@@ -40,6 +41,14 @@ from smol_frontier.hydro.levels import (
 )
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.quality import assess_quality
+from smol_frontier.series import (
+    OUTPUT_DIR as SERIES_OUTPUT_DIR,
+)
+from smol_frontier.series import (
+    FingerprintMismatch,
+    build_run,
+    new_run_id,
+)
 from smol_frontier.sources.stac import search_scenes
 
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
@@ -49,6 +58,8 @@ hydro_app = typer.Typer(help="Hydrology inputs for the exposed-bed correction.")
 app.add_typer(hydro_app, name="hydro")
 gate_app = typer.Typer(help="Identity gate against the reference series.")
 app.add_typer(gate_app, name="gate")
+series_app = typer.Typer(help="Resumable hyacinth time series.")
+app.add_typer(series_app, name="series")
 
 
 @app.callback()
@@ -323,6 +334,85 @@ def gate_identity(
         typer.echo(render_worst_table(rows))
     if not summary.passed:
         raise typer.Exit(1)
+
+
+@series_app.command("build")
+def series_build(
+    extend: Annotated[
+        bool,
+        typer.Option("--extend", help="Also add scenes after the last reference date."),
+    ] = False,
+    resume: Annotated[
+        str | None,
+        typer.Option("--resume", help="Resume an interrupted run id."),
+    ] = None,
+    workers: Annotated[int, typer.Option("--workers", help="Concurrent scenes.")] = 4,
+) -> None:
+    """Build the hyacinth time series into outputs/series/<run_id>/.
+
+    Each scene runs classify() + quality light + regime + the exposed-bed
+    correction. POOR scenes are skipped (kept in the manifest, out of
+    series.csv); failed scenes never stop the run. A series is identified
+    by the sha256 of its series.csv (in the manifest), not by date.
+    """
+    if workers < 1:
+        typer.echo("error: --workers must be >= 1")
+        raise typer.Exit(2)
+    if extend and resume:
+        typer.echo("error: --extend cannot be combined with --resume")
+        raise typer.Exit(2)
+    run_id = resume if resume else new_run_id()
+    typer.echo(f"run: {run_id} ({'resume' if resume else 'new'})")
+
+    def on_done(record: dict, done: int, total: int) -> None:
+        status = record["status"]
+        detail = ""
+        if status == "ok":
+            row = record["row"]
+            assert isinstance(row, dict)
+            detail = (
+                f" raw={row['hyacinth_raw_ha']:.2f}ha"
+                f" light={row['light']} regime={row['regime']}"
+            )
+        elif status == "skipped":
+            detail = f" valid_frac={record['valid_frac']:.4f}"
+        else:
+            detail = f" {record['error']}"
+        typer.echo(
+            f"[{done}/{total}] {record['date']} {record['item_id_requested']}"
+            f" {status}{detail}"
+        )
+
+    start = time.perf_counter()
+    try:
+        manifest = build_run(
+            run_id=run_id,
+            extend=extend,
+            resume=bool(resume),
+            workers=workers,
+            command=sys.argv,
+            on_done=on_done,
+        )
+    except FingerprintMismatch as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(2)
+    except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        typer.echo(f"interrupted: resume with `smolf series build --resume {run_id}`")
+        raise typer.Exit(130)
+    wall = time.perf_counter() - start
+    counts = manifest["counts"]
+    assert isinstance(counts, dict)
+    typer.echo(f"run_dir: {SERIES_OUTPUT_DIR / run_id}")
+    typer.echo(f"series_csv: {SERIES_OUTPUT_DIR / run_id / 'series.csv'}")
+    typer.echo(f"series_sha256: {manifest['series_sha256']}")
+    typer.echo(
+        f"counts: requested={counts['requested']} ok={counts['ok']}"
+        f" skipped={counts['skipped']} errors={counts['errors']}"
+    )
+    typer.echo(f"wall: {time.strftime('%H:%M:%S', time.gmtime(wall))}")
 
 
 if __name__ == "__main__":

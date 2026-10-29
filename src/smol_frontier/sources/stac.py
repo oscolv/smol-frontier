@@ -83,6 +83,10 @@ class SceneMeta:
     processing_baseline: str | None
     boa_offset_applied: bool
     assets: dict[str, str]
+    # WHY: whole-tile eo:cloud_cover from the catalog — the series builder
+    #   records it per scene (tile_cloud_pct). None when the catalog omits it
+    #   or the scene was rebuilt from an old cache file without the tag.
+    cloud_cover: float | None = None
 
 
 def _baseline_key(value: str | None) -> tuple[int, tuple[int, ...]]:
@@ -128,6 +132,11 @@ def item_to_scene(item: pystac.Item, source: str) -> SceneMeta | None:
     if item.datetime is None:
         logger.warning("Skipping scene %s: missing datetime", item.id)
         return None
+    cloud = item.properties.get("eo:cloud_cover")
+    try:
+        cloud_cover = None if cloud is None else float(cloud)
+    except (TypeError, ValueError):
+        cloud_cover = None
     return SceneMeta(
         id=item.id,
         datetime=item.datetime,
@@ -137,6 +146,7 @@ def item_to_scene(item: pystac.Item, source: str) -> SceneMeta | None:
             item.properties.get("earthsearch:boa_offset_applied", False)
         ),
         assets=hrefs,
+        cloud_cover=cloud_cover,
     )
 
 

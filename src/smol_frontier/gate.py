@@ -57,6 +57,7 @@ __all__ = [
     "render_rows_table",
     "render_summary",
     "render_worst_table",
+    "resolve_scene",
     "run_gate",
     "summarize",
     "write_csv",
@@ -628,6 +629,28 @@ def _measure_scene_meta(scene) -> MeasuredScene:
     )
 
 
+def resolve_scene(day: date, item_id: str):
+    """Resolve one Earth Search item id to a scene, with PC fallback.
+
+    Returns (scene, note): the exact Earth Search item, or — when Earth
+    Search fails — the Planetary Computer scene of the same date and tile,
+    with a note recording the backend change. Shared by the identity gate
+    and the series builder so both ingest items the same way. Raises when
+    both backends fail.
+    """
+    try:
+        return get_scene(EARTH_SEARCH, item_id), ""
+    except Exception as exc:  # noqa: BLE001 — fallback is the contract
+        logger.warning(
+            "earth-search failed for %s (%r); falling back to %s",
+            item_id,
+            exc,
+            PLANETARY_COMPUTER,
+        )
+        scene = _fallback_scene(day, item_id)
+        return scene, f"earth-search failed ({exc}); used {scene.id}"
+
+
 def measure_scene(target: GateTarget) -> ComparedScene:
     """Ingest + classify + compare one gate scene (never raises).
 
@@ -637,18 +660,7 @@ def measure_scene(target: GateTarget) -> ComparedScene:
     """
     ref = target.ref
     try:
-        try:
-            scene = get_scene(EARTH_SEARCH, ref.item_id)
-            note = ""
-        except Exception as exc:  # noqa: BLE001 — fallback is the contract
-            logger.warning(
-                "earth-search failed for %s (%r); falling back to %s",
-                ref.item_id,
-                exc,
-                PLANETARY_COMPUTER,
-            )
-            scene = _fallback_scene(ref.date, ref.item_id)
-            note = f"earth-search failed ({exc}); used {scene.id}"
+        scene, note = resolve_scene(ref.date, ref.item_id)
         measured = _measure_scene_meta(scene)
         return compare(ref, replace(measured, note=note), stratum=target.stratum)
     except Exception as exc:  # noqa: BLE001 — a failed scene is skipped, not fatal

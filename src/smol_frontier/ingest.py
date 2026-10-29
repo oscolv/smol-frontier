@@ -177,6 +177,9 @@ def _write_cache(
             boa_offset_applied=str(scene.boa_offset_applied),
             datetime=scene.datetime.isoformat(),
             assets=json.dumps(scene.assets),
+            tile_cloud_cover=""
+            if scene.cloud_cover is None
+            else str(scene.cloud_cover),
         )
 
 
@@ -195,6 +198,13 @@ def _read_cache(
     if crs is None:
         msg = f"missing CRS in {path}"
         raise ValueError(msg)
+    # WHY .get: cache files written before the tile-cloud tag existed have no
+    #   such tag; they stay readable (cloud cover None) instead of stale.
+    raw_cloud = tags.get("tile_cloud_cover") or ""
+    try:
+        cloud_cover = float(raw_cloud) if raw_cloud else None
+    except ValueError:
+        cloud_cover = None
     scene = SceneMeta(
         id=tags["item_id"],
         datetime=datetime.fromisoformat(tags["datetime"]),
@@ -202,6 +212,7 @@ def _read_cache(
         processing_baseline=tags["processing_baseline"] or None,
         boa_offset_applied=tags["boa_offset_applied"] == "True",
         assets=json.loads(tags["assets"]),
+        cloud_cover=cloud_cover,
     )
     return scene, bands, transform, crs
 

@@ -1,4 +1,4 @@
-"""Regression on the two control scenes (AGENTS.md golden numbers).
+"""Regression on the control scenes (AGENTS.md golden numbers) + haze scene.
 
 Runs classify + quality + bed correction from data/cache and asserts the
 control values exactly. Skips with a clear reason when the scene is not
@@ -18,6 +18,7 @@ from smol_frontier.sources.stac import SceneMeta
 
 SCENE_2026_10_12 = "S2B_MSIL2A_20261012T170239_R069_T14QMH_20261012T223155"
 SCENE_2024_06_09 = "S2A_MSIL2A_20240609T165901_R069_T14QMH_20240610T011221"
+SCENE_2025_07_29 = "S2B_MSIL2A_20250729T165849_R069_T14QMH_20250729T221939"
 
 
 def _classify_cached(scene_id: str, day: date):
@@ -82,3 +83,17 @@ def test_control_scene_2024_06_09() -> None:
     assert round(bed.dense_corrected_ha, 2) == 3.84
     assert round(bed.interface_corrected_ha, 2) == 9.90
     assert round(bed.pct_corrected, 2) == 1.09
+
+
+def test_haze_scene_2025_07_29_is_poor() -> None:
+    """Spectral-cloud regression: SCL-missed haze → POOR, out of the series.
+
+    The Earth Search copy of this date measures identically (valid 0.5462,
+    cloud 0.4538, POOR, raw 451.64 ha), so the verdict is backend-stable.
+    """
+    result, quality, _bed = _classify_cached(SCENE_2025_07_29, date(2025, 7, 29))
+    assert quality.light == "POOR"
+    assert result.valid_fraction < settings.MIN_VALID_FRACTION
+    assert round(result.valid_fraction, 4) == 0.5462
+    assert round(result.cloud_fraction, 4) == 0.4538
+    assert round(result.hyacinth_total_ha, 2) == 451.65

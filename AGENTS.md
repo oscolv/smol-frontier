@@ -13,6 +13,37 @@
 - Run everything with `uv run` (`uv run pytest`, `uv run ruff check .`,
   `uv run smolf ...`). The environment lives in `.venv/` at the repo root.
 
+## Architecture map
+
+The pipeline in order, one line per stage:
+
+- STAC search — `sources/stac.py`
+- Ingest + cache — `ingest.py` (`smolf fetch`)
+- Radiometry — `sources/radiometry.py`
+- Validity masks + indices — `classify/masks.py`, `classify/indices.py`
+- Pre-masks + GMM Stage 1/2 + rescue + substrate — `classify/gmm.py`
+- `classify()` — `classify/pipeline.py` (`smolf classify`)
+- Quality light + regime — `quality.py`
+- Exposed-bed correction — `hydro/bed.py`, using levels (`hydro/levels.py`,
+  `smolf levels`), stage–area curve (`hydro/curve.py`, `smolf hydro curve`)
+  and flood-stage map (`hydro/flood_map.py`, `smolf hydro flood-map`)
+- Frontier verification layer + agent — plugs in after the corrected
+  figures (change comparison, seasonal baseline, claim levels);
+  NOT BUILT YET.
+
+## Data layout
+
+- `data/aoi/` — reservoir polygon (committed).
+- `data/hydro/` — committed hydrology inputs, each with a provenance JSON
+  sidecar: `ENDHD.csv[.json]`, `stage_area_curve.csv[.json]`,
+  `flood_stage.tif[.json]`, `gsw_occurrence_endho_v1_4_2021.tif`. The
+  `*.tif` there are force-added on purpose (`*.tif` is gitignored for
+  cache/outputs).
+- `data/cache/` — ingested scenes (gitignored, regenerable via
+  `smolf fetch`).
+- `outputs/` — classified GeoTIFFs (gitignored, regenerable via
+  `smolf classify`).
+
 ## Parameters and provenance
 
 - Every threshold lives in `config.py` (or as a named module constant) with a
@@ -34,6 +65,35 @@
   function; the model selects tools, explains results, and abstains when
   data or quality are insufficient.
 
+## Control values (golden numbers)
+
+Any change that moves these must be flagged, not silently accepted
+(`tests/test_regression_scenes.py` guards them when the scenes are cached):
+
+- 2026-10-12: hyacinth 818.34 ha (dense 350.24, interface 468.10), water
+  415.86, soil 0.11, 64.86 % of 1261.75 ha; light GOOD; regime clean;
+  exposed bed: applied, nothing removed.
+- 2024-06-09 (deep dry season, level 2004.60 m): raw 432.25 ha →
+  corrected 13.74 ha (margin 2005.54 m, expected bed 696.80 ha, removed
+  418.51 ha); light GOOD; regime EXPOSED_BED. (Author's pipeline, Earth
+  Search backend: 432.38 → 13.73; the ~0.1 ha gap is the STAC backend.)
+- `data/hydro/ENDHD.csv` sha256 `3728099d…`; `stage_area_curve.csv` and
+  `flood_stage.tif` are guarded by golden tests.
+
+## Glossary
+
+The author's prior research and the SIH data are in Spanish:
+
+- lirio = water hyacinth; manto = floating mat; denso = dense hyacinth;
+  interfase = interface (mat edge / sparse cover); vaso = reservoir basin
+  (the AOI polygon); espejo de agua = open-water surface at the day's
+  level; lecho expuesto = exposed bed; cota = water-surface stage
+  (m a.s.l.); estiaje = dry season; curva cota–área = stage–area curve;
+  azolve = sedimentation; semáforo = traffic light;
+  BUENA/DUDOSA/MALA = GOOD/DOUBTFUL/POOR; régimen LECHO/TURBIDEZ =
+  EXPOSED_BED/TURBIDITY; SIH = Mexico's national hydrometric information
+  system.
+
 ## Dependencies
 
 - Pin dependencies exactly (`==` in `pyproject.toml`, resolved in `uv.lock`).
@@ -47,6 +107,11 @@
 - For rare code paths, test the pure function directly or monkeypatch —
   don't build fragile synthetic scenes for paths that are nearly
   impossible to trigger naturally.
+
+## How to verify a change
+
+- Run `ruff check .`, `ruff format --check .`, and `pytest -q`, then
+  `smolf classify 2026-10-12` and compare with the control values above.
 
 ## Before finishing
 

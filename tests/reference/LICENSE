@@ -1,0 +1,21 @@
+Reference data in this directory
+==================================
+
+The CSV files in tests/reference/ are a validation extract of the author's
+prior Sentinel-2 classification series for Endho Reservoir:
+
+- serie_2017-01-01_2026-12-31_v2026-10-22.csv — 465 scenes, 2017-2026,
+  raw classifier output (no exposed-bed correction).
+- gate_scenes.csv — the fixed 30-scene identity-gate sample drawn from it.
+
+(C) 2026 Oscar Olvera Neria. Released under the Creative Commons
+Attribution 4.0 International license (CC BY 4.0):
+
+    https://creativecommons.org/licenses/by/4.0/
+
+You may share and adapt this data, including for commercial purposes,
+as long as you give appropriate credit. When you publish results derived
+from it, please cite the source series and this repository.
+
+This license covers only the data in this directory. The code in this
+repository stays under the MIT License (see LICENSE at the repo root).

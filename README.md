@@ -34,10 +34,11 @@ uv run pytest                        # tests (no network; live tests need SMOLF_
 
 - Sentinel-2 L2A: Copernicus Sentinel data (ESA), free and open access,
   via Microsoft Planetary Computer / Earth Search.
-- Reservoir water level: public records of CONAGUA's National Hydrometric
-  System (SIH).
+- Reservoir water level: public records of Mexico's National Hydrometric
+  Information System (SIH).
 - Surface-water occurrence: JRC Global Surface Water v1.4, publicly
   available from the European Commission's Joint Research Centre.
+- Identity-gate reference series: author's data in `tests/reference/`, released under CC BY 4.0 (see `tests/reference/LICENSE`).
 
 See each provider's terms for reuse conditions. This repository's code is
 MIT-licensed (LICENSE).

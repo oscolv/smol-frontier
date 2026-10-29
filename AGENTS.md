@@ -27,9 +27,13 @@ The pipeline in order, one line per stage:
 - Exposed-bed correction — `hydro/bed.py`, using levels (`hydro/levels.py`,
   `smolf levels`), stage–area curve (`hydro/curve.py`, `smolf hydro curve`)
   and flood-stage map (`hydro/flood_map.py`, `smolf hydro flood-map`)
+- Series builder + manifest — `series.py` (`smolf series build`, resumable;
+  a series is identified by its `series.csv` sha256, not by date)
 - Frontier verification layer + agent — plugs in after the corrected
   figures (change comparison, seasonal baseline, claim levels);
   NOT BUILT YET.
+
+Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 
 ## Data layout
 
@@ -43,6 +47,9 @@ The pipeline in order, one line per stage:
   `smolf fetch`).
 - `outputs/` — classified GeoTIFFs (gitignored, regenerable via
   `smolf classify`).
+- `outputs/series/` — series runs, one directory per run id with scene
+  JSONs, `series.csv`, and `manifest.json` (gitignored, regenerable via
+  `smolf series build`).
 
 ## Parameters and provenance
 

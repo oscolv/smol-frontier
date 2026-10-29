@@ -65,6 +65,18 @@ def test_hydro_constants() -> None:
     assert settings.LEVEL_REVISION_TOL_M == 0.05
 
 
+def test_curve_constants() -> None:
+    assert settings.CURVE_DATA_END.isoformat() == "2026-09-20"
+    assert settings.CURVE_BIN_M == 0.10
+    assert settings.CURVE_BIN_MIN_N == 5
+    assert settings.CURVE_FIT_H_MAX == 2017.5
+    assert settings.CURVE_ANCHORS == ((2003.16, 52.1), (2018.0, 182.0), (2020.0, 208.0))
+    assert settings.CURVE_W_ANCHOR == 50.0
+    assert settings.CURVE_BOOTSTRAP_B == 300
+    assert settings.CURVE_BOOTSTRAP_SEED == 42
+    assert settings.CURVE_GRID_TOP == 2018.5
+
+
 def test_stage1_constants() -> None:
     assert settings.BORDER_ZONE_M == 150.0
     assert settings.SOIL_BSI_MIN == 0.02

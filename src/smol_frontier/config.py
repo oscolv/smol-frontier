@@ -6,6 +6,7 @@ All paths, thresholds, bands, and class codes live in one frozen
 
 import os
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 __all__ = ["PROJECT_ROOT", "Settings", "settings"]
@@ -128,6 +129,47 @@ class Settings:
     #   unless --force.
     # HOW: fixed cutoff from the author's prior research (hydrology inputs).
     LEVEL_REVISION_TOL_M: float = 0.05
+
+    # WHY: freezes the stage–area curve to the SIH copy that defined it —
+    #   pairs past this date are ignored, so the exposed-bed correction only
+    #   moves when the classifier moves.
+    # HOW: fixed cutoff from the author's prior research (stage–area curve).
+    CURVE_DATA_END: date = date(2026, 9, 20)
+
+    # WHY: 0.10 m bins average out the SIH's cm rounding noise while keeping
+    #   the V(h) shape; bins with fewer than 5 days are too noisy to keep.
+    # HOW: fixed binning from the author's prior research (stage–area curve).
+    CURVE_BIN_M: float = 0.10
+    CURVE_BIN_MIN_N: int = 5
+
+    # WHY: bins stop here — above it, past the free spillway crest at
+    #   2018.0 m, the reported volume follows another rule.
+    # HOW: fixed cutoff from the author's prior research (stage–area curve).
+    CURVE_FIT_H_MAX: float = 2017.5
+
+    # WHY: official (level m, volume hm³) points from the dam's design
+    #   report — they anchor the fit where SIH bins are absent or suspect.
+    # HOW: design-report values, fixed per project spec.
+    CURVE_ANCHORS: tuple[tuple[float, float], ...] = (
+        (2003.16, 52.1),
+        (2018.0, 182.0),
+        (2020.0, 208.0),
+    )
+
+    # WHY: weight of each official anchor — ≈ one bin of 2 500 days
+    #   (sqrt(2500) = 50), so each anchor outvotes any single bin.
+    # HOW: fixed weight from the author's prior research (stage–area curve).
+    CURVE_W_ANCHOR: float = 50.0
+
+    # WHY: bootstrap size and seed for the area uncertainty bands — fixed
+    #   seed so the bands are reproducible run to run.
+    # HOW: fixed budget from the author's prior research (stage–area curve).
+    CURVE_BOOTSTRAP_B: int = 300
+    CURVE_BOOTSTRAP_SEED: int = 42
+
+    # WHY: top of the output grid — above it would be spline extrapolation.
+    # HOW: fixed grid from the author's prior research (stage–area curve).
+    CURVE_GRID_TOP: float = 2018.5
 
     # WHY: width of the strip near the reservoir edge where exposed bed
     #   appears at low water — the soil pre-mask applies ONLY there, never in

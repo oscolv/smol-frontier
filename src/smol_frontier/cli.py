@@ -12,6 +12,7 @@ from smol_frontier.classify import pipeline
 from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro.curve import build_curve
 from smol_frontier.hydro.levels import (
     DEFAULT_LEVELS_PATH,
     LevelsError,
@@ -25,6 +26,8 @@ from smol_frontier.sources.stac import search_scenes
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
 levels_app = typer.Typer(help="Reservoir water levels from the SIH record.")
 app.add_typer(levels_app, name="levels")
+hydro_app = typer.Typer(help="Hydrology inputs for the exposed-bed correction.")
+app.add_typer(hydro_app, name="hydro")
 
 
 @app.callback()
@@ -158,6 +161,25 @@ def levels_show(
     typer.echo(f"date: {match.date}")
     typer.echo(f"level_m: {match.level_m:.2f}")
     typer.echo(f"volume_hm3: {volume}")
+
+
+@hydro_app.command("curve")
+def hydro_curve() -> None:
+    """Build the stage–area curve from the SIH record and write it."""
+    if not DEFAULT_LEVELS_PATH.exists():
+        typer.echo("no local levels file; run `smolf levels update` first")
+        raise typer.Exit(1)
+    report = build_curve()
+    typer.echo(f"pairs: {report.n_pairs}")
+    typer.echo(f"level_min: {report.level_min:.2f}")
+    typer.echo(f"level_max: {report.level_max:.2f}")
+    typer.echo(f"s_factor: {report.s_factor}")
+    typer.echo(f"area_at_2018_km2: {report.area_at_2018_km2:.4f}")
+    typer.echo(f"volume_at_2018_hm3: {report.volume_at_2018_hm3:.3f}")
+    typer.echo(f"volume_at_2003_16_hm3: {report.volume_at_2003_16_hm3:.3f}")
+    for stage, err in report.model_errors_km2.items():
+        typer.echo(f"model_error_{stage}_km2: {err:.4f}")
+    typer.echo(f"output: {report.csv_path}")
 
 
 if __name__ == "__main__":

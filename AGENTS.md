@@ -1,5 +1,12 @@
 # smol-frontier — agent conventions
 
+## Language
+
+- Everything in the repository is in English — code, comments, docs, CLI
+  output, column and file names.
+- Exceptions: third-party data kept byte-for-byte (the SIH CSV headers stay
+  as published) and proper nouns (Endhó, SIH).
+
 ## Layout and toolchain
 
 - Package layout: `src/smol_frontier/`; CLI is `smolf` (Typer).

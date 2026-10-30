@@ -423,8 +423,8 @@ def stage2(
     Below 4 mat pixels (or none) everything resolves to interface and the
     separability is NaN (diagnostic only). Mat pixels with non-finite features
     cannot enter the GMM and resolve to interface. No 3-D fallback — it was
-    retired in the prior research (tied or worsened against PlanetScope at
-    3 m). Inputs are not mutated.
+    retired in the prior research (tied or worsened against higher-resolution
+    imagery at 3 m). Inputs are not mutated.
     """
     s = settings
     _one_shape(ndvi, ndre, classes, confidence)

@@ -7,9 +7,11 @@ cached (CI). No network: the cache-hit path never leaves the machine.
 
 from datetime import date, datetime
 
+import numpy as np
 import pytest
 
 from smol_frontier.classify import pipeline
+from smol_frontier.classify.masks import scl_invalid, spectral_cloud
 from smol_frontier.config import settings
 from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path, ingest_scene
@@ -19,6 +21,8 @@ from smol_frontier.sources.stac import SceneMeta
 SCENE_2026_10_12 = "S2B_MSIL2A_20261012T170239_R069_T14QMH_20261012T223155"
 SCENE_2024_06_09 = "S2A_MSIL2A_20240609T165901_R069_T14QMH_20240610T011221"
 SCENE_2025_07_29 = "S2B_MSIL2A_20250729T165849_R069_T14QMH_20250729T221939"
+SCENE_ES_2025_07_29 = "S2B_14QMH_20250729_0_L2A"
+SCENE_ES_2025_07_24 = "S2C_14QMH_20250724_0_L2A"
 
 
 def _classify_cached(scene_id: str, day: date):
@@ -54,6 +58,31 @@ def _assert_control_figures(result, dense, interface, water, soil, total, pct) -
 def _assert_quality(quality: QualityReport, light: str, regime: str) -> None:
     assert quality.light == light
     assert quality.regime == regime
+
+
+def _ingest_cached(scene_id: str, day: date):
+    """Ingest a cached scene (skip when absent); return the ingested scene."""
+    if not _cache_path(DEFAULT_CACHE_DIR, scene_id).exists():
+        pytest.skip(f"scene {scene_id} not in data/cache (CI): run `smolf fetch {day}`")
+    meta = SceneMeta(
+        id=scene_id,
+        datetime=datetime(day.year, day.month, day.day),
+        source="cache",
+        processing_baseline=None,
+        boa_offset_applied=False,
+        assets={},
+    )
+    return ingest_scene(meta)
+
+
+def _spectral_only_fraction(ing) -> float:
+    """Fraction of reservoir pixels flagged by spectral_cloud, not by SCL."""
+    inside = np.asanyarray(ing.inside, dtype=bool)
+    spec = spectral_cloud(
+        ing.reflectance("B02"), ing.reflectance("B11"), ing.reflectance("B04")
+    )
+    only = spec & ~scl_invalid(ing.bands["SCL"]) & inside
+    return float(only.sum()) / float(inside.sum())
 
 
 def test_control_scene_2026_10_12() -> None:
@@ -97,3 +126,30 @@ def test_haze_scene_2025_07_29_is_poor() -> None:
     assert round(result.valid_fraction, 4) == 0.5462
     assert round(result.cloud_fraction, 4) == 0.4538
     assert round(result.hyacinth_total_ha, 2) == 451.65
+
+
+def test_cloud_test_separates_haze_from_control() -> None:
+    """Spectral cloud test (CLOUD_B02_MIN/B11_MIN/WHITENESS): haze vs control.
+
+    2025-07-29 haze: 43.44 % of reservoir pixels are flagged by
+    spectral_cloud that SCL did not flag, so the scene is POOR. 2025-07-24
+    turbid control: the spectral test flags nothing (0.0000), so the scene
+    stays GOOD / TURBIDITY with the reference figures (valid 1.0,
+    total 486.41 ha).
+    """
+    haze = _ingest_cached(SCENE_ES_2025_07_29, date(2025, 7, 29))
+    haze_result = pipeline.classify(haze)
+    haze_quality = assess_quality(haze_result)
+    assert haze_quality.light == "POOR"
+    assert round(_spectral_only_fraction(haze), 4) == 0.4344
+    assert round(haze_result.valid_fraction, 4) == 0.5462
+    assert round(haze_result.cloud_fraction, 4) == 0.4538
+    assert round(haze_result.hyacinth_total_ha, 2) == 451.64
+
+    control = _ingest_cached(SCENE_ES_2025_07_24, date(2025, 7, 24))
+    control_result = pipeline.classify(control)
+    control_quality = assess_quality(control_result)
+    _assert_quality(control_quality, "GOOD", "TURBIDITY")
+    assert round(_spectral_only_fraction(control), 4) == 0.0
+    assert round(control_result.valid_fraction, 4) == 1.0
+    assert round(control_result.hyacinth_total_ha, 2) == 486.41

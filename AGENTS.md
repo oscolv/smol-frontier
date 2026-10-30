@@ -29,6 +29,8 @@ The pipeline in order, one line per stage:
   and flood-stage map (`hydro/flood_map.py`, `smolf hydro flood-map`)
 - Series builder + manifest — `series.py` (`smolf series build`, resumable;
   a series is identified by its `series.csv` sha256, not by date)
+- Experiments — `experiments/` (re-verification scripts + notes; per-scene
+  outputs under `outputs/`)
 - Frontier verification layer + agent — plugs in after the corrected
   figures (change comparison, seasonal baseline, claim levels);
   NOT BUILT YET.

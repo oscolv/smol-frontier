@@ -4,7 +4,8 @@ Pure functions over :class:`SceneResult`: the light and its flags follow the
 author's prior methodology exactly (an identity gate compares them against the
 reference series), so every comparison below is spec-literal. The regime is
 reported in its own field and never degrades quality — no
-separability/confidence metric predicted the PlanetScope gap in those regimes.
+separability/confidence metric predicted the gap to higher-resolution
+imagery in those regimes.
 No I/O.
 """
 

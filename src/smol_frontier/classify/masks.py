@@ -35,15 +35,20 @@ SCL_CLOUD = frozenset({3, 8, 9, 10})
 # WHY: spectral cloud test, independent of SCL: since Processing Baseline
 #   04.00, Sen2Cor's SCL misses low clouds and haze, labelling them "not
 #   vegetated"/water/vegetation (documented ESA limitation). Real case:
-#   Endho scene 2025-07-29, ~32 % cloud that SCL missed → 1025 ha of false
-#   hyacinth. cloud = (B02 > 0.07) AND (B11 > 0.10) AND (B02 > 0.85 · B04).
-# HOW: calibrated on the author's prior research (see PRIOR_WORK.md):
-#   clean water/vegetation B02 p99 = 0.045; clouds B02 0.05–0.19 and
-#   B11 0.13–0.29. The B11 guard protects turbid water (absorbs SWIR); the
-#   B02 guard protects vegetation. 0.07 (not 0.10) catches thin haze
-#   (B02 ≈ 0.06–0.09); 0.06 starts flagging bright hyacinth. Whiteness
-#   guard: clouds are spectrally neutral (B02/B04 ≈ 0.99) while exposed
-#   sediment is reddish (B02/B04 ≈ 0.73), so 0.85 separates them.
+#   Endho scene 2025-07-29, 43.44 % of reservoir pixels flagged that SCL
+#   did not flag; without the test the scene passes as valid (0.9806) with
+#   998.79 ha of false hyacinth (see experiments/sensitivity.md).
+#   cloud = (B02 > 0.07) AND (B11 > 0.10) AND (B02 > 0.85 · B04). The B11
+#   guard protects turbid water (absorbs SWIR); the B02 guard protects
+#   vegetation; the whiteness guard protects reddish sediment (clouds are
+#   spectrally neutral, B02/B04 ≈ 0.99, while sediment is ≈ 0.73).
+# HOW: Re-verified in this repo (see experiments/sensitivity.md): the
+#   2025-07-29 haze scene is POOR via 43.44 % spectral-only pixels while
+#   the 2025-07-24 turbid control stays GOOD/TURBIDITY with 0.0000 flagged.
+#   Values from the author's prior research (see PRIOR_WORK.md): clean
+#   water/vegetation B02 p99 = 0.045; clouds B02 0.05–0.19, B11 0.13–0.29;
+#   0.07 (not 0.10) catches thin haze (B02 ≈ 0.06–0.09), 0.06 starts
+#   flagging bright hyacinth.
 CLOUD_B02_MIN = 0.07
 CLOUD_B11_MIN = 0.10
 CLOUD_WHITENESS = 0.85

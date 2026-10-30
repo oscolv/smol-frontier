@@ -41,18 +41,26 @@ class Settings:
     # HOW: fixed by geography — Endho sits in UTM zone 14N.
     UTM_CRS: str = "EPSG:32614"
 
+    # NOTE: the classifier thresholds as a set are verified jointly by the
+    #   identity gate (465 scenes); docs/method.md section 10 reports the
+    #   gate figures.
     # WHY: GMM posterior cutoff above which a pixel counts as water at all;
     #   separates the reservoir surface from land before hyacinth mapping.
-    # HOW: calibrated on the author's prior research (Oct 2026, 465
-    #   Sentinel-2 scenes 2017–2026): varying TAU_WATER over 0.50–0.99 moves
-    #   total hyacinth area by at most 7 ha, so 0.80 is a stable choice.
+    # HOW: set in the author's prior research (Oct 2026, 465 Sentinel-2
+    #   scenes 2017–2026). Re-verification in this repo (see
+    #   experiments/sensitivity.md) does NOT reproduce the prior "at most
+    #   7 ha" bound: max |Δ total| vs 0.80 is 22.68 ha at 0.99 (2023-05-01),
+    #   13.28 ha at 0.95 and 7.92 ha at 0.50 (2019-04-17); median 0.00 ha at
+    #   every grid point, p95 at most 5.62 ha, no light/regime change.
     TAU_WATER: float = 0.80
 
     # WHY: GMM posterior cutoff above which water counts as dense hyacinth
     #   rather than open water / interface; splits the water mask by cover.
-    # HOW: same calibration as TAU_WATER (Oct 2026, 465 scenes): moving
-    #   TAU_HYACINTH only reallocates pixels between dense and interface
-    #   classes without changing the water mask, so 0.55 is a stable split.
+    # HOW: Re-verified in this repo (see experiments/sensitivity.md): at
+    #   0.45 and 0.65 the total is bit-identical to 0.55 in all 465 scenes
+    #   (max |Δ total| 0.0000 ha) while dense/interface move up to 124.54 ha
+    #   in opposite directions, so 0.55 is a stable split. Same origin as
+    #   TAU_WATER (Oct 2026, 465 scenes).
     TAU_HYACINTH: float = 0.55
 
     # WHY: minimum valid (cloud-free, observed) fraction of the reservoir for
@@ -107,19 +115,19 @@ class Settings:
     SEP_DOUBTFUL: float = 1.5
 
     # WHY: soil hectares above which the scene is in the EXPOSED_BED regime —
-    #   with exposed bed, Sentinel-2 underestimates hyacinth versus same-day
-    #   PlanetScope (P(|PS − S2| > 100 ha) = 0.62 with exposed bed vs 0.22
-    #   without; 125 pairs ±1 day), and no separability/confidence metric
-    #   predicted that gap. So the regime is reported in its own field and
-    #   does NOT degrade quality.
+    #   the prior research found larger disagreement with a higher-resolution
+    #   sensor in this regime (Sentinel-2 differs from same-day reference
+    #   imagery on hyacinth), and no separability/confidence metric predicted
+    #   that gap. So the regime is reported in its own field and does NOT
+    #   degrade quality.
     # HOW: fixed cutoff from the author's prior research.
     REGIME_SOIL_MAX_HA: float = 50.0
 
     # WHY: nir_water_frac at or above which the scene is in the TURBIDITY
-    #   regime — with turbidity, Sentinel-2 underestimates versus same-day
-    #   PlanetScope (P(|PS − S2| > 100 ha) = 0.91 with turbidity vs 0.25
-    #   without; same 125 pairs). Reported in its own field, never degrades
-    #   quality.
+    #   regime — the prior research found larger disagreement with a
+    #   higher-resolution sensor in this regime (Sentinel-2 differs from
+    #   same-day reference imagery on hyacinth). Reported in its own field,
+    #   never degrades quality.
     # HOW: fixed cutoff from the author's prior research.
     REGIME_NIR_WATER_MIN: float = 0.60
 

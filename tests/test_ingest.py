@@ -192,6 +192,10 @@ def _fake_ingested() -> IngestedScene:
     bands = dict.fromkeys(BAND_ORDER, np.zeros((2, 2), dtype=np.uint16))
     bands["B02"] = np.array([[1500, 2000], [1000, 0]], dtype=np.uint16)
     bands["B03"] = np.array([[1500, 2000], [1000, 3000]], dtype=np.uint16)
+    # Every spectral band needs finite, above-floor reflectance inside, or the
+    # validity mask rejects the pixel (DN 0 outside is fine: it is not inside).
+    for band in ("B04", "B05", "B08", "B8A", "B11"):
+        bands[band] = np.array([[1500, 1500], [1500, 0]], dtype=np.uint16)
     bands["SCL"] = np.array([[6, 6], [6, 4]], dtype=np.uint16)
     inside = np.array([[True, True], [True, False]])
     return IngestedScene(scene, bands, inside, Affine.identity(), CRS, -0.1)

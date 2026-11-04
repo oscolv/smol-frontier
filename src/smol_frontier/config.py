@@ -86,6 +86,20 @@ class Settings:
     # HOW: fixed policy value per project spec.
     MIN_VALID_FRACTION: float = 0.80
 
+    # WHY: reflectance floor for the validity mask — since processing baseline
+    #   04.00, Sen2Cor over-corrects dark water in the NIR/SWIR, so real Endho
+    #   water lands slightly below zero in offset scenes; that is water, not
+    #   nodata (nodata would sit at exactly -0.10 had DN == 0 not been mapped
+    #   to NaN first). Any band at or below this floor, or non-finite, fails
+    #   the mask.
+    # HOW: measured on this repo's 473 cached scenes (59.7M inside pixels, Nov
+    #   2026): per-band minima over finite inside reflectance are B02 -0.0065,
+    #   B03 -0.0020, B04 -0.0017, B05 -0.0174, B08 -0.0414, B8A -0.0162 and
+    #   B11 -0.0006 (every dark-water SCL-6 minimum >= -0.02); zero pixels sit
+    #   below -0.05 while 25 315 sit in [-0.05, 0), so the floor keeps every
+    #   real measurement and only rejects sub-floor garbage.
+    REFLECTANCE_MIN_VALID: float = -0.05
+
     # WHY: catalog cloud-cover ceiling when extending the series with new
     #   scenes — generous on purpose, because the per-pixel SCL mask and the
     #   spectral cloud test filter clouds later anyway.

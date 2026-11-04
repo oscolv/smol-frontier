@@ -8,6 +8,7 @@ import pytest
 import rasterio
 
 from smol_frontier.aoi import reservoir_area_ha
+from smol_frontier.classify import indices
 from smol_frontier.classify.gmm import (
     MAT_PENDING,
     rescue_water,
@@ -222,3 +223,63 @@ def test_pipeline_all_water() -> None:
     assert result.pct_reservoir == pytest.approx(
         result.hyacinth_total_ha / reservoir_area_ha() * 100.0
     )
+
+
+def _dark_water_scene(shape=(20, 20)) -> IngestedScene:
+    """Dark-water scene, offset -0.1: NIR dips slightly below zero (real water)."""
+    dn = {
+        "B02": 1100,  # 0.01
+        "B03": 1050,  # 0.005
+        "B04": 1200,  # 0.02
+        "B05": 980,  # -0.002
+        "B08": 950,  # -0.005
+        "B8A": 900,  # -0.01
+        "B11": 1020,  # 0.002
+    }
+    bands = {band: np.full(shape, value, dtype=np.uint16) for band, value in dn.items()}
+    bands["SCL"] = np.full(shape, 6, dtype=np.uint16)
+    scene = SceneMeta(
+        id="TEST_DARK_WATER",
+        datetime=datetime(2026, 11, 1),
+        source="test",
+        processing_baseline="05.13",
+        boa_offset_applied=False,
+        assets={},
+    )
+    return IngestedScene(
+        scene=scene,
+        bands=bands,
+        inside=np.full(shape, True),
+        transform=rasterio.Affine(10.0, 0.0, 500000.0, 0.0, -10.0, 2200000.0),
+        crs="EPSG:32614",
+        offset=-0.1,
+    )
+
+
+def test_pipeline_clips_bands_before_indices(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Indices see non-negative copies; the scene arrays are untouched."""
+    scene = _dark_water_scene()
+    dn_before = {band: arr.copy() for band, arr in scene.bands.items()}
+    seen: dict[str, list[list[np.ndarray]]] = {}
+    for name in ("ndvi", "ndre", "mndwi", "bsi", "nsd", "fai"):
+        real = getattr(indices, name)
+
+        def wrap(*args, _name=name, _real=real):
+            seen.setdefault(_name, []).append(list(args))
+            return _real(*args)
+
+        monkeypatch.setattr(indices, name, wrap)
+    result = classify(scene)
+    assert set(seen) == {"ndvi", "ndre", "mndwi", "bsi", "nsd", "fai"}
+    for name, calls in seen.items():
+        for args in calls:
+            for arr in args:
+                arr = np.asanyarray(arr)
+                assert ((arr >= 0) | ~np.isfinite(arr)).all(), name
+    for band, arr in scene.bands.items():
+        assert (arr == dn_before[band]).all()
+    assert float(scene.reflectance("B08").min()) == pytest.approx(-0.005)
+    assert result.valid_fraction == pytest.approx(1.0)
+    assert (result.class_map == settings.CLASS_WATER).all()

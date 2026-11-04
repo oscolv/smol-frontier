@@ -89,15 +89,20 @@ def fetch(
         raise typer.Exit(1)
     ing = ingest_scene(scenes[0])
     scl = ing.bands["SCL"]
-    b02, b04, b11 = (ing.reflectance(band) for band in ("B02", "B04", "B11"))
-    water = ing.reflectance("B03")[(scl == 6) & ing.inside]
+    bands = {
+        band: ing.reflectance(band)
+        for band in ("B02", "B03", "B04", "B05", "B08", "B8A", "B11")
+    }
+    water = bands["B03"][(scl == 6) & ing.inside]
     median = f"{float(np.median(water)):.4f}" if water.size else "n/a"
     typer.echo(f"scene: {ing.scene.id}")
     typer.echo(f"backend: {ing.scene.source}")
     typer.echo(f"baseline: {ing.scene.processing_baseline or 'unknown'}")
     typer.echo(f"offset: {ing.offset}")
-    typer.echo(f"valid_fraction: {valid_fraction(scl, b02, b11, b04, ing.inside):.4f}")
-    typer.echo(f"cloud_fraction: {cloud_fraction(scl, b02, b11, b04, ing.inside):.4f}")
+    valid = valid_fraction(scl, bands=bands, inside=ing.inside)
+    cloud = cloud_fraction(scl, bands["B02"], bands["B11"], bands["B04"], ing.inside)
+    typer.echo(f"valid_fraction: {valid:.4f}")
+    typer.echo(f"cloud_fraction: {cloud:.4f}")
     typer.echo(f"median_b03_water: {median}")
 
 

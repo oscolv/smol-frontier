@@ -67,13 +67,28 @@ def classify(scene: IngestedScene) -> SceneResult:
     b8a = scene.reflectance("B8A")
     b11 = scene.reflectance("B11")
 
-    valid = valid_mask(scl, b02, b11, b04, inside)
-    ndvi = indices.ndvi(b08, b04)
-    ndre = indices.ndre(b8a, b05)
-    mndwi = indices.mndwi(b03, b11)
-    bsi = indices.bsi(b11, b04, b08, b02)
-    nsd = indices.nsd(b08, b11)
-    fai = indices.fai(b08, b04, b11)
+    bands = {
+        "B02": b02,
+        "B03": b03,
+        "B04": b04,
+        "B05": b05,
+        "B08": b08,
+        "B8A": b8a,
+        "B11": b11,
+    }
+    valid = valid_mask(scl, bands=bands, inside=inside)
+    # Indices see non-negative copies: slightly negative dark-water
+    # reflectance (Sen2Cor over-correction) would otherwise push ratios
+    # outside [-1, 1]. np.maximum returns new arrays, so the originals (and
+    # the mask above, which must see the true values) are untouched; NaN
+    # stays NaN and positive pixels are unchanged.
+    clipped = {name: np.maximum(arr, 0) for name, arr in bands.items()}
+    ndvi = indices.ndvi(clipped["B08"], clipped["B04"])
+    ndre = indices.ndre(clipped["B8A"], clipped["B05"])
+    mndwi = indices.mndwi(clipped["B03"], clipped["B11"])
+    bsi = indices.bsi(clipped["B11"], clipped["B04"], clipped["B08"], clipped["B02"])
+    nsd = indices.nsd(clipped["B08"], clipped["B11"])
+    fai = indices.fai(clipped["B08"], clipped["B04"], clipped["B11"])
     border = border_strip(inside)
 
     first = stage1(fai, ndvi, ndre, mndwi, bsi, nsd, b08, valid, border)
@@ -106,7 +121,7 @@ def classify(scene: IngestedScene) -> SceneResult:
         hyacinth_total_ha=hyacinth_total_ha,
         pct_reservoir=hyacinth_total_ha / area_ha * 100.0,
         reservoir_area_ha=area_ha,
-        valid_fraction=valid_fraction(scl, b02, b11, b04, inside),
+        valid_fraction=valid_fraction(scl, bands=bands, inside=inside),
         cloud_fraction=cloud_fraction(scl, b02, b11, b04, inside),
         gmm1_sep=first.gmm1_sep,
         gmm2_sep=second.gmm2_sep,

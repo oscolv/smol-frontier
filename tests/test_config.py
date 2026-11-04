@@ -52,6 +52,7 @@ def test_thresholds_in_unit_interval() -> None:
 
 
 def test_quality_constants() -> None:
+    assert settings.REFLECTANCE_MIN_VALID == -0.05
     assert settings.MIN_VALID_FRACTION == 0.80
     assert settings.CLOUD_FRAC_DOUBTFUL == 0.10
     assert settings.FRAC_DOUBTFUL == 0.85

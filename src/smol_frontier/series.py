@@ -34,12 +34,17 @@ from pathlib import Path
 from smol_frontier import __version__
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.gate import REFERENCE_CSV, load_reference, resolve_scene
+from smol_frontier.gate import (
+    REFERENCE_CSV,
+    ingest_with_fallback,
+    load_reference,
+    resolve_scene,
+)
 from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
 from smol_frontier.hydro.levels import DEFAULT_LEVELS_PATH
-from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path, ingest_scene
+from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import EARTH_SEARCH, search_scenes
 
@@ -251,8 +256,9 @@ def _base_record(
     backend_used: str,
     tile_cloud_pct: float | None,
     status: str,
+    note: str = "",
 ) -> dict[str, object]:
-    """Record shared fields: ids, backend, fallback, cloud, status."""
+    """Record shared fields: ids, backend, fallback, cloud, status, note."""
     return {
         "date": target.day.isoformat(),
         "item_id_requested": target.item_id,
@@ -261,6 +267,7 @@ def _base_record(
         "fallback": bool(backend_used) and backend_used != EARTH_SEARCH,
         "tile_cloud_pct": tile_cloud_pct,
         "status": status,
+        "note": note,
         "valid_frac": None,
         "error": "",
         "cache_sha256": cache_sha256(item_id_used),
@@ -274,9 +281,12 @@ def _error_record(
     backend_used: str,
     tile_cloud_pct: float | None,
     message: str,
+    note: str = "",
 ) -> dict[str, object]:
     """Record for a failed scene (never stops the run)."""
-    record = _base_record(target, item_id_used, backend_used, tile_cloud_pct, "error")
+    record = _base_record(
+        target, item_id_used, backend_used, tile_cloud_pct, "error", note
+    )
     record["error"] = message
     return record
 
@@ -288,26 +298,36 @@ def process_scene(target: SeriesTarget) -> dict[str, object]:
     for scene failures — those become error records; only truly unexpected
     BaseExceptions (e.g. KeyboardInterrupt) propagate to interrupt the run.
     A POOR scene (valid_frac < MIN_VALID_FRACTION) is skipped before the
-    bed correction and never enters series.csv.
+    bed correction and never enters series.csv. An anomalous product falls
+    back to the other STAC source; the reason lands in the record note.
     """
     day = target.day
     try:
-        scene, _note = resolve_scene(day, target.item_id)
+        scene, resolve_note = resolve_scene(day, target.item_id)
     except Exception as exc:  # noqa: BLE001 — failed scene, not a fatal error
         logger.warning("series scene %s failed to resolve: %r", target.item_id, exc)
         return _error_record(target, "", "", None, _short(exc))
-    tile_cloud_pct = scene.cloud_cover
     try:
-        ing = ingest_scene(scene)
+        ing, ingest_note = ingest_with_fallback(scene)
+    except Exception as exc:  # noqa: BLE001 — failed scene, not a fatal error
+        logger.warning("series scene %s failed to ingest: %r", target.item_id, exc)
+        return _error_record(
+            target, scene.id, scene.source, scene.cloud_cover, _short(exc)
+        )
+    used = ing.scene
+    note = "; ".join(part for part in (resolve_note, ingest_note) if part)
+    try:
         result = classify_scene(ing)
         quality = assess_quality(result)
     except Exception as exc:  # noqa: BLE001 — failed scene, not a fatal error
         logger.warning("series scene %s failed to classify: %r", target.item_id, exc)
         return _error_record(
-            target, scene.id, scene.source, tile_cloud_pct, _short(exc)
+            target, used.id, used.source, used.cloud_cover, _short(exc), note
         )
     if result.valid_fraction < settings.MIN_VALID_FRACTION:
-        record = _base_record(target, scene.id, scene.source, tile_cloud_pct, "skipped")
+        record = _base_record(
+            target, used.id, used.source, used.cloud_cover, "skipped", note
+        )
         record["valid_frac"] = result.valid_fraction
         return record
     try:
@@ -315,20 +335,20 @@ def process_scene(target: SeriesTarget) -> dict[str, object]:
     except Exception as exc:  # noqa: BLE001 — failed scene, not a fatal error
         logger.warning("series scene %s failed bed correction: %r", target.item_id, exc)
         return _error_record(
-            target, scene.id, scene.source, tile_cloud_pct, _short(exc)
+            target, used.id, used.source, used.cloud_cover, _short(exc), note
         )
     ha = result.ha_per_class
-    record = _base_record(target, scene.id, scene.source, tile_cloud_pct, "ok")
+    record = _base_record(target, used.id, used.source, used.cloud_cover, "ok", note)
     record["valid_frac"] = result.valid_fraction
     # WHY "clean": the gate writes "clean" for an empty regime, so the series
     #   uses the same word and both CSVs compare directly.
     record["row"] = {
         "date": day.isoformat(),
         "item_id_requested": target.item_id,
-        "item_id_used": scene.id,
-        "backend_used": scene.source,
-        "fallback": scene.source != EARTH_SEARCH,
-        "tile_cloud_pct": tile_cloud_pct,
+        "item_id_used": used.id,
+        "backend_used": used.source,
+        "fallback": used.source != EARTH_SEARCH,
+        "tile_cloud_pct": used.cloud_cover,
         "light": quality.light,
         "regime": quality.regime or "clean",
         "valid_frac": result.valid_fraction,

@@ -8,6 +8,7 @@ the `smolf series build` CLI, never a pytest test.
 import csv
 import hashlib
 import json
+import math
 from datetime import date, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -344,6 +345,44 @@ def _fake_scene(item_id: str) -> SimpleNamespace:
     return SimpleNamespace(id=item_id, source="earth-search", cloud_cover=7.5)
 
 
+def test_process_scene_records_fallback_note(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fallback ingest lands in the record and the manifest entry."""
+    target = SeriesTarget(day=date(2026, 10, 27), item_id="S2C_14QMH_20261027_0_L2A")
+    monkeypatch.setattr(
+        series, "resolve_scene", lambda day, item_id: (_fake_scene(item_id), "")
+    )
+    monkeypatch.setattr(
+        series,
+        "ingest_with_fallback",
+        lambda scene: (
+            SimpleNamespace(scene=scene, transform="t", crs="c"),
+            "used earth-search: pc anomalous",
+        ),
+    )
+    monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.98))
+    bed = BedCorrection(
+        applied=False,
+        reason="no level",
+        level_m=math.nan,
+        margin_m=math.nan,
+        expected_bed_ha=0.0,
+        removed_ha=0.0,
+        hyacinth_corrected_ha=150.0,
+        dense_corrected_ha=100.0,
+        interface_corrected_ha=50.0,
+        pct_corrected=11.9,
+    )
+    monkeypatch.setattr(series, "correct_bed", lambda *args: bed)
+    record = series.process_scene(target)
+    assert record["status"] == "ok"
+    assert record["note"] == "used earth-search: pc anomalous"
+    entry = series._manifest_entry(record)
+    assert entry["note"] == "used earth-search: pc anomalous"
+    assert "row" not in entry
+
+
 def test_process_scene_skips_poor_before_bed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -352,7 +391,11 @@ def test_process_scene_skips_poor_before_bed(
     monkeypatch.setattr(
         series, "resolve_scene", lambda day, item_id: (_fake_scene(item_id), "")
     )
-    monkeypatch.setattr(series, "ingest_scene", lambda scene: SimpleNamespace())
+    monkeypatch.setattr(
+        series,
+        "ingest_with_fallback",
+        lambda scene: (SimpleNamespace(scene=scene), ""),
+    )
     monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.5))
 
     def _forbidden(*args, **kwargs):
@@ -376,8 +419,8 @@ def test_process_scene_ok_applies_real_quality_and_bed(
     )
     monkeypatch.setattr(
         series,
-        "ingest_scene",
-        lambda scene: SimpleNamespace(transform="t", crs="c"),
+        "ingest_with_fallback",
+        lambda scene: (SimpleNamespace(scene=scene, transform="t", crs="c"), ""),
     )
     monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.98))
     bed = BedCorrection(

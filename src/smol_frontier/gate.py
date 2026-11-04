@@ -23,11 +23,13 @@ from pathlib import Path
 
 from smol_frontier.classify import pipeline
 from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.ingest import ingest_scene
+from smol_frontier.ingest import IngestedScene, ingest_scene
 from smol_frontier.quality import assess_quality
+from smol_frontier.sources.radiometry import AnomalousProduct
 from smol_frontier.sources.stac import (
     EARTH_SEARCH,
     PLANETARY_COMPUTER,
+    SceneMeta,
     get_scene,
     search_scenes,
 )
@@ -588,36 +590,82 @@ def load_sample_targets(
     return targets, errors
 
 
-def _tile_of_earth_search_id(item_id: str) -> str:
-    """MGRS tile from an Earth Search id (S2A_14QMH_20240609_0_L2A → 14QMH)."""
+def _tile_of_id(item_id: str) -> str:
+    """MGRS tile from either id style (PC ..._T14QMH_... or ES S2A_14QMH_...)."""
+    if "_T" in item_id:
+        return item_id.split("_T", 1)[1].split("_", 1)[0]
     parts = item_id.split("_")
     return parts[1] if len(parts) >= 3 else ""
 
 
-def _fallback_scene(day: date, item_id: str):
-    """Planetary Computer scene of the same date and tile (may raise)."""
-    scenes = search_scenes(day, day, 100.0, backends=(PLANETARY_COMPUTER,))
+def _same_tile(candidate_id: str, tile: str) -> bool:
+    """Tile match across id styles (PC ..._T14QMH_... vs ES ..._14QMH_...)."""
+    return bool(tile) and (f"_{tile}_" in candidate_id or f"_T{tile}_" in candidate_id)
+
+
+def _same_date_scene(day: date, source: str, tile: str) -> SceneMeta:
+    """First same-tile scene from one backend for a date (may raise)."""
+    scenes = search_scenes(day, day, 100.0, backends=(source,))
     if not scenes:
-        msg = f"no {PLANETARY_COMPUTER} scene for {day}"
+        msg = f"no {source} scene for {day}"
         raise RuntimeError(msg)
-    tile = _tile_of_earth_search_id(item_id)
     for scene in scenes:
-        if tile and f"T{tile}" in scene.id:
+        if _same_tile(scene.id, tile):
             return scene
     return scenes[0]
 
 
+def _fallback_scene(day: date, item_id: str) -> SceneMeta:
+    """Planetary Computer scene of the same date and tile (may raise)."""
+    return _same_date_scene(day, PLANETARY_COMPUTER, _tile_of_id(item_id))
+
+
+def ingest_with_fallback(scene: SceneMeta) -> tuple[IngestedScene, str]:
+    """Ingest one scene, falling back to the other STAC source on anomaly.
+
+    Returns (ingested, note): note is "" when the first source worked,
+    else records why the other source was used. Raises AnomalousProduct
+    when the fallback is missing or also anomalous — fail loud, never a
+    silent 0 ha. Shared by the gate, the series builder, and the CLI so
+    all three ingest scenes the same way.
+    """
+    try:
+        return ingest_scene(scene), ""
+    except AnomalousProduct as exc:
+        if scene.source == PLANETARY_COMPUTER:
+            other = EARTH_SEARCH
+        else:
+            other = PLANETARY_COMPUTER
+        day = scene.datetime.date()
+        logger.warning("%s failed (%r); falling back to %s", scene.id, exc, other)
+        try:
+            fallback = _same_date_scene(day, other, _tile_of_id(scene.id))
+        except Exception as exc2:  # noqa: BLE001 — wrapped, then loud
+            msg = f"{exc} (no fallback: {exc2})"
+            raise AnomalousProduct(msg) from exc
+        try:
+            ing = ingest_scene(fallback)
+        except AnomalousProduct as exc2:
+            msg = f"{exc} (fallback also anomalous: {exc2})"
+            raise AnomalousProduct(msg) from exc2
+        note = (
+            f"{scene.id} ({scene.source}) anomalous ({exc}); "
+            f"used {fallback.id} ({other})"
+        )
+        return ing, note
+
+
 def _measure_scene_meta(scene) -> MeasuredScene:
     """Classify one ingested scene: raw hectares + light + regime."""
-    ing = ingest_scene(scene)
+    ing, note = ingest_with_fallback(scene)
     result = pipeline.classify(ing)
     quality = assess_quality(result)
     ha = result.ha_per_class
     return MeasuredScene(
-        item_id=scene.id,
-        backend=scene.source,
-        fallback=scene.source != EARTH_SEARCH,
-        note="",
+        item_id=ing.scene.id,
+        backend=ing.scene.source,
+        fallback=ing.scene.source != EARTH_SEARCH,
+        note=note,
         dense_ha=ha[settings.CLASS_DENSE_HYACINTH],
         interface_ha=ha[settings.CLASS_INTERFACE],
         total_ha=result.hyacinth_total_ha,
@@ -662,7 +710,8 @@ def measure_scene(target: GateTarget) -> ComparedScene:
     try:
         scene, note = resolve_scene(ref.date, ref.item_id)
         measured = _measure_scene_meta(scene)
-        return compare(ref, replace(measured, note=note), stratum=target.stratum)
+        full_note = "; ".join(part for part in (note, measured.note) if part)
+        return compare(ref, replace(measured, note=full_note), stratum=target.stratum)
     except Exception as exc:  # noqa: BLE001 — a failed scene is skipped, not fatal
         logger.warning("gate scene %s failed: %r", ref.item_id, exc)
         row = compared_error(

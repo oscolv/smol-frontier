@@ -28,7 +28,9 @@ from shapely.geometry.base import BaseGeometry
 from smol_frontier.aoi import utm_geometry, wgs84_bbox
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.sources.radiometry import (
+    SPECTRAL_BANDS,
     boa_offset,
+    check_radiometry,
     dn_to_reflectance,
     guard_boa_offset,
 )
@@ -141,6 +143,18 @@ def _scene_offset(scene: SceneMeta, b2_dn: np.ndarray) -> float:
     return guard_boa_offset(rule, b2_dn)
 
 
+def _check_product(
+    scene: SceneMeta, bands: dict[str, np.ndarray], inside: np.ndarray
+) -> None:
+    """Reject 8-bit-like products on raw DN, before the offset and the guard."""
+    check_radiometry(
+        {band: bands[band] for band in SPECTRAL_BANDS},
+        inside,
+        scene.id,
+        scene.source,
+    )
+
+
 def _cache_path(cache_dir: Path, scene_id: str) -> Path:
     return cache_dir / f"{scene_id.replace('/', '_')}.tif"
 
@@ -242,6 +256,7 @@ def ingest_scene(
             logger.info("cache hit: %s", scene.id)
             shape = bands[REF_GRID_BAND].shape
             inside = _inside_mask(aoi_geom, crs, transform, shape)
+            _check_product(scene, bands, inside)
             offset = _scene_offset(scene, bands["B02"])
             return IngestedScene(scene, bands, inside, transform, str(crs), offset)
     if bbox is None:
@@ -268,6 +283,7 @@ def ingest_scene(
     inside = _inside_mask(aoi_geom, ref_crs, ref_transform, shape)
     for band in BAND_ORDER:
         bands[band][~inside] = 0
+    _check_product(scene, bands, inside)
     offset = _scene_offset(scene, bands["B02"])
     cache_dir.mkdir(parents=True, exist_ok=True)
     _write_cache(path, scene, bands, ref_transform, ref_crs)

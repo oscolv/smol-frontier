@@ -100,6 +100,24 @@ class Settings:
     #   real measurement and only rejects sub-floor garbage.
     REFLECTANCE_MIN_VALID: float = -0.05
 
+    # WHY: DN ceiling for the anomalous-product guard — a genuine Sentinel-2
+    #   L2A product always has bright pixels (cloud, soil, mat) in at least
+    #   one band, while the corrupt 2026-10-27 MPC product is 8-bit data (DN
+    #   0-255) in every band. check_radiometry flags a product only when ALL
+    #   seven bands sit below this ceiling, so one dark band can never
+    #   false-positive.
+    # HOW: joint p99.9 separation over this repo's 474 cached scenes (Nov
+    #   2026): the bad product peaks at 255.0 (B02 255.0, B03 255.0, B04
+    #   255.0, B05 251.0, B08 255.0, B8A 248.0, B11 251.0) while the most
+    #   8-bit-like good scene still reaches 1958.0 (B08,
+    #   S2B_14QMH_20211008_1_L2A). Per-band minima over the other 473 scenes
+    #   are B02 462.0, B03 632.0, B04 497.8, B05 921.8, B08 1958.0, B8A
+    #   1641.7, B11 974.1 — B02/B04 alone sit below 500, which is why the
+    #   rule needs every band. 500 clears the bad max by 245 DN and the
+    #   nearest good scene by 1458 DN. p99.9, not the max, so one hot pixel
+    #   cannot hide a bad product.
+    DN_MAX_ANOMALOUS: int = 500
+
     # WHY: catalog cloud-cover ceiling when extending the series with new
     #   scenes — generous on purpose, because the per-pixel SCL mask and the
     #   spectral cloud test filter clouds later anyway.

@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from smol_frontier.config import settings
+from smol_frontier.sources.radiometry import SPECTRAL_BANDS
 
 __all__ = [
     "CLOUD_B02_MIN",
@@ -71,10 +72,10 @@ def spectral_cloud(b02: np.ndarray, b11: np.ndarray, b04: np.ndarray) -> np.ndar
     return (b02 > CLOUD_B02_MIN) & (b11 > CLOUD_B11_MIN) & (b02 > CLOUD_WHITENESS * b04)
 
 
-# WHY: the spectral bands the validity mask range-checks — every band the
-#   classifier consumes (see pipeline.classify), so a NaN or sub-floor value
-#   anywhere disqualifies the pixel instead of poisoning an index.
-SPECTRAL_BANDS = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11")
+# NOTE: SPECTRAL_BANDS is owned by sources/radiometry.py and re-exported
+#   here (see __all__): the mask range-checks every band the classifier
+#   consumes, so a NaN or sub-floor value anywhere disqualifies the pixel
+#   instead of poisoning an index.
 
 
 def _fold_dict_style(

@@ -6,7 +6,9 @@ import numpy as np
 import pytest
 
 from smol_frontier.sources.radiometry import (
+    AnomalousProduct,
     boa_offset,
+    check_radiometry,
     dn_to_reflectance,
     guard_boa_offset,
     to_reflectance,
@@ -83,3 +85,46 @@ def test_funnel_end_to_end() -> None:
         np.array([1500]), "05.11", False, b2_dn=np.array([100, 100, 100])
     )
     assert other[0] == pytest.approx(0.15)
+
+
+SPECTRAL = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11")
+
+
+def _dn_bands(rng, low: int, high: int, shape=(40, 50)):
+    return {
+        band: rng.integers(low, high, size=shape).astype(np.uint16) for band in SPECTRAL
+    }
+
+
+def test_check_radiometry_synthetic_8bit_raises() -> None:
+    rng = np.random.default_rng(27)
+    bands = _dn_bands(rng, 1, 256)
+    bands["B08"][0, 0] = 5000  # outside the reservoir: must not save the scene
+    inside = np.full((40, 50), True)
+    inside[0, 0] = False
+    bands["B02"][:, 0] = 0  # nodata column inside: excluded via DN > 0
+    with pytest.raises(AnomalousProduct, match="S2C_TEST_8BIT") as excinfo:
+        check_radiometry(bands, inside, "S2C_TEST_8BIT", "planetary-computer")
+    message = str(excinfo.value)
+    assert "planetary-computer" in message
+    for band in SPECTRAL:
+        assert f"{band}=" in message
+    assert "earth-search" in message  # retry with the other STAC source
+
+
+def test_check_radiometry_normal_product_passes() -> None:
+    rng = np.random.default_rng(11)
+    bands = _dn_bands(rng, 800, 4000)
+    p999 = check_radiometry(
+        bands, np.full((40, 50), True), "S2A_NORMAL", "earth-search"
+    )
+    assert sorted(p999) == sorted(SPECTRAL)
+    assert all(value >= 800 for value in p999.values())
+
+
+def test_bad_flag_case_reaches_guard() -> None:
+    """Normal DN with a wrong boa_offset_applied flag: no raise, guard runs."""
+    rng = np.random.default_rng(5)
+    bands = _dn_bands(rng, 200, 800)  # already corrected: -0.1 negatives most
+    check_radiometry(bands, np.full((40, 50), True), "S2X_BADFLAG", "earth-search")
+    assert guard_boa_offset(-0.1, bands["B02"]) == 0.0

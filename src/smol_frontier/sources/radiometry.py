@@ -24,12 +24,23 @@ Pure functions on primitives and numpy arrays. No I/O.
 """
 
 import logging
+from collections.abc import Mapping
 
 import numpy as np
 
+from smol_frontier.config import settings
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["boa_offset", "dn_to_reflectance", "guard_boa_offset", "to_reflectance"]
+__all__ = [
+    "SPECTRAL_BANDS",
+    "AnomalousProduct",
+    "boa_offset",
+    "check_radiometry",
+    "dn_to_reflectance",
+    "guard_boa_offset",
+    "to_reflectance",
+]
 
 # WHY: fixed L2A quantification — reflectance units are DN / 10000 by product
 #   definition (https://docs.sentinel-hub.com/api/latest/data/s2l2a/).
@@ -47,6 +58,28 @@ BASELINE_WITH_OFFSET = (4, 0)
 #   before the flag is judged wrong — a genuinely uncorrected scene keeps
 #   almost all water/land pixels positive after -0.1.
 NEGATIVE_FRAC_LIMIT = 0.5
+
+# WHY: the spectral bands every radiometric check covers — the seven
+#   reflectance bands the classifier consumes (SCL is a class map, not DN).
+SPECTRAL_BANDS = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11")
+
+# WHY: high percentile for the anomalous-product test — the max would let a
+#   single hot pixel hide an 8-bit product, while p99.9 still sees the
+#   ceiling over ~126k reservoir pixels.
+P999 = 99.9
+
+# WHY: names the retry target in the AnomalousProduct message without
+#   importing sources.stac (which would drag pystac into this light
+#   module); the canonical constants live there. Unknown sources fall
+#   back to the generic "the other STAC source".
+_OTHER_SOURCE = {
+    "planetary-computer": "earth-search",
+    "earth-search": "planetary-computer",
+}
+
+
+class AnomalousProduct(ValueError):
+    """A STAC product whose DN range is unphysical (e.g. 8-bit data)."""
 
 
 def _parse_baseline(baseline: str | None) -> tuple[int, ...] | None:
@@ -93,6 +126,39 @@ def dn_to_reflectance(dn: np.ndarray, offset: float) -> np.ndarray:
     """Convert DN to reflectance; nodata (DN <= 0) stays nodata (NaN)."""
     scaled = dn.astype(np.float64) / DN_SCALE + offset
     return np.where(dn > 0, scaled, np.nan)
+
+
+def check_radiometry(
+    dn_bands: Mapping[str, np.ndarray],
+    inside: np.ndarray,
+    scene_id: str,
+    source: str,
+) -> dict[str, float]:
+    """Flag 8-bit-like products on raw DN; return per-band DN p99.9.
+
+    Runs BEFORE the offset and guard_boa_offset: a product is anomalous
+    when EVERY spectral band's p99.9 over valid (DN > 0) inside pixels
+    sits below DN_MAX_ANOMALOUS. A band with no valid inside pixel counts
+    as below the ceiling — an empty band is itself broken. Raises
+    AnomalousProduct naming the scene, source, and measured p99.9.
+    """
+    mask = np.asanyarray(inside, dtype=bool)
+    ceiling = settings.DN_MAX_ANOMALOUS
+    p999: dict[str, float] = {}
+    for band in SPECTRAL_BANDS:
+        valid = np.asanyarray(dn_bands[band])[mask]
+        valid = valid[valid > 0]
+        p999[band] = float(np.percentile(valid, P999)) if valid.size else 0.0
+    if all(value < ceiling for value in p999.values()):
+        measured = " ".join(f"{band}={p999[band]:.1f}" for band in SPECTRAL_BANDS)
+        other = _OTHER_SOURCE.get(source, "the other STAC source")
+        msg = (
+            f"anomalous product {scene_id} ({source}): DN p99.9 over valid "
+            f"inside pixels {measured} — every band below {ceiling}; "
+            f"retry with {other}"
+        )
+        raise AnomalousProduct(msg)
+    return p999
 
 
 def to_reflectance(

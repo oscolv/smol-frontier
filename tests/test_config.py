@@ -66,6 +66,10 @@ def test_hydro_constants() -> None:
     assert settings.LEVEL_REVISION_TOL_M == 0.05
 
 
+def test_radiometry_constants() -> None:
+    assert settings.DN_MAX_ANOMALOUS == 500
+
+
 def test_bed_constants() -> None:
     assert settings.BED_CUSHION_MODEL_HA == (
         (2005.0, 29.0),

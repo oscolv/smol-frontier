@@ -4,11 +4,13 @@ The live gate run is the `smolf gate identity` CLI, never a pytest test.
 """
 
 import csv
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+import smol_frontier.gate as gate_mod
 from smol_frontier.gate import (
     CSV_FIELDS,
     ComparedScene,
@@ -18,6 +20,7 @@ from smol_frontier.gate import (
     RunMeta,
     compare,
     compared_error,
+    ingest_with_fallback,
     load_reference,
     load_sample_targets,
     map_light,
@@ -26,6 +29,8 @@ from smol_frontier.gate import (
     summarize,
     write_csv,
 )
+from smol_frontier.sources.radiometry import AnomalousProduct
+from smol_frontier.sources.stac import SceneMeta
 
 
 def _ref(item_id: str = "S2A_14QMH_20200101_0_L2A", **over) -> ReferenceRow:
@@ -288,3 +293,75 @@ def test_write_csv_schema(tmp_path: Path) -> None:
     assert rows[0]["light_match"] == "true"
     assert rows[1]["error"] == "boom"
     assert rows[1]["delta_total_ha"] == ""
+
+
+def _pc_scene() -> SceneMeta:
+    return SceneMeta(
+        id="S2C_MSIL2A_20261027T170411_R069_T14QMH_20261027T213804",
+        datetime=datetime(2026, 10, 27, 17, 4, tzinfo=UTC),
+        source="planetary-computer",
+        processing_baseline="05.13",
+        boa_offset_applied=False,
+        assets={},
+    )
+
+
+def _es_scene() -> SceneMeta:
+    return SceneMeta(
+        id="S2C_14QMH_20261027_0_L2A",
+        datetime=datetime(2026, 10, 27, 17, 4, tzinfo=UTC),
+        source="earth-search",
+        processing_baseline="05.13",
+        boa_offset_applied=True,
+        assets={},
+    )
+
+
+def _raise_anomalous(scene: SceneMeta) -> None:
+    msg = f"anomalous product {scene.id} ({scene.source})"
+    raise AnomalousProduct(msg)
+
+
+def test_ingest_with_fallback_picks_other_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tried: list[str] = []
+
+    def fake_ingest(scene: SceneMeta):
+        tried.append(scene.id)
+        if scene.source == "planetary-computer":
+            _raise_anomalous(scene)
+        return SimpleNamespace(scene=scene)
+
+    seen: list[tuple[str, ...]] = []
+
+    def fake_search(start, end, max_cloud, backends=("planetary-computer",)):
+        seen.append(tuple(backends))
+        return [_es_scene()]
+
+    monkeypatch.setattr(gate_mod, "ingest_scene", fake_ingest)
+    monkeypatch.setattr(gate_mod, "search_scenes", fake_search)
+    ing, note = ingest_with_fallback(_pc_scene())
+    assert tried == [_pc_scene().id, _es_scene().id]
+    assert seen == [("earth-search",)]
+    assert ing.scene.id == _es_scene().id
+    assert "20261027T170411" in note
+    assert "earth-search" in note
+
+
+def test_ingest_with_fallback_no_scene_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gate_mod, "ingest_scene", _raise_anomalous)
+    monkeypatch.setattr(gate_mod, "search_scenes", lambda *a, **k: [])
+    with pytest.raises(AnomalousProduct, match="no fallback"):
+        ingest_with_fallback(_pc_scene())
+
+
+def test_ingest_with_fallback_also_anomalous_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gate_mod, "ingest_scene", _raise_anomalous)
+    monkeypatch.setattr(gate_mod, "search_scenes", lambda *a, **k: [_es_scene()])
+    with pytest.raises(AnomalousProduct, match="also anomalous"):
+        ingest_with_fallback(_pc_scene())

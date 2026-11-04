@@ -20,6 +20,7 @@ from smol_frontier.gate import (
     GateTarget,
     RunMeta,
     gate_timestamp,
+    ingest_with_fallback,
     load_reference,
     load_sample_targets,
     render_rows_table,
@@ -39,7 +40,6 @@ from smol_frontier.hydro.levels import (
     load_levels,
     update_levels,
 )
-from smol_frontier.ingest import ingest_scene
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     OUTPUT_DIR as SERIES_OUTPUT_DIR,
@@ -49,6 +49,7 @@ from smol_frontier.series import (
     build_run,
     new_run_id,
 )
+from smol_frontier.sources.radiometry import AnomalousProduct
 from smol_frontier.sources.stac import search_scenes
 
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
@@ -87,7 +88,11 @@ def fetch(
     if not scenes:
         typer.echo(f"no scenes found for {day.date()}")
         raise typer.Exit(1)
-    ing = ingest_scene(scenes[0])
+    try:
+        ing, note = ingest_with_fallback(scenes[0])
+    except AnomalousProduct as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
     scl = ing.bands["SCL"]
     bands = {
         band: ing.reflectance(band)
@@ -96,6 +101,8 @@ def fetch(
     water = bands["B03"][(scl == 6) & ing.inside]
     median = f"{float(np.median(water)):.4f}" if water.size else "n/a"
     typer.echo(f"scene: {ing.scene.id}")
+    if note:
+        typer.echo(f"note: {note}")
     typer.echo(f"backend: {ing.scene.source}")
     typer.echo(f"baseline: {ing.scene.processing_baseline or 'unknown'}")
     typer.echo(f"offset: {ing.offset}")
@@ -117,7 +124,11 @@ def classify(
     if not scenes:
         typer.echo(f"no scenes found for {day.date()}")
         raise typer.Exit(1)
-    ing = ingest_scene(scenes[0])
+    try:
+        ing, note = ingest_with_fallback(scenes[0])
+    except AnomalousProduct as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
     result = pipeline.classify(ing)
     ha = result.ha_per_class
     bed = correct_bed(result.class_map, ing.transform, ing.crs, day.date())
@@ -127,6 +138,8 @@ def classify(
     write_classified_geotiff(path, result.class_map, ing.transform, ing.crs)
     nir_thr = "none" if result.nir_thr_used is None else f"{result.nir_thr_used:.4f}"
     typer.echo(f"scene: {result.scene_id}")
+    if note:
+        typer.echo(f"note: {note}")
     typer.echo(f"water_ha: {ha[settings.CLASS_WATER]:.2f}")
     typer.echo(f"dense_ha: {ha[settings.CLASS_DENSE_HYACINTH]:.2f}")
     typer.echo(f"interface_ha: {ha[settings.CLASS_INTERFACE]:.2f}")

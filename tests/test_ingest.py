@@ -17,9 +17,17 @@ from typer.testing import CliRunner
 
 import smol_frontier.ingest as ingest_mod
 from smol_frontier.cli import app
-from smol_frontier.ingest import BAND_ORDER, IngestedScene, ingest_scene
-from smol_frontier.sources.radiometry import dn_to_reflectance
+from smol_frontier.ingest import (
+    BAND_ORDER,
+    DEFAULT_CACHE_DIR,
+    IngestedScene,
+    _cache_path,
+    ingest_scene,
+)
+from smol_frontier.sources.radiometry import AnomalousProduct, dn_to_reflectance
 from smol_frontier.sources.stac import SceneMeta
+
+SCENE_ANOMALOUS_2026_10_27 = "S2C_MSIL2A_20261027T170411_R069_T14QMH_20261027T213804"
 
 CRS = "EPSG:32614"
 T10 = from_origin(440000, 2226000, 10, 10)
@@ -201,10 +209,28 @@ def _fake_ingested() -> IngestedScene:
     return IngestedScene(scene, bands, inside, Affine.identity(), CRS, -0.1)
 
 
+def test_ingest_anomalous_cached_product_raises() -> None:
+    """Cache hit on the 8-bit 2026-10-27 MPC product raises (fixture kept)."""
+    if not _cache_path(DEFAULT_CACHE_DIR, SCENE_ANOMALOUS_2026_10_27).exists():
+        pytest.skip("anomalous scene not in data/cache (CI)")
+    meta = SceneMeta(
+        id=SCENE_ANOMALOUS_2026_10_27,
+        datetime=datetime(2026, 10, 27, tzinfo=UTC),
+        source="cache",
+        processing_baseline=None,
+        boa_offset_applied=False,
+        assets={},
+    )
+    with pytest.raises(AnomalousProduct, match="anomalous product"):
+        ingest_scene(meta)
+
+
 def test_cli_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
     ing = _fake_ingested()
     monkeypatch.setattr("smol_frontier.cli.search_scenes", lambda *a, **k: [ing.scene])
-    monkeypatch.setattr("smol_frontier.cli.ingest_scene", lambda scene: ing)
+    monkeypatch.setattr(
+        "smol_frontier.cli.ingest_with_fallback", lambda scene: (ing, "")
+    )
     result = CliRunner().invoke(app, ["fetch", "2026-10-12"])
     assert result.exit_code == 0, result.output
     assert "scene: S2_FAKE" in result.output

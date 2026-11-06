@@ -43,7 +43,7 @@ from smol_frontier.gate import (
 from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
-from smol_frontier.hydro.levels import DEFAULT_LEVELS_PATH
+from smol_frontier.hydro.levels import DEFAULT_LEVELS_PATH, last_day_with_level
 from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import EARTH_SEARCH, search_scenes
@@ -56,9 +56,11 @@ __all__ = [
     "SERIES_FIELDS",
     "FingerprintMismatch",
     "SeriesTarget",
+    "StaleLevelsError",
     "build_run",
     "cache_sha256",
     "check_fingerprint",
+    "check_levels_cover",
     "config_hash",
     "current_fingerprint",
     "input_hashes",
@@ -111,6 +113,24 @@ _FLOAT_4DP = frozenset({"valid_frac", "cloud_frac"})
 
 class FingerprintMismatch(Exception):
     """Resume refused: the run's code fingerprint differs from the current one."""
+
+
+class StaleLevelsError(Exception):
+    """Build refused: some scene is newer than the last day in the SIH level record."""
+
+
+# WHY: these input files are refreshed operationally (`smolf levels update`
+#   rewrites ENDHD.csv every time the SIH publishes a new day) and each one is
+#   already pinned by sha256 in the manifest's `inputs`. Counting their edits
+#   as "dirty" would flag every operational run while adding no provenance:
+#   the hash identifies the exact bytes used. Their provenance sidecars
+#   (*.json) carry download metadata only. Code and config changes still
+#   count as dirty.
+HASHED_INPUT_PATHS = tuple(
+    path.relative_to(PROJECT_ROOT).as_posix()
+    for base in (DEFAULT_LEVELS_PATH, DEFAULT_CURVE_CSV_PATH, DEFAULT_FLOOD_PATH)
+    for path in (base, base.with_name(f"{base.name}.json"))
+)
 
 
 @dataclass(frozen=True)
@@ -167,13 +187,52 @@ def _git(*args: str) -> str:
     return proc.stdout
 
 
+def is_dirty(porcelain: str) -> bool:
+    """True when `git status --porcelain` lists any path outside HASHED_INPUT_PATHS.
+
+    Rename lines ("R  old -> new") count by their new path.
+    """
+    for line in porcelain.splitlines():
+        if not line.strip():
+            continue
+        path = line[3:].split(" -> ")[-1].strip('"')
+        if path not in HASHED_INPUT_PATHS:
+            return True
+    return False
+
+
 def current_fingerprint() -> dict[str, object]:
     """Code fingerprint: git commit + dirty flag + config hash."""
     return {
         "git_commit": _git("rev-parse", "HEAD").strip(),
-        "dirty": bool(_git("status", "--porcelain").strip()),
+        "dirty": is_dirty(_git("status", "--porcelain")),
         "config_hash": config_hash(),
     }
+
+
+def check_levels_cover(
+    targets: Sequence[SeriesTarget], last_level_day: date | None
+) -> None:
+    """Refuse targets newer than the SIH level record (pure check).
+
+    WHY: a scene without its day's level cannot get the exposed-bed
+    correction, so it would enter series.csv with empty corrected columns
+    (seen 2026-11-01: SIH copy ended 2026-10-27). Refreshing first keeps every
+    scene corrected; a scene the SIH has not published yet simply waits for
+    the next run. Raises StaleLevelsError naming the uncovered dates.
+    """
+    uncovered = sorted(
+        {t.day for t in targets if last_level_day is None or t.day > last_level_day}
+    )
+    if uncovered:
+        last = last_level_day.isoformat() if last_level_day else "none"
+        days = ", ".join(day.isoformat() for day in uncovered)
+        msg = (
+            f"SIH level record ends {last}; no level for {days}. "
+            "Run `smolf levels update` first; days the SIH has not published "
+            "yet must wait for a later run."
+        )
+        raise StaleLevelsError(msg)
 
 
 def check_fingerprint(
@@ -494,6 +553,7 @@ def build_run(
     output_dir: Path | None = None,
     today: date | None = None,
     on_done: Callable[[dict[str, object], int, int], None] | None = None,
+    levels_end: Callable[[], date | None] | None = None,
 ) -> dict[str, object]:
     """Build (or resume) a series run; return the final manifest.
 
@@ -501,7 +561,10 @@ def build_run(
     scene JSON per finished scene, then series.csv and the "complete"
     manifest. Resumes reuse the scene JSONs already present and process
     only the missing targets — after the code fingerprint check.
+    Fresh runs first check that the SIH level record covers every target
+    (``levels_end`` returns its last day; tests inject it).
     Raises FingerprintMismatch (resume with changed code/config),
+    StaleLevelsError (fresh build with a target newer than the level record),
     FileNotFoundError (resume of an unknown run), FileExistsError (fresh
     build over an existing run id), ValueError (workers < 1).
     """
@@ -539,6 +602,10 @@ def build_run(
             if extend:
                 last_day = max(target.day for target in targets)
                 targets = targets + list_extend_targets(last_day, today or date.today())
+        # WHY before anything is written: a refused build leaves no run dir.
+        check_levels_cover(
+            targets, last_day_with_level() if levels_end is None else levels_end()
+        )
         started_utc = utc_now()
         have = set()
         scenes_dir.mkdir(parents=True, exist_ok=True)

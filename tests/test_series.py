@@ -460,3 +460,68 @@ def test_process_scene_resolve_failure_is_error(
     assert record["status"] == "error"
     assert record["error"] == "no such item"
     assert record["item_id_used"] == ""
+
+
+# --- SIH level preflight and the dirty flag ---------------------------------
+
+
+def test_check_levels_cover_accepts_targets_up_to_last_level_day() -> None:
+    targets = _targets(3)
+    series.check_levels_cover(targets, targets[-1].day)
+
+
+def test_check_levels_cover_names_every_uncovered_day() -> None:
+    targets = _targets(4)
+    with pytest.raises(series.StaleLevelsError) as info:
+        series.check_levels_cover(targets, targets[1].day)
+    message = str(info.value)
+    assert f"ends {targets[1].day.isoformat()}" in message
+    assert targets[2].day.isoformat() in message
+    assert targets[3].day.isoformat() in message
+    assert targets[0].day.isoformat() not in message.split("no level for")[1]
+    assert "smolf levels update" in message
+
+
+def test_check_levels_cover_with_no_level_record_refuses_everything() -> None:
+    with pytest.raises(series.StaleLevelsError, match="ends none"):
+        series.check_levels_cover(_targets(1), None)
+
+
+def test_stale_levels_refuse_fresh_build_before_writing(tmp_path: Path) -> None:
+    targets = _targets(3)
+    with pytest.raises(series.StaleLevelsError):
+        build_run(
+            run_id="run_stale",
+            targets=targets,
+            process_fn=_make_fake(),
+            output_dir=tmp_path,
+            levels_end=lambda: targets[0].day,
+        )
+    assert not (tmp_path / "run_stale").exists()
+
+
+def test_cli_maps_stale_levels_to_exit_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    targets = _targets(2)
+    monkeypatch.setattr(series, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    monkeypatch.setattr(series, "last_day_with_level", lambda: targets[0].day)
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 1
+    assert "smolf levels update" in result.output
+    assert not any(tmp_path.iterdir())
+
+
+def test_level_and_curve_inputs_do_not_mark_the_tree_dirty() -> None:
+    porcelain = "".join(f" M {path}\n" for path in series.HASHED_INPUT_PATHS)
+    assert "data/hydro/ENDHD.csv" in series.HASHED_INPUT_PATHS
+    assert "data/hydro/ENDHD.csv.json" in series.HASHED_INPUT_PATHS
+    assert series.is_dirty(porcelain) is False
+    assert series.is_dirty("") is False
+
+
+def test_code_and_other_data_changes_still_mark_the_tree_dirty() -> None:
+    assert series.is_dirty(" M data/hydro/ENDHD.csv\n M src/smol_frontier/series.py\n")
+    assert series.is_dirty("?? data/hydro/notes.txt\n")
+    assert series.is_dirty("R  data/hydro/ENDHD.csv -> data/aoi/endho.gpkg\n")

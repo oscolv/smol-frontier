@@ -40,6 +40,7 @@ __all__ = [
     "RevisionCounts",
     "check_regression",
     "download_levels",
+    "last_day_with_level",
     "level_on",
     "load_levels",
     "parse_levels_bytes",
@@ -339,6 +340,11 @@ def level_on(day: date, path: Path | str | None = None) -> float | None:
         if row.date == day:
             return None if math.isnan(row.level_m) else row.level_m
     return None
+
+
+def last_day_with_level(path: Path | str | None = None) -> date | None:
+    """Latest day with a non-NaN level in the local SIH copy, or None."""
+    return _last_day_with_level(load_levels(path))
 
 
 def update_levels(

@@ -46,6 +46,7 @@ from smol_frontier.series import (
 )
 from smol_frontier.series import (
     FingerprintMismatch,
+    StaleLevelsError,
     build_run,
     new_run_id,
 )
@@ -414,6 +415,9 @@ def series_build(
     except FingerprintMismatch as exc:
         typer.echo(f"error: {exc}")
         raise typer.Exit(2)
+    except StaleLevelsError as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}")
         raise typer.Exit(1)

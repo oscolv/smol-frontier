@@ -108,3 +108,21 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `tests/test_masks.py`, `tests/test_regression_scenes.py`
   (`test_haze_scene_2025_07_29_is_poor`); the visual veto — **planned**
   (the agent layer is not built yet).
+
+## 12. Levels before scenes; hashed inputs are not "dirty"
+
+- **Rule:** a fresh series build refuses any scene newer than the last day in
+  the local SIH level record and asks for `smolf levels update` first. Edits
+  to the hydrology inputs already pinned by sha256 in the manifest
+  (`ENDHD.csv`, the stage–area curve, the flood-stage map, and their
+  sidecars) do not set the `dirty` flag; any other change does.
+- **Why:** a scene without its day's level gets no exposed-bed correction and
+  would enter `series.csv` with empty corrected columns (2026-11-01 did, with
+  the SIH copy ending 2026-10-27). The level record is refreshed
+  operationally, and its hash already identifies the exact bytes a run used,
+  so flagging those edits as dirty would mark every operational run without
+  adding provenance.
+- **Where in this repo:** `series.py` (`check_levels_cover()`,
+  `HASHED_INPUT_PATHS`, `is_dirty()`), `hydro/levels.py`
+  (`last_day_with_level()`), `cli.py` (exit 1 on `StaleLevelsError`),
+  `tests/test_series.py`.

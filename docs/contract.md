@@ -23,8 +23,9 @@ First release containing this contract: smolf 0.2.0 (tag `v0.2.0`).
 - **Provenance, not contract.** The series run's `manifest.json` is
   internal provenance; it is never copied out. Each document carries
   `run_id` and `series_sha256` so any figure traces back to the exact run.
-- **Derived products only.** The only raster writer accepts a uint8 array
-  with values 0–5 and nothing else, and only allowlisted files are ever
+- **Derived products only.** Both raster writers (GeoTIFF and PNG) accept
+  a uint8 class array with values 0–5 and nothing else (the PNG writer
+  colours the classes itself), and only allowlisted files are ever
   written, so source imagery or reflectance of any sensor cannot be
   published.
 

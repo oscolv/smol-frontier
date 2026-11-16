@@ -253,7 +253,7 @@ manifest's inputs, when the recomputed margin does not round to the row's
 `removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
 run, no `ok` scene, cache hash mismatch, hectare mismatch. A schema or
 raster-guard failure of smolf's own output is a bug (exit 1). Rasters go
-only through the guarded writer (uint8, values 0–5), files only through the
+only through the guarded writers (uint8, values 0–5), files only through the
 allowlist, and the directory is swapped in by rename after validation.
 
 Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`

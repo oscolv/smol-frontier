@@ -515,7 +515,7 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
             )
             raise PublishRefused(msg)
         published[removed] = settings.CLASS_BED_REMOVED
-    # the guard runs inside render_display_image, before any PNG exists
+    # the C21 guard runs here and again in each published-raster writer
     display = render_display_image(published, ing.transform, ing.crs)
     return PublishedMap(published, ing.transform, ing.crs, display)
 

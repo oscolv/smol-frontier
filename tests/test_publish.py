@@ -23,8 +23,10 @@ from typer.testing import CliRunner
 from smol_frontier import __version__, aoi, ingest, publish, series
 from smol_frontier.classify.geotiff import (
     PUBLISHED_COLORMAP,
+    DisplayImage,
     hex_to_rgba,
     render_display_image,
+    write_display_png,
 )
 from smol_frontier.cli import app
 from smol_frontier.config import settings
@@ -1356,6 +1358,24 @@ def test_publish_png_guard_rejects_float_and_class_6() -> None:
     bad = np.full((4, 4), 6, dtype=np.uint8)
     with pytest.raises(ValueError, match="outside classes"):
         render_display_image(bad, GRID_TRANSFORM, GRID_CRS)
+
+
+@pytest.mark.parametrize(
+    ("classes", "match"),
+    [
+        (np.zeros((4, 4), dtype=np.float32), "uint8"),
+        (np.full((4, 4), 6, dtype=np.uint8), "outside classes"),
+        (np.zeros((4, 4, 4), dtype=np.uint8), "2-D"),
+    ],
+)
+def test_publish_png_writer_guards_hand_built_image(
+    tmp_path: Path, classes: np.ndarray, match: str
+) -> None:
+    image = DisplayImage(classes, GRID_TRANSFORM, [[0.0, 0.0], [1.0, 1.0]])
+    target = tmp_path / "x.png"
+    with pytest.raises(ValueError, match=match):
+        write_display_png(target, image)
+    assert not target.exists()
 
 
 def test_publish_png_schema_requires_png_and_bounds(

@@ -1,11 +1,12 @@
-"""Write the classified map as a styled GeoTIFF.
+"""Write the classified map as a styled GeoTIFF, and the published display PNG.
 
-The output opens colored in QGIS: a palette color table on band 1, nodata 0
-(transparent), a band description, and per-class legend tags. Two writers:
+The GeoTIFF opens colored in QGIS: a palette color table on band 1, nodata 0
+(transparent), a band description, and per-class legend tags. Writers:
 ``write_classified_geotiff`` for the classifier's map (classes 0-4), and the
-guarded ``write_published_geotiff`` for the published map (classes 0-5),
-which refuses anything that is not a uint8 class map — so reflectance or
-source imagery can never be written through it.
+guarded ``write_published_geotiff`` and ``write_display_png`` for the
+published map (classes 0-5), which refuse anything that is not a uint8 class
+map and colour it themselves — so reflectance or source imagery can never be
+written through them.
 """
 
 import warnings
@@ -138,9 +139,13 @@ def _guard_published(class_map: np.ndarray) -> np.ndarray:
 
 @dataclass(frozen=True, eq=False)
 class DisplayImage:
-    """The display raster: RGBA on an EPSG:3857 grid plus its EPSG:4326 bounds."""
+    """The display raster: classes 0-5 warped to EPSG:3857 plus EPSG:4326 bounds.
 
-    rgba: np.ndarray  # (4, height, width) uint8
+    It carries classes, not colours: ``write_display_png`` guards and colours
+    them itself, so no pre-made RGBA (e.g. imagery) can reach a PNG.
+    """
+
+    classes: np.ndarray  # (height, width) uint8, values 0-5
     transform: rasterio.Affine
     bounds: list[list[float]]  # [[south, west], [north, east]], 6 decimals
 
@@ -148,10 +153,10 @@ class DisplayImage:
 def render_display_image(
     class_map: np.ndarray, transform: rasterio.Affine, crs: str
 ) -> DisplayImage:
-    """Warp the class map to EPSG:3857 (nearest) and colour it with the palette.
+    """Warp the class map to EPSG:3857 (nearest) for the display PNG.
 
-    Runs the C21 guard first. Nodata and pixels outside the warped footprint
-    are fully transparent; classes 1-5 take their configured colour.
+    Runs the C21 guard first. Pixels outside the warped footprint are nodata;
+    colouring happens in ``write_display_png``.
     """
     array = _guard_published(class_map)
     height, width = array.shape
@@ -176,11 +181,6 @@ def render_display_image(
         src_nodata=settings.CLASS_NODATA,
         dst_nodata=settings.CLASS_NODATA,
     )
-    lookup = np.zeros((256, 4), dtype=np.uint8)
-    for code, color in PUBLISHED_COLORMAP.items():
-        lookup[code] = color
-    lookup[settings.CLASS_NODATA] = (0, 0, 0, 0)
-    rgba = np.moveaxis(lookup[warped], -1, 0).copy()
     west, south, east, north = transform_bounds(
         DISPLAY_CRS,
         "EPSG:4326",
@@ -190,7 +190,7 @@ def render_display_image(
         [round(south, BOUNDS_DECIMALS), round(west, BOUNDS_DECIMALS)],
         [round(north, BOUNDS_DECIMALS), round(east, BOUNDS_DECIMALS)],
     ]
-    return DisplayImage(rgba, dst_transform, bounds)
+    return DisplayImage(warped, dst_transform, bounds)
 
 
 def _extent(
@@ -203,9 +203,19 @@ def _extent(
 
 
 def write_display_png(path: str | Path, image: DisplayImage) -> Path:
-    """Write the RGBA display image as a PNG with no sidecar files."""
+    """Write the display image as an RGBA PNG with no sidecar files.
+
+    Runs the C21 guard on the image's classes before anything is written, then
+    colours them: nodata fully transparent, classes 1-5 their configured colour.
+    """
     path = Path(path)
-    _, height, width = image.rgba.shape
+    classes = _guard_published(image.classes)
+    lookup = np.zeros((256, 4), dtype=np.uint8)
+    for code, color in PUBLISHED_COLORMAP.items():
+        lookup[code] = color
+    lookup[settings.CLASS_NODATA] = (0, 0, 0, 0)
+    rgba = np.moveaxis(lookup[classes], -1, 0).copy()
+    _, height, width = rgba.shape
     # WHY: the PNG driver only supports CreateCopy, so stage in memory; PAM is
     #   disabled so GDAL never writes a .aux.xml beside the PNG.
     with (
@@ -223,7 +233,7 @@ def write_display_png(path: str | Path, image: DisplayImage) -> Path:
             alpha="YES",
         ) as src,
     ):
-        src.write(image.rgba)
+        src.write(rgba)
         rasterio.shutil.copy(src, path, driver="PNG")
     return path
 

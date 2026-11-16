@@ -31,6 +31,7 @@ __all__ = [
     "compute_bed_correction",
     "correct_bed",
     "cushion_ha",
+    "exposed_bed_mask",
 ]
 
 
@@ -75,6 +76,27 @@ def cushion_ha(
     return float(max(model, half_width))
 
 
+def exposed_bed_mask(
+    class_map: np.ndarray,
+    flood_stage: np.ndarray,
+    level_m: float,
+    margin_m: float,
+) -> np.ndarray:
+    """Hyacinth pixels on safe exposed bed: the pixels the correction removes.
+
+    Safe bed is a staged pixel that floods only above the level AND above the
+    level-plus-margin; hyacinth in the mirror or the margin band keeps
+    counting. The single home of the removal rule (pure; boolean array).
+    """
+    s = settings
+    classes = np.asanyarray(class_map)
+    flood = np.asanyarray(flood_stage, dtype=np.float64)
+    staged = flood != FLOOD_NODATA
+    safe_bed = staged & (flood > level_m) & (flood > margin_m)
+    hyacinth = (classes == s.CLASS_DENSE_HYACINTH) | (classes == s.CLASS_INTERFACE)
+    return hyacinth & safe_bed
+
+
 def compute_bed_correction(
     class_map: np.ndarray,
     flood_stage: np.ndarray,
@@ -101,12 +123,11 @@ def compute_bed_correction(
 
     staged = flood != FLOOD_NODATA
     bed = staged & (flood > level)
-    mirror = staged & ~bed
-    band = bed & (flood <= margin)
-    safe_bed = bed & ~band
     hyacinth = (classes == s.CLASS_DENSE_HYACINTH) | (classes == s.CLASS_INTERFACE)
-    kept = hyacinth & (mirror | band)
-    removed = hyacinth & safe_bed
+    removed = exposed_bed_mask(classes, flood, level, margin)
+    # WHY: kept = hyacinth in the mirror or the margin band, i.e. every staged
+    #   hyacinth pixel the removal rule does not take.
+    kept = hyacinth & staged & ~removed
     corrected_ha = float(kept.sum()) * PIXEL_HA
     return BedCorrection(
         applied=True,

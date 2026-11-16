@@ -12,6 +12,7 @@ from smol_frontier.hydro.bed import (
     compute_bed_correction,
     correct_bed,
     cushion_ha,
+    exposed_bed_mask,
 )
 from smol_frontier.hydro.curve import StageAreaCurve
 
@@ -188,3 +189,46 @@ def test_missing_file_not_applied(
     )
     assert out.applied is False
     assert ("flood map" if which == "flood" else "curve") in out.reason
+
+
+def test_bed_mask_marks_hyacinth_above_margin_only() -> None:
+    nodata = settings.CLASS_NODATA
+    soil = settings.CLASS_BARE_SOIL
+    class_map = np.array(
+        [
+            [DENSE, INTERFACE, DENSE, INTERFACE, WATER, soil, DENSE, nodata],
+        ],
+        dtype=np.uint8,
+    )
+    # mirror, band (level < f <= margin), band edge, safe bed, safe bed
+    # (water), safe bed (soil), outside the flood map, safe bed (nodata class)
+    flood = np.array(
+        [[2000.0, 2001.0, 2002.0, 2003.0, 2003.0, 2003.0, -9999.0, 2003.0]]
+    )
+    mask = exposed_bed_mask(class_map, flood, 2000.5, 2002.0)
+    assert mask.dtype == bool
+    assert mask.tolist() == [[False, False, False, True, False, False, False, False]]
+
+
+def test_bed_mask_uses_given_margin_not_level() -> None:
+    class_map = np.array([[DENSE, DENSE]], dtype=np.uint8)
+    flood = np.array([[2001.0, 2005.0]])
+    assert exposed_bed_mask(class_map, flood, 2000.0, 2000.0).tolist() == [[True, True]]
+    assert exposed_bed_mask(class_map, flood, 2000.0, 2003.0).tolist() == [
+        [False, True]
+    ]
+
+
+def test_bed_mask_matches_compute_bed_correction_removed() -> None:
+    rng = np.random.default_rng(7)
+    class_map = rng.integers(0, 5, size=(40, 40)).astype(np.uint8)
+    flood = rng.uniform(1998.0, 2006.0, size=(40, 40))
+    flood[rng.random((40, 40)) < 0.1] = -9999.0
+    stages = [1998.0, 2000.0, 2002.0, 2004.0, 2006.0]
+    areas = [0.1, 0.3, 0.6, 0.9, 1.2]
+    out = compute_bed_correction(
+        class_map, flood, 2001.2, stages, areas, areas, areas, 100.0
+    )
+    assert out.margin_m is not None
+    mask = exposed_bed_mask(class_map, flood, 2001.2, out.margin_m)
+    assert float(mask.sum()) * 0.01 == pytest.approx(out.removed_ha)

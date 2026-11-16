@@ -290,6 +290,12 @@ class Settings:
     CLASS_DENSE_HYACINTH: int = 2
     CLASS_INTERFACE: int = 3
     CLASS_BARE_SOIL: int = 4
+    # WHY: code for hyacinth removed by the exposed-bed correction, so the
+    #   published map agrees with the corrected figures. Exists ONLY in the
+    #   map `smolf publish` writes; the classifier never emits it and its own
+    #   class map and GeoTIFF stay 0-4.
+    # HOW: next free code after the classifier's fixed enumeration.
+    CLASS_BED_REMOVED: int = 5
 
     # WHY: display palette for the classified map — single source of truth
     #   for the GeoTIFF color table, the demo UI, and charts, so every
@@ -301,6 +307,12 @@ class Settings:
     COLOR_DENSE_HYACINTH: str = "#15c912"
     COLOR_INTERFACE: str = "#8ed89d"
     COLOR_BARE_SOIL: str = "#a0783c"
+    # WHY: published-map colour for class 5 (removed by exposed-bed
+    #   correction): hyacinth-coloured pixels that do NOT count must not read
+    #   as hyacinth, water or soil.
+    # HOW: picked by eye as a muted red-orange, far in hue from the greens,
+    #   the dark blue and the soil brown above.
+    COLOR_BED_REMOVED: str = "#d0573a"
 
     def traffic_light(self, pct: float) -> str:
         """Classify reservoir-area percent into green/yellow/red bands."""

@@ -3,8 +3,10 @@
 ``publish_run`` picks a run (``--run`` or the newest complete one), refuses
 runs that cannot back a reproducible contract (incomplete, dirty, no scene
 with figures), maps the run's scene records to the English contract fields,
-validates every document against its packaged JSON Schema, and swaps the
-output directory in atomically. The run manifest is provenance, never
+validates every document against its packaged JSON Schema, re-classifies
+the latest scene from the hash-verified scene cache into the published map
+(classes 0-5, class 5 = removed by the exposed-bed correction), and swaps
+the output directory in atomically. The run manifest is provenance, never
 contract: nothing is copied out of it verbatim.
 
 Contract files are canonical JSON (sorted keys, 2-space indent, UTF-8,
@@ -14,27 +16,44 @@ byte-identical files.
 
 import json
 import math
+import re
 import shutil
 import tempfile
+from dataclasses import dataclass
+from datetime import datetime
 from functools import cache
 from importlib import resources
 from pathlib import Path
 
+import numpy as np
+import rasterio
 from jsonschema import Draft202012Validator
+from rasterio.crs import CRS
 
-from smol_frontier import __version__, aoi, series
+from smol_frontier import __version__, aoi, ingest, series
+from smol_frontier.classify.geotiff import write_published_geotiff
+from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.hydro import levels
+from smol_frontier.hydro import flood_map, levels
+from smol_frontier.hydro.bed import exposed_bed_mask
+from smol_frontier.ingest import ingest_scene
+from smol_frontier.sources.stac import SceneMeta, get_scene
 
 __all__ = [
     "ALLOWED_FILES",
+    "ALLOWED_MAP_PATTERN",
     "OUTPUT_DIR",
     "SCHEMA_VERSION",
     "ContractInvalid",
     "PublishRefused",
+    "PublishedMap",
+    "build_map",
     "canonical_json",
     "current_level",
+    "is_allowed",
     "latest_document",
+    "latest_record",
+    "map_path",
     "publish_run",
     "select_run",
     "series_document",
@@ -53,6 +72,18 @@ SCHEMA_VERSION = "1.0.0"
 # WHY: allowlist — the only files `publish` may ever write, so nothing
 #   unexpected (e.g. source imagery) can reach the published directory.
 ALLOWED_FILES = frozenset({"latest.json", "series.json"})
+# WHY: the only other files allowed — the latest scene's map, one level deep
+#   under map/, named <date>_<item_id> (no path separators in the id).
+ALLOWED_MAP_PATTERN = re.compile(r"map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.tif")
+
+# WHY: the classified hectares publish re-derives must equal the run row to
+#   the hundredth (the published decimals) — (class code, run row field).
+_HECTARE_CHECKS = (
+    (settings.CLASS_DENSE_HYACINTH, "dense_ha"),
+    (settings.CLASS_INTERFACE, "interface_ha"),
+    (settings.CLASS_WATER, "water_ha"),
+    (settings.CLASS_BARE_SOIL, "soil_ha"),
+)
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
@@ -103,6 +134,25 @@ class PublishRefused(Exception):
 
 class ContractInvalid(Exception):
     """smolf's own output failed its schema (exit 1): a bug, never published."""
+
+
+@dataclass(frozen=True, eq=False)
+class PublishedMap:
+    """The published class map (0-5) on the scene's native grid."""
+
+    class_map: np.ndarray
+    transform: rasterio.Affine
+    crs: str
+
+
+def is_allowed(name: str) -> bool:
+    """True for a relative path `publish` may write (the C6 allowlist)."""
+    return name in ALLOWED_FILES or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
+
+
+def map_path(record: dict[str, object]) -> str:
+    """Relative path of a scene's map GeoTIFF: ``map/<date>_<item_id>.tif``."""
+    return f"map/{record['date']}_{record['item_id_used']}.tif"
 
 
 @cache
@@ -299,7 +349,118 @@ def latest_document(
         "red_min_pct": settings.RED_MIN_PCT,
     }
     document["current_level"] = current_level(levels_path)
+    document["map"] = {"geotiff": map_path(record)}
     return document
+
+
+def latest_record(records: list[dict[str, object]]) -> dict[str, object]:
+    """The last ``ok`` record (the scene ``latest.json`` and the map describe)."""
+    return [record for record in records if record["status"] == "ok"][-1]
+
+
+def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
+    """The scene exactly as the run cached it, verified by sha256.
+
+    A scene missing from the cache is re-ingested by its exact item id and
+    backend (no search, no fallback: another item could never match the
+    recorded hash). Either way the cache file must hash to the record's
+    ``cache_sha256`` before it is read.
+    """
+    item_id = str(record["item_id_used"])
+    backend = str(record["backend_used"])
+    cache_dir = ingest.DEFAULT_CACHE_DIR
+    path = ingest._cache_path(cache_dir, item_id)
+    if not path.is_file():
+        try:
+            ingest_scene(get_scene(backend, item_id), cache_dir=cache_dir)
+        except Exception as exc:  # WHY broad: any re-ingest failure refuses
+            msg = f"scene {item_id} is not cached and re-ingest failed: {exc}"[:300]
+            raise PublishRefused(msg) from exc
+    expected = record.get("cache_sha256")
+    actual = series.sha256_file(path)
+    if actual is None or actual != expected:
+        msg = (
+            f"cache sha256 of {item_id} ({actual}) differs from the scene "
+            f"record ({expected})"
+        )
+        raise PublishRefused(msg)
+    # WHY a stub: on a cache hit ingest_scene rebuilds the scene metadata
+    #   from the cache tags; only the id (cache key) is used from here.
+    stub = SceneMeta(
+        id=item_id,
+        datetime=datetime.fromisoformat(str(record["date"])),
+        source=backend,
+        processing_baseline=None,
+        boa_offset_applied=False,
+        assets={},
+    )
+    return ingest_scene(stub, cache_dir=cache_dir)
+
+
+def _flood_stage_for(
+    manifest: dict[str, object], ing: ingest.IngestedScene, shape: tuple[int, ...]
+) -> np.ndarray:
+    """The flood-stage map the run used, on the scene's grid (else refuse)."""
+    inputs = manifest.get("inputs")
+    expected = inputs.get("flood_stage_tif") if isinstance(inputs, dict) else None
+    path = flood_map.DEFAULT_FLOOD_PATH
+    actual = series.sha256_file(path)
+    if expected is None or actual != expected:
+        msg = (
+            f"flood-stage map sha256 ({actual}) differs from the run manifest "
+            f"inputs ({expected})"
+        )
+        raise PublishRefused(msg)
+    flood, transform, crs = flood_map.load_flood_map(path)
+    if (
+        flood.shape != shape
+        or transform != ing.transform
+        or CRS.from_string(crs) != CRS.from_string(ing.crs)
+    ):
+        msg = "flood-stage map grid differs from the scene grid"
+        raise PublishRefused(msg)
+    return flood
+
+
+def build_map(record: dict[str, object], manifest: dict[str, object]) -> PublishedMap:
+    """Re-classify the record's scene and overlay class 5 (C17-C19).
+
+    Refuses (PublishRefused) when the cache hash, the per-class hectares,
+    the flood-stage map hash or the removed hectares disagree with the run.
+    Class 5 uses the run row's level and margin, never a fresh lookup, and
+    only when the correction was applied.
+    """
+    row = record["row"]
+    assert isinstance(row, dict)
+    item_id = record["item_id_used"]
+    ing = _cached_scene(record)
+    result = classify_scene(ing)
+    mismatches = [
+        f"{field} {round(result.ha_per_class[code], 2)} != run "
+        f"{round(float(row[field]), 2)}"
+        for code, field in _HECTARE_CHECKS
+        if round(result.ha_per_class[code], 2) != round(float(row[field]), 2)
+    ]
+    if mismatches:
+        msg = f"re-classified {item_id} differs from the run: " + "; ".join(mismatches)
+        raise PublishRefused(msg)
+    # WHY no dtype cast: the guarded writer must see the classifier's own
+    #   dtype, so a non-uint8 map is rejected instead of silently truncated.
+    published = np.array(result.class_map, copy=True)
+    if row["bed_applied"]:
+        flood = _flood_stage_for(manifest, ing, published.shape)
+        removed = exposed_bed_mask(
+            published, flood, float(row["level_m"]), float(row["margin_m"])
+        )
+        removed_ha = round(float(removed.sum()) * flood_map.PIXEL_HA, 2)
+        if removed_ha != round(float(row["removed_ha"]), 2):
+            msg = (
+                f"class-5 area of {item_id} {removed_ha} ha differs from the run "
+                f"removed_ha {round(float(row['removed_ha']), 2)}"
+            )
+            raise PublishRefused(msg)
+        published[removed] = settings.CLASS_BED_REMOVED
+    return PublishedMap(published, ing.transform, ing.crs)
 
 
 def series_document(
@@ -338,10 +499,18 @@ def _swap_in(staging: Path, out_dir: Path) -> None:
     shutil.rmtree(previous)
 
 
-def _write_contract(out_dir: Path, documents: dict[str, str]) -> None:
-    """Write allowlisted files into a sibling staging dir, then swap it in."""
-    for name in documents:
-        if name not in ALLOWED_FILES:
+def _write_contract(
+    out_dir: Path,
+    documents: dict[str, str],
+    maps: dict[str, PublishedMap] | None = None,
+) -> None:
+    """Write allowlisted files into a sibling staging dir, then swap it in.
+
+    Maps go through the guarded raster writer only (uint8, classes 0-5).
+    """
+    maps = {} if maps is None else maps
+    for name in [*documents, *maps]:
+        if not is_allowed(name):
             msg = f"refusing to publish a file outside the allowlist: {name}"
             raise ValueError(msg)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -354,6 +523,10 @@ def _write_contract(out_dir: Path, documents: dict[str, str]) -> None:
     try:
         for name, text in documents.items():
             (staging / name).write_text(text, encoding="utf-8")
+        for name, layer in maps.items():
+            target = staging / name
+            target.parent.mkdir(mode=0o755, exist_ok=True)
+            write_published_geotiff(target, layer.class_map, layer.transform, layer.crs)
         _swap_in(staging, out_dir)
     finally:
         if staging.exists():
@@ -377,15 +550,19 @@ def publish_run(
     target = OUTPUT_DIR if out_dir is None else Path(out_dir)
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
-    latest = latest_document(records, _read_manifest(run_dir), levels_path)
-    series_doc = series_document(records, _read_manifest(run_dir))
+    manifest = _read_manifest(run_dir)
+    latest = latest_document(records, manifest, levels_path)
+    series_doc = series_document(records, manifest)
     validate("latest", latest)
     validate("series", series_doc)
+    record = latest_record(records)
+    layer = build_map(record, manifest)
     _write_contract(
         target,
         {
             "latest.json": canonical_json(latest),
             "series.json": canonical_json(series_doc),
         },
+        {map_path(record): layer},
     )
     return target

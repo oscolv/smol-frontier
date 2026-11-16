@@ -7,17 +7,147 @@ documents directly against the packaged schema.
 """
 
 import copy
+import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
+import rasterio
 from typer.testing import CliRunner
 
-from smol_frontier import __version__, aoi, publish, series
+from smol_frontier import __version__, aoi, ingest, publish, series
+from smol_frontier.classify.geotiff import hex_to_rgba
 from smol_frontier.cli import app
-from smol_frontier.hydro import levels
+from smol_frontier.config import settings
+from smol_frontier.hydro import flood_map, levels
+from smol_frontier.sources.stac import SceneMeta
 
 RUN_ID = "20240110T120000"
+
+# --- scene map fixture ------------------------------------------------------
+# A 20x20 scene on a 10 m UTM grid. The ingest/classify boundary is faked
+# (no network, no real reflectance), but the cache file, its sha256, the
+# flood-stage map, the class-5 mask, the hectare checks and the GeoTIFF
+# writer all run for real.
+GRID_TRANSFORM = rasterio.Affine(10.0, 0.0, 460_000.0, 0.0, -10.0, 2_250_000.0)
+GRID_CRS = "EPSG:32614"
+DENSE = settings.CLASS_DENSE_HYACINTH
+INTERFACE = settings.CLASS_INTERFACE
+WATER = settings.CLASS_WATER
+SOIL = settings.CLASS_BARE_SOIL
+REMOVED = settings.CLASS_BED_REMOVED
+
+
+def _class_map() -> np.ndarray:
+    """Rows 0-2 dense, 3-4 interface, 5-18 water, row 19 soil | nodata."""
+    classes = np.full((20, 20), WATER, dtype=np.uint8)
+    classes[0:3] = DENSE
+    classes[3:5] = INTERFACE
+    classes[19, :10] = SOIL
+    classes[19, 10:] = settings.CLASS_NODATA
+    return classes
+
+
+def _flood_stage() -> np.ndarray:
+    """Mirror everywhere except: 56 dense px on safe bed (2011 m), 9 hyacinth
+    px in the band between the row level 2010.12 and margin 2010.55
+    (2010.3 m), soil on safe bed, and no stage under the nodata strip."""
+    flood = np.full((20, 20), 2000.0, dtype=np.float32)
+    flood.reshape(-1)[:56] = 2011.0
+    flood[2, 16:] = 2010.3
+    flood[3, :5] = 2010.3
+    flood[19, :10] = 2011.0
+    flood[19, 10:] = flood_map.FLOOD_NODATA
+    return flood
+
+
+SAFE_BED_HYACINTH_PX = 56
+BAND_HYACINTH_PX = 9
+
+# WHY: the classifier hectares the fake classify reports — the default row's
+#   unrounded figures, so the hundredth check passes unless a test edits them.
+FAKE_HA = {
+    settings.CLASS_NODATA: 0.0,
+    WATER: 600.5,
+    DENSE: 400.123456,
+    INTERFACE: 230.987654,
+    SOIL: 3.25,
+}
+
+
+def _cache_bytes(item_id: str) -> bytes:
+    return f"cached scene {item_id}\n".encode()
+
+
+def _sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+@pytest.fixture(autouse=True)
+def scene_env(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> SimpleNamespace:
+    """Tmp scene cache + flood-stage map; fake ingest, STAC lookup, classify."""
+    base = tmp_path_factory.mktemp("scene_env")
+    cache_dir = base / "cache"
+    cache_dir.mkdir()
+    flood_path = base / "flood_stage.tif"
+    flood = _flood_stage()
+    with rasterio.open(
+        flood_path,
+        "w",
+        driver="GTiff",
+        height=20,
+        width=20,
+        count=1,
+        dtype="float32",
+        crs=GRID_CRS,
+        transform=GRID_TRANSFORM,
+        nodata=flood_map.FLOOD_NODATA,
+    ) as dst:
+        dst.write(flood, 1)
+    monkeypatch.setattr(ingest, "DEFAULT_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(flood_map, "DEFAULT_FLOOD_PATH", flood_path)
+    env = SimpleNamespace(
+        cache_dir=cache_dir,
+        flood_path=flood_path,
+        stac_calls=[],
+        ingest_calls=[],
+        download=_cache_bytes,
+        ha=dict(FAKE_HA),
+    )
+
+    def fake_get_scene(backend: str, item_id: str) -> SceneMeta:
+        env.stac_calls.append((backend, item_id))
+        return SceneMeta(
+            id=item_id,
+            datetime=datetime(2024, 1, 1),
+            source=backend,
+            processing_baseline="05.11",
+            boa_offset_applied=True,
+            assets={"B04": "https://example.invalid/B04.tif"},
+        )
+
+    def fake_ingest_scene(scene: SceneMeta, *args: object, **kwargs: object):
+        cache = Path(kwargs.get("cache_dir") or ingest.DEFAULT_CACHE_DIR)
+        path = cache / f"{scene.id}.tif"
+        env.ingest_calls.append((scene.id, path.exists()))
+        if not path.exists():  # a cache miss "downloads" the scene
+            path.write_bytes(env.download(scene.id))
+        return SimpleNamespace(
+            scene=scene, transform=GRID_TRANSFORM, crs=GRID_CRS, inside=None
+        )
+
+    def fake_classify(ing: object) -> SimpleNamespace:
+        return SimpleNamespace(class_map=_class_map(), ha_per_class=dict(env.ha))
+
+    monkeypatch.setattr(publish, "get_scene", fake_get_scene)
+    monkeypatch.setattr(publish, "ingest_scene", fake_ingest_scene)
+    monkeypatch.setattr(publish, "classify_scene", fake_classify)
+    return env
 
 
 def _row(day: str, item_id: str, **overrides: object) -> dict:
@@ -109,6 +239,13 @@ def _write_run(
 ) -> Path:
     """Write a fixture run directory (manifest + scene JSONs)."""
     records = _default_records() if records is None else records
+    for record in records:  # cache the scene; the record pins its sha256
+        if record["status"] == "ok":
+            data = _cache_bytes(record["item_id_used"])
+            (ingest.DEFAULT_CACHE_DIR / f"{record['item_id_used']}.tif").write_bytes(
+                data
+            )
+            record["cache_sha256"] = _sha(data)
     run_dir = root / run_id
     scenes_dir = run_dir / "scenes"
     scenes_dir.mkdir(parents=True)
@@ -128,6 +265,7 @@ def _write_run(
         "scenes": [{k: v for k, v in r.items() if k != "row"} for r in records],
         "series_csv": "series.csv",
         "series_sha256": "cd" * 32,
+        "inputs": {"flood_stage_tif": series.sha256_file(flood_map.DEFAULT_FLOOD_PATH)},
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return run_dir
@@ -183,7 +321,11 @@ def test_publish_latest_golden_values(
     out = tmp_path / "pub"
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 0, result.output
-    assert sorted(p.name for p in out.iterdir()) == ["latest.json", "series.json"]
+    assert sorted(p.name for p in out.iterdir()) == [
+        "latest.json",
+        "map",
+        "series.json",
+    ]
     assert _latest(out) == {
         "date": "2024-01-04",
         "item_id": "S2B_14QMH_20240104_0_L2A",
@@ -227,6 +369,7 @@ def test_publish_latest_golden_values(
             "level_m": 2010.13,
             "levels_sha256": series.sha256_file(levels_file),
         },
+        "map": {"geotiff": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.tif"},
     }
 
 
@@ -720,7 +863,7 @@ def test_publish_series_in_allowlist(series_root: Path, tmp_path: Path) -> None:
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 0
-    assert {p.name for p in out.iterdir()} == {"latest.json", "series.json"}
+    assert {p.name for p in out.iterdir()} == {"latest.json", "map", "series.json"}
 
 
 def test_publish_series_schema_accepts_and_tolerates_extras(
@@ -787,3 +930,222 @@ def test_publish_series_invalid_output_exit_1_writes_nothing(
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 1
     assert not out.exists()
+
+
+# --- map GeoTIFF ------------------------------------------------------------
+
+LATEST_ITEM = "S2B_14QMH_20240104_0_L2A"
+MAP_REL = f"map/2024-01-04_{LATEST_ITEM}.tif"
+
+
+def _map(out: Path) -> tuple[np.ndarray, dict]:
+    with rasterio.open(out / MAP_REL) as src:
+        return src.read(1), {
+            "dtype": src.dtypes[0],
+            "nodata": src.nodata,
+            "crs": src.crs,
+            "transform": src.transform,
+            "colormap": src.colormap(1),
+            "count": src.count,
+        }
+
+
+def test_publish_map_geotiff_written_with_class_5(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert [p.name for p in (out / "map").iterdir()] == [MAP_REL.split("/")[1]]
+    assert _latest(out)["map"] == {"geotiff": MAP_REL}
+    array, meta = _map(out)
+    assert meta["dtype"] == "uint8"
+    assert meta["count"] == 1
+    assert meta["nodata"] == 0
+    assert meta["crs"] == rasterio.CRS.from_string(GRID_CRS)
+    assert meta["transform"] == GRID_TRANSFORM
+    assert set(np.unique(array)) <= {0, 1, 2, 3, 4, 5}
+    assert int((array == REMOVED).sum()) == SAFE_BED_HYACINTH_PX
+    assert meta["colormap"][REMOVED] == hex_to_rgba(settings.COLOR_BED_REMOVED)
+    # every other pixel keeps the classifier's class
+    expected = _class_map()
+    expected[array == REMOVED] = REMOVED
+    assert np.array_equal(array, expected)
+    assert array[0, 0] == REMOVED and expected[0, 0] == REMOVED
+
+
+def test_publish_map_uses_row_level_and_margin(
+    series_root: Path, tmp_path: Path
+) -> None:
+    # A margin below the band pixels' stage makes them safe bed too.
+    records = [
+        _record(
+            "2024-01-04",
+            LATEST_ITEM,
+            "ok",
+            margin_m=2010.2,
+            removed_ha=(SAFE_BED_HYACINTH_PX + BAND_HYACINTH_PX) * 0.01,
+        )
+    ]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    array, _ = _map(out)
+    assert int((array == REMOVED).sum()) == SAFE_BED_HYACINTH_PX + BAND_HYACINTH_PX
+
+
+def test_publish_map_bed_not_applied_has_no_class_5(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    record = _record(
+        "2024-01-04",
+        LATEST_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-01-04",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    _write_run(series_root, records=[record])
+    # the flood-stage checks do not apply: a changed flood map is no refusal
+    scene_env.flood_path.write_bytes(b"not a raster")
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    array, _ = _map(out)
+    assert not (array == REMOVED).any()
+    assert np.array_equal(array, _class_map())
+
+
+def test_publish_map_cache_hash_mismatch_exit_2(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root)
+    cached = scene_env.cache_dir / f"{LATEST_ITEM}.tif"
+    data = bytearray(cached.read_bytes())
+    data[0] ^= 0x01  # tamper one byte
+    cached.write_bytes(bytes(data))
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "cache sha256" in lines[0] and LATEST_ITEM in lines[0]
+    assert not out.exists()
+
+
+def test_publish_map_missing_cache_reingests_by_exact_item_id(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    records = [
+        _record(
+            "2024-01-04",
+            LATEST_ITEM,
+            "ok",
+        )
+    ]
+    records[0]["backend_used"] = "planetary-computer"
+    _write_run(series_root, records=records)
+    (scene_env.cache_dir / f"{LATEST_ITEM}.tif").unlink()
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    assert scene_env.stac_calls == [("planetary-computer", LATEST_ITEM)]
+    assert (scene_env.cache_dir / f"{LATEST_ITEM}.tif").exists()
+    assert (out / MAP_REL).exists()
+
+
+def test_publish_map_reingested_cache_hash_mismatch_exit_2(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root)
+    (scene_env.cache_dir / f"{LATEST_ITEM}.tif").unlink()
+    scene_env.download = lambda item_id: b"a different product"
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    assert "cache sha256" in result.output
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("field", ["dense_ha", "interface_ha", "water_ha", "soil_ha"])
+def test_publish_map_hectare_mismatch_exit_2(
+    series_root: Path, tmp_path: Path, field: str
+) -> None:
+    value = _row("2024-01-04", LATEST_ITEM)[field] + 0.01
+    _write_run(
+        series_root,
+        records=[_record("2024-01-04", LATEST_ITEM, "ok", **{field: value})],
+    )
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert field in lines[0]
+    assert not out.exists()
+
+
+def test_publish_map_hectares_compared_to_the_hundredth(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    scene_env.ha[DENSE] = 400.1249  # still 400.12 at 2 dp
+    _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
+    assert _publish(tmp_path / "pub").exit_code == 0
+
+
+def test_publish_map_removed_ha_mismatch_exit_2(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(
+        series_root,
+        records=[_record("2024-01-04", LATEST_ITEM, "ok", removed_ha=0.57)],
+    )
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    assert "removed_ha" in result.output
+    assert not out.exists()
+
+
+def test_publish_map_flood_stage_hash_mismatch_exit_2(
+    series_root: Path, tmp_path: Path
+) -> None:
+    run_dir = _write_run(series_root)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest["inputs"]["flood_stage_tif"] = "0" * 64
+    (run_dir / "manifest.json").write_text(json.dumps(manifest))
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "flood-stage" in lines[0]
+    assert not out.exists()
+
+
+def test_publish_map_refusal_keeps_previous_output(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root, "20240101T000000", [_record("2024-01-01", "A", "ok")])
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", "20240101T000000").exit_code == 0
+    before = sorted(p.relative_to(out).as_posix() for p in out.rglob("*"))
+    _write_run(
+        series_root,
+        records=[_record("2024-01-04", LATEST_ITEM, "ok", removed_ha=0.57)],
+    )
+    assert _publish(out, "--run", RUN_ID).exit_code == 2
+    assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*")) == before
+    assert before == ["latest.json", "map", "map/2024-01-01_A.tif", "series.json"]
+
+
+def test_publish_map_allowlist_rejects_other_names(tmp_path: Path) -> None:
+    for name in ("map/2024-01-01_A.png.exe", "map/../x.tif", "B04.tif", "map/x.tif"):
+        assert not publish.is_allowed(name), name
+    assert publish.is_allowed("map/2024-01-01_S2B_14QMH_20240101_0_L2A.tif")
+    assert publish.is_allowed("latest.json")

@@ -450,10 +450,12 @@ def publish(
         typer.Option("--out", help="Output directory (default: outputs/publish)."),
     ] = None,
 ) -> None:
-    """Publish the versioned data contract (latest.json) from one series run.
+    """Publish the versioned data contract (JSON + latest map) from one run.
 
-    Refuses (exit 2) incomplete or dirty runs and runs with no scene that
-    has figures; an output failing its own schema is a bug (exit 1). The
+    Refuses (exit 2) incomplete or dirty runs, runs with no scene that has
+    figures, and a latest scene whose re-classified map disagrees with the
+    run (cache, flood-stage map, hectares); an output failing its own schema
+    or the raster guard is a bug (exit 1). The
     output directory is replaced atomically; on any failure it is untouched.
     """
     try:

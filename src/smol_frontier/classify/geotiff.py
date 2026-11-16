@@ -1,7 +1,11 @@
 """Write the classified map as a styled GeoTIFF.
 
 The output opens colored in QGIS: a palette color table on band 1, nodata 0
-(transparent), a band description, and per-class legend tags.
+(transparent), a band description, and per-class legend tags. Two writers:
+``write_classified_geotiff`` for the classifier's map (classes 0-4), and the
+guarded ``write_published_geotiff`` for the published map (classes 0-5),
+which refuses anything that is not a uint8 class map — so reflectance or
+source imagery can never be written through it.
 """
 
 from pathlib import Path
@@ -15,8 +19,11 @@ __all__ = [
     "BAND_DESCRIPTION",
     "CLASS_COLORMAP",
     "CLASS_NAMES",
+    "PUBLISHED_CLASS_NAMES",
+    "PUBLISHED_COLORMAP",
     "hex_to_rgba",
     "write_classified_geotiff",
+    "write_published_geotiff",
 ]
 
 # WHY: one-line band description shown by GIS clients in layer properties.
@@ -58,6 +65,18 @@ CLASS_COLORMAP = {
 }
 
 
+# WHY: the published map adds class 5 (removed by exposed-bed correction);
+#   the classifier's own legend and colour table above stay 0-4.
+PUBLISHED_CLASS_NAMES = {
+    **CLASS_NAMES,
+    settings.CLASS_BED_REMOVED: "removed by exposed-bed correction",
+}
+PUBLISHED_COLORMAP = {
+    **CLASS_COLORMAP,
+    settings.CLASS_BED_REMOVED: hex_to_rgba(settings.COLOR_BED_REMOVED),
+}
+
+
 def write_classified_geotiff(
     path: str | Path,
     class_map: np.ndarray,
@@ -65,6 +84,43 @@ def write_classified_geotiff(
     crs: str,
 ) -> Path:
     """Write the class map as a styled uint8 GeoTIFF; return the path."""
+    return _write_styled(path, class_map, transform, crs, CLASS_COLORMAP, CLASS_NAMES)
+
+
+def write_published_geotiff(
+    path: str | Path,
+    class_map: np.ndarray,
+    transform: rasterio.Affine,
+    crs: str,
+) -> Path:
+    """Write the published class map (0-5) as a styled GeoTIFF; return the path.
+
+    Source-imagery guard: raises ValueError, before anything is written, for
+    an array that is not 2-D uint8 or holds a value outside the published
+    classes.
+    """
+    array = np.asarray(class_map)
+    if array.dtype != np.uint8 or array.ndim != 2:
+        msg = f"published map must be a 2-D uint8 class map, got {array.dtype} {array.shape}"
+        raise ValueError(msg)
+    unknown = sorted(set(np.unique(array).tolist()) - set(PUBLISHED_COLORMAP))
+    if unknown:
+        msg = f"published map holds values outside classes 0-5: {unknown}"
+        raise ValueError(msg)
+    return _write_styled(
+        path, array, transform, crs, PUBLISHED_COLORMAP, PUBLISHED_CLASS_NAMES
+    )
+
+
+def _write_styled(
+    path: str | Path,
+    class_map: np.ndarray,
+    transform: rasterio.Affine,
+    crs: str,
+    colormap: dict[int, tuple[int, int, int, int]],
+    names: dict[int, str],
+) -> Path:
+    """Write a uint8 class map with a colour table, nodata 0 and legend tags."""
     path = Path(path)
     height, width = np.shape(class_map)
     with rasterio.open(
@@ -82,9 +138,7 @@ def write_classified_geotiff(
         compress="deflate",
     ) as dst:
         dst.write(np.asanyarray(class_map, dtype=np.uint8), 1)
-        dst.write_colormap(1, CLASS_COLORMAP)
+        dst.write_colormap(1, colormap)
         dst.set_band_description(1, BAND_DESCRIPTION)
-        dst.update_tags(
-            1, **{f"class_{code}": name for code, name in CLASS_NAMES.items()}
-        )
+        dst.update_tags(1, **{f"class_{code}": name for code, name in names.items()})
     return path

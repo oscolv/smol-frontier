@@ -1391,7 +1391,7 @@ def _valid_index() -> dict:
         "run_id": RUN_ID,
         "schema_version": "1.0.0",
         "series_sha256": "cd" * 32,
-        "smolf_version": "0.1.0",
+        "smolf_version": "0.2.0",
     }
 
 

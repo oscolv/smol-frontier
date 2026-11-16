@@ -9,6 +9,7 @@ documents directly against the packaged schema.
 import copy
 import hashlib
 import json
+import warnings
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,10 +17,15 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import rasterio
+from rasterio.warp import transform_bounds
 from typer.testing import CliRunner
 
 from smol_frontier import __version__, aoi, ingest, publish, series
-from smol_frontier.classify.geotiff import hex_to_rgba
+from smol_frontier.classify.geotiff import (
+    PUBLISHED_COLORMAP,
+    hex_to_rgba,
+    render_display_image,
+)
 from smol_frontier.cli import app
 from smol_frontier.config import settings
 from smol_frontier.hydro import curve, flood_map, levels
@@ -395,7 +401,11 @@ def test_publish_latest_golden_values(
             "level_m": 2010.13,
             "levels_sha256": series.sha256_file(levels_file),
         },
-        "map": {"geotiff": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.tif"},
+        "map": {
+            "geotiff": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.tif",
+            "png": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.png",
+            "bounds": _latest(out)["map"]["bounds"],
+        },
     }
 
 
@@ -962,6 +972,7 @@ def test_publish_series_invalid_output_exit_1_writes_nothing(
 
 LATEST_ITEM = "S2B_14QMH_20240104_0_L2A"
 MAP_REL = f"map/2024-01-04_{LATEST_ITEM}.tif"
+PNG_REL = f"map/2024-01-04_{LATEST_ITEM}.png"
 
 
 def _map(out: Path) -> tuple[np.ndarray, dict]:
@@ -983,8 +994,10 @@ def test_publish_map_geotiff_written_with_class_5(
     out = tmp_path / "pub"
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 0, result.output
-    assert [p.name for p in (out / "map").iterdir()] == [MAP_REL.split("/")[1]]
-    assert _latest(out)["map"] == {"geotiff": MAP_REL}
+    assert sorted(p.name for p in (out / "map").iterdir()) == sorted(
+        [MAP_REL.split("/")[1], PNG_REL.split("/")[1]]
+    )
+    assert _latest(out)["map"]["geotiff"] == MAP_REL
     array, meta = _map(out)
     assert meta["dtype"] == "uint8"
     assert meta["count"] == 1
@@ -1201,11 +1214,157 @@ def test_publish_map_refusal_keeps_previous_output(
     )
     assert _publish(out, "--run", RUN_ID).exit_code == 2
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*")) == before
-    assert before == ["latest.json", "map", "map/2024-01-01_A.tif", "series.json"]
+    assert before == [
+        "latest.json",
+        "map",
+        "map/2024-01-01_A.png",
+        "map/2024-01-01_A.tif",
+        "series.json",
+    ]
 
 
 def test_publish_map_allowlist_rejects_other_names(tmp_path: Path) -> None:
     for name in ("map/2024-01-01_A.png.exe", "map/../x.tif", "B04.tif", "map/x.tif"):
         assert not publish.is_allowed(name), name
     assert publish.is_allowed("map/2024-01-01_S2B_14QMH_20240101_0_L2A.tif")
+    assert publish.is_allowed("map/2024-01-01_S2B_14QMH_20240101_0_L2A.png")
+    assert not publish.is_allowed("map/2024-01-01_A.png.aux.xml")
+    assert not publish.is_allowed("map/2024-01-01_A.pgw")
     assert publish.is_allowed("latest.json")
+
+
+# --- display PNG ------------------------------------------------------------
+
+
+def _png(out: Path) -> tuple[np.ndarray, dict]:
+    # the PNG is deliberately not georeferenced (bounds live in latest.json)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        src = rasterio.open(out / PNG_REL)
+    with src:
+        return src.read(), {
+            "driver": src.driver,
+            "count": src.count,
+            "dtype": src.dtypes[0],
+            "shape": src.shape,
+        }
+
+
+def test_publish_png_rgba_palette_and_transparent_nodata(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    rgba, meta = _png(out)
+    assert meta["driver"] == "PNG" and meta["count"] == 4 and meta["dtype"] == "uint8"
+    pixels = {
+        tuple(rgba[:, r, c]) for r in range(rgba.shape[1]) for c in range(rgba.shape[2])
+    }
+    for code in (WATER, DENSE, INTERFACE, SOIL, REMOVED):
+        assert PUBLISHED_COLORMAP[code] in pixels, code
+    # every pixel is a palette colour or fully transparent
+    transparent = {p for p in pixels if p[3] == 0}
+    assert all(p[3] == 255 for p in pixels - transparent)
+    assert pixels - transparent <= {PUBLISHED_COLORMAP[c] for c in range(1, 6)}
+    assert transparent  # nodata strip and warped corners
+
+
+def test_publish_png_warped_to_web_mercator_with_bounds(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    bounds = _latest(out)["map"]["bounds"]
+    (south, west), (north, east) = bounds
+    assert south < north and west < east
+    assert -90 <= south and north <= 90 and -180 <= west and east <= 180
+    assert all(round(v, 6) == v for pair in bounds for v in pair)
+    left, top = GRID_TRANSFORM @ (0, 0)
+    right, bottom = GRID_TRANSFORM @ (20, 20)
+    w, s, e, n = transform_bounds(GRID_CRS, "EPSG:4326", left, bottom, right, top)
+    # the warped extent encloses the native footprint, within about a pixel
+    assert west <= w + 1e-4 and east >= e - 1e-4
+    assert south <= s + 1e-4 and north >= n - 1e-4
+    assert abs(west - w) < 3e-4 and abs(north - n) < 3e-4
+    _, meta = _png(out)
+    assert meta["shape"][0] >= 19 and meta["shape"][1] >= 19
+
+
+def test_publish_png_nearest_neighbour_no_new_colours(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    rgba, _ = _png(out)
+    counts = {
+        code: int(
+            (rgba[:3] == np.array(PUBLISHED_COLORMAP[code][:3])[:, None, None])
+            .all(axis=0)
+            .sum()
+        )
+        for code in (DENSE, REMOVED)
+    }
+    assert counts[REMOVED] >= SAFE_BED_HYACINTH_PX
+    assert counts[DENSE] > 0
+
+
+def test_publish_png_has_no_sidecar_files(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    files = sorted(p.suffix for p in (out / "map").iterdir())
+    assert files == [".png", ".tif"]
+    assert all(
+        publish.is_allowed(p.relative_to(out).as_posix())
+        for p in (out / "map").iterdir()
+    )
+
+
+def test_publish_png_only_latest_scene_maps_remain(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root, "20240101T000000", [_record("2024-01-01", "A", "ok")])
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", "20240101T000000").exit_code == 0
+    assert sorted(p.name for p in (out / "map").iterdir()) == [
+        "2024-01-01_A.png",
+        "2024-01-01_A.tif",
+    ]
+    _write_run(series_root)
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert sorted(p.name for p in (out / "map").iterdir()) == [
+        f"2024-01-04_{LATEST_ITEM}.png",
+        f"2024-01-04_{LATEST_ITEM}.tif",
+    ]
+
+
+def test_publish_png_guard_rejects_float_and_class_6() -> None:
+    with pytest.raises(ValueError, match="uint8"):
+        render_display_image(
+            np.zeros((4, 4), dtype=np.float32), GRID_TRANSFORM, GRID_CRS
+        )
+    bad = np.full((4, 4), 6, dtype=np.uint8)
+    with pytest.raises(ValueError, match="outside classes"):
+        render_display_image(bad, GRID_TRANSFORM, GRID_CRS)
+
+
+def test_publish_png_schema_requires_png_and_bounds(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    good = _latest(out)
+    publish.validate("latest", good)
+    for key in ("geotiff", "png", "bounds"):
+        broken = {**good, "map": {k: v for k, v in good["map"].items() if k != key}}
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate("latest", broken)
+    for bounds in ([[91, 0], [92, 1]], [[0, 0], [1]], [[0, 181], [1, 182]]):
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate(
+                "latest", {**good, "map": {**good["map"], "bounds": bounds}}
+            )

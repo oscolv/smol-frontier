@@ -31,7 +31,12 @@ from jsonschema import Draft202012Validator
 from rasterio.crs import CRS
 
 from smol_frontier import __version__, aoi, ingest, series
-from smol_frontier.classify.geotiff import write_published_geotiff
+from smol_frontier.classify.geotiff import (
+    DisplayImage,
+    render_display_image,
+    write_display_png,
+    write_published_geotiff,
+)
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map, levels
@@ -74,7 +79,9 @@ SCHEMA_VERSION = "1.0.0"
 ALLOWED_FILES = frozenset({"latest.json", "series.json"})
 # WHY: the only other files allowed — the latest scene's map, one level deep
 #   under map/, named <date>_<item_id> (no path separators in the id).
-ALLOWED_MAP_PATTERN = re.compile(r"map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.tif")
+ALLOWED_MAP_PATTERN = re.compile(
+    r"map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.(?:tif|png)"
+)
 
 # WHY: the classified hectares publish re-derives must equal the run row to
 #   the hundredth (the published decimals) — (class code, run row field).
@@ -143,6 +150,7 @@ class PublishedMap:
     class_map: np.ndarray
     transform: rasterio.Affine
     crs: str
+    display: DisplayImage
 
 
 def is_allowed(name: str) -> bool:
@@ -153,6 +161,11 @@ def is_allowed(name: str) -> bool:
 def map_path(record: dict[str, object]) -> str:
     """Relative path of a scene's map GeoTIFF: ``map/<date>_<item_id>.tif``."""
     return f"map/{record['date']}_{record['item_id_used']}.tif"
+
+
+def png_path(record: dict[str, object]) -> str:
+    """Relative path of a scene's display PNG: ``map/<date>_<item_id>.png``."""
+    return f"map/{record['date']}_{record['item_id_used']}.png"
 
 
 @cache
@@ -349,7 +362,8 @@ def latest_document(
         "red_min_pct": settings.RED_MIN_PCT,
     }
     document["current_level"] = current_level(levels_path)
-    document["map"] = {"geotiff": map_path(record)}
+    # bounds come from the warped PNG, so publish_run fills them in
+    document["map"] = {"geotiff": map_path(record), "png": png_path(record)}
     return document
 
 
@@ -493,7 +507,9 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
             )
             raise PublishRefused(msg)
         published[removed] = settings.CLASS_BED_REMOVED
-    return PublishedMap(published, ing.transform, ing.crs)
+    # the guard runs inside render_display_image, before any PNG exists
+    display = render_display_image(published, ing.transform, ing.crs)
+    return PublishedMap(published, ing.transform, ing.crs, display)
 
 
 def series_document(
@@ -539,10 +555,12 @@ def _write_contract(
 ) -> None:
     """Write allowlisted files into a sibling staging dir, then swap it in.
 
-    Maps go through the guarded raster writer only (uint8, classes 0-5).
+    Maps (keyed by their GeoTIFF path; the PNG sits beside it) go through the
+    guarded raster writers only (uint8, classes 0-5).
     """
     maps = {} if maps is None else maps
-    for name in [*documents, *maps]:
+    pngs = {Path(name).with_suffix(".png").as_posix(): name for name in maps}
+    for name in [*documents, *maps, *pngs]:
         if not is_allowed(name):
             msg = f"refusing to publish a file outside the allowlist: {name}"
             raise ValueError(msg)
@@ -560,6 +578,7 @@ def _write_contract(
             target = staging / name
             target.parent.mkdir(mode=0o755, exist_ok=True)
             write_published_geotiff(target, layer.class_map, layer.transform, layer.crs)
+            write_display_png(staging / Path(name).with_suffix(".png"), layer.display)
         _swap_in(staging, out_dir)
     finally:
         if staging.exists():
@@ -586,10 +605,13 @@ def publish_run(
     manifest = _read_manifest(run_dir)
     latest = latest_document(records, manifest, levels_path)
     series_doc = series_document(records, manifest)
-    validate("latest", latest)
-    validate("series", series_doc)
     record = latest_record(records)
     layer = build_map(record, manifest)
+    latest_map = latest["map"]
+    assert isinstance(latest_map, dict)
+    latest_map["bounds"] = layer.display.bounds
+    validate("latest", latest)
+    validate("series", series_doc)
     _write_contract(
         target,
         {

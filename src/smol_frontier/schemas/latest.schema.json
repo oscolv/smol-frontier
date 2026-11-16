@@ -114,11 +114,31 @@
     "map": {
       "description": "Relative paths of the latest scene's map files inside the published directory. geotiff: uint8 classes 0-5 (0 nodata, 1 water, 2 dense hyacinth, 3 interface, 4 bare soil, 5 removed by exposed-bed correction), native scene CRS and 10 m grid.",
       "type": "object",
-      "required": ["geotiff"],
+      "required": ["geotiff", "png", "bounds"],
       "properties": {
         "geotiff": {
           "type": "string",
           "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.tif$"
+        },
+        "png": {
+          "description": "RGBA PNG warped to EPSG:3857, same classes coloured with the configured palette; nodata fully transparent.",
+          "type": "string",
+          "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.png$"
+        },
+        "bounds": {
+          "description": "EPSG:4326 extent of the PNG as [[south, west], [north, east]].",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {"type": "number", "minimum": -90, "maximum": 90},
+              {"type": "number", "minimum": -180, "maximum": 180}
+            ]
+          }
         }
       }
     }

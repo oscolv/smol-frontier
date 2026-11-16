@@ -356,6 +356,7 @@ def test_publish_latest_golden_values(
     assert sorted(p.name for p in out.iterdir()) == [
         "latest.json",
         "map",
+        "publish.json",
         "series.json",
     ]
     assert _latest(out) == {
@@ -899,7 +900,12 @@ def test_publish_series_in_allowlist(series_root: Path, tmp_path: Path) -> None:
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 0
-    assert {p.name for p in out.iterdir()} == {"latest.json", "map", "series.json"}
+    assert {p.name for p in out.iterdir()} == {
+        "latest.json",
+        "map",
+        "publish.json",
+        "series.json",
+    }
 
 
 def test_publish_series_schema_accepts_and_tolerates_extras(
@@ -1219,6 +1225,7 @@ def test_publish_map_refusal_keeps_previous_output(
         "map",
         "map/2024-01-01_A.png",
         "map/2024-01-01_A.tif",
+        "publish.json",
         "series.json",
     ]
 
@@ -1368,3 +1375,142 @@ def test_publish_png_schema_requires_png_and_bounds(
             publish.validate(
                 "latest", {**good, "map": {**good["map"], "bounds": bounds}}
             )
+
+
+# --- publish.json integrity index ---------------------------------------
+
+
+def _index(out: Path) -> dict:
+    return json.loads((out / "publish.json").read_text(encoding="utf-8"))
+
+
+def _valid_index() -> dict:
+    return {
+        "files": [{"path": "latest.json", "sha256": "ab" * 32}],
+        "generated_utc": "2026-11-16T10:00:00Z",
+        "run_id": RUN_ID,
+        "schema_version": "1.0.0",
+        "series_sha256": "cd" * 32,
+        "smolf_version": "0.1.0",
+    }
+
+
+def test_publish_index_lists_every_other_file_with_sha256(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    index = _index(out)
+    on_disk = sorted(
+        p.relative_to(out).as_posix()
+        for p in out.rglob("*")
+        if p.is_file() and p.name != "publish.json"
+    )
+    assert [f["path"] for f in index["files"]] == on_disk
+    assert len(on_disk) == 4
+    for entry in index["files"]:
+        data = (out / entry["path"]).read_bytes()
+        assert entry["sha256"] == hashlib.sha256(data).hexdigest()
+        assert publish.is_allowed(entry["path"])
+    assert "publish.json" not in [f["path"] for f in index["files"]]
+
+
+def test_publish_index_header_fields(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    index = _index(out)
+    series_doc = json.loads((out / "series.json").read_text(encoding="utf-8"))
+    assert index["run_id"] == RUN_ID
+    assert index["series_sha256"] == series_doc["series_sha256"]
+    assert index["schema_version"] == publish.SCHEMA_VERSION
+    assert index["smolf_version"] == __version__
+    stamp = datetime.strptime(index["generated_utc"], "%Y-%m-%dT%H:%M:%SZ")
+    assert stamp.year >= 2026
+    assert (out / "publish.json").read_text(encoding="utf-8") == publish.canonical_json(
+        index
+    )
+
+
+def test_publish_index_only_nondeterministic_file(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    first = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    monkeypatch.setattr(series, "utc_now", lambda: "2030-01-01T00:00:00Z")
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    second = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    changed = {k for k in first if first[k] != second[k]}
+    assert changed == {"publish.json"}
+    assert _index(out)["generated_utc"] == "2030-01-01T00:00:00Z"
+
+
+def test_publish_index_schema_accepts_valid() -> None:
+    publish.validate("publish", _valid_index())
+    doc = _valid_index()
+    doc["extra"] = 1
+    publish.validate("publish", doc)
+
+
+def _drop_sha(doc: dict) -> None:
+    del doc["files"][0]["sha256"]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        _drop_sha,
+        lambda d: d["files"][0].update(sha256="ab" * 31),
+        lambda d: d["files"][0].update(sha256="AB" * 32),
+        lambda d: d["files"][0].update(sha256="zz" * 32),
+        lambda d: d["files"][0].update(path="publish.json"),
+        lambda d: d["files"][0].update(path="../latest.json"),
+        lambda d: d["files"][0].update(path="map/B04.tif"),
+        lambda d: d.update(files=[]),
+        lambda d: d.update(generated_utc="2026-11-16 10:00:00"),
+        lambda d: d.update(generated_utc="2026-11-16T10:00:00+00:00"),
+        lambda d: d.update(schema_version="2.0.0"),
+        lambda d: d.update(series_sha256="short"),
+        lambda d: d.pop("run_id"),
+        lambda d: d.pop("smolf_version"),
+    ],
+)
+def test_publish_index_schema_rejects_bad_docs(mutate) -> None:
+    doc = _valid_index()
+    mutate(doc)
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("publish", doc)
+
+
+def test_publish_index_invalid_exit_1_nothing_swapped(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    monkeypatch.setattr(series, "utc_now", lambda: "not-a-date")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 1
+    assert not out.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["series"]
+
+
+def test_publish_index_replaces_previous_output(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    first = _index(out)
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert _index(out)["files"] == first["files"]

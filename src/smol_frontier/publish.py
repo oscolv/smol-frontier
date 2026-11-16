@@ -11,7 +11,7 @@ contract: nothing is copied out of it verbatim.
 
 Contract files are canonical JSON (sorted keys, 2-space indent, UTF-8,
 trailing newline) with no wall-clock timestamp, so the same run yields
-byte-identical files.
+byte-identical files; only the integrity index `publish.json` carries a timestamp.
 """
 
 import json
@@ -47,6 +47,7 @@ from smol_frontier.sources.stac import SceneMeta, get_scene
 __all__ = [
     "ALLOWED_FILES",
     "ALLOWED_MAP_PATTERN",
+    "INDEX_FILE",
     "OUTPUT_DIR",
     "SCHEMA_VERSION",
     "ContractInvalid",
@@ -59,6 +60,7 @@ __all__ = [
     "latest_document",
     "latest_record",
     "map_path",
+    "publish_index",
     "publish_run",
     "select_run",
     "series_document",
@@ -76,7 +78,10 @@ SCHEMA_VERSION = "1.0.0"
 
 # WHY: allowlist — the only files `publish` may ever write, so nothing
 #   unexpected (e.g. source imagery) can reach the published directory.
-ALLOWED_FILES = frozenset({"latest.json", "series.json"})
+ALLOWED_FILES = frozenset({"latest.json", "series.json", "publish.json"})
+# WHY: the integrity index is written last, over the other staged files; it
+#   is the only file that never lists itself.
+INDEX_FILE = "publish.json"
 # WHY: the only other files allowed — the latest scene's map, one level deep
 #   under map/, named <date>_<item_id> (no path separators in the id).
 ALLOWED_MAP_PATTERN = re.compile(
@@ -548,15 +553,39 @@ def _swap_in(staging: Path, out_dir: Path) -> None:
     shutil.rmtree(previous)
 
 
+def publish_index(
+    staging: Path, run_id: str, series_sha256: str, generated_utc: str
+) -> dict[str, object]:
+    """Integrity index over every file staged in ``staging`` (not itself)."""
+    paths = sorted(
+        path.relative_to(staging).as_posix()
+        for path in staging.rglob("*")
+        if path.is_file()
+    )
+    return {
+        "files": [
+            {"path": rel, "sha256": series.sha256_file(staging / rel)} for rel in paths
+        ],
+        "generated_utc": generated_utc,
+        "run_id": run_id,
+        "schema_version": SCHEMA_VERSION,
+        "series_sha256": series_sha256,
+        "smolf_version": __version__,
+    }
+
+
 def _write_contract(
     out_dir: Path,
     documents: dict[str, str],
+    run_id: str,
+    series_sha256: str,
     maps: dict[str, PublishedMap] | None = None,
 ) -> None:
     """Write allowlisted files into a sibling staging dir, then swap it in.
 
     Maps (keyed by their GeoTIFF path; the PNG sits beside it) go through the
-    guarded raster writers only (uint8, classes 0-5).
+    guarded raster writers only (uint8, classes 0-5). ``publish.json`` is
+    built last from the bytes actually staged and validated before the swap.
     """
     maps = {} if maps is None else maps
     pngs = {Path(name).with_suffix(".png").as_posix(): name for name in maps}
@@ -579,6 +608,9 @@ def _write_contract(
             target.parent.mkdir(mode=0o755, exist_ok=True)
             write_published_geotiff(target, layer.class_map, layer.transform, layer.crs)
             write_display_png(staging / Path(name).with_suffix(".png"), layer.display)
+        index = publish_index(staging, run_id, series_sha256, series.utc_now())
+        validate("publish", index)
+        (staging / INDEX_FILE).write_text(canonical_json(index), encoding="utf-8")
         _swap_in(staging, out_dir)
     finally:
         if staging.exists():
@@ -618,6 +650,8 @@ def publish_run(
             "latest.json": canonical_json(latest),
             "series.json": canonical_json(series_doc),
         },
+        str(manifest["run_id"]),
+        str(manifest["series_sha256"]),
         {map_path(record): layer},
     )
     return target

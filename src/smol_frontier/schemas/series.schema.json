@@ -266,13 +266,33 @@
         }
       },
       "else": {
+        "description": "A scene with figures: the same definitions as the per-scene fields of latest.json (kept identical by a test).",
         "properties": {
+          "date": {
+            "description": "UTC acquisition date.",
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quality_light": {
+            "description": "Never POOR here: a POOR scene has no figures.",
+            "enum": [
+              "GOOD",
+              "DOUBTFUL"
+            ]
+          },
           "regime": {
             "enum": [
               "CLEAN",
               "EXPOSED_BED",
               "TURBIDITY"
             ]
+          },
+          "valid_frac": {
+            "$ref": "#/$defs/fraction"
           },
           "cloud_frac": {
             "$ref": "#/$defs/fraction"
@@ -294,6 +314,12 @@
           },
           "bed_reason": {
             "type": "string"
+          },
+          "level_m": {
+            "type": [
+              "number",
+              "null"
+            ]
           },
           "removed_ha": {
             "$ref": "#/$defs/area_or_null"
@@ -351,6 +377,25 @@
                 },
                 "cover_band": {
                   "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "dense_corrected_ha": {
+                  "type": "number"
+                },
+                "interface_corrected_ha": {
+                  "type": "number"
+                },
+                "hyacinth_corrected_ha": {
+                  "type": "number"
+                },
+                "pct_reservoir_corrected": {
+                  "type": "number"
+                },
+                "cover_band": {
+                  "type": "string"
                 }
               }
             }

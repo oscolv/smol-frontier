@@ -1648,3 +1648,68 @@ def test_publish_writes_exactly_the_code_schema_version(
     for name in ("latest.json", "series.json", "publish.json"):
         doc = json.loads((out / name).read_text(encoding="utf-8"))
         assert doc["schema_version"] == publish.SCHEMA_VERSION, name
+
+
+# --- latest/series per-scene schema parity --------------------------------------
+
+
+def _resolve(node: object, defs: dict) -> object:
+    """``node`` with every local ``#/$defs/<name>`` reference inlined."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/$defs/"):
+            return _resolve(defs[ref.removeprefix("#/$defs/")], defs)
+        return {key: _resolve(value, defs) for key, value in node.items()}
+    if isinstance(node, list):
+        return [_resolve(value, defs) for value in node]
+    return node
+
+
+def test_publish_series_non_poor_scene_matches_latest_definitions() -> None:
+    latest = _schema("latest")
+    series_schema = _schema("series")
+    scene = series_schema["$defs"]["scene"]
+    assert scene["if"] == {"properties": {"quality_light": {"const": "POOR"}}}
+    non_poor = _resolve(scene["else"], series_schema["$defs"])
+    top = _resolve(latest, latest["$defs"])
+    fields = scene["required"]
+    assert set(fields) <= set(latest["required"])
+    assert set(non_poor["properties"]) == set(fields)
+    for field in fields:
+        assert non_poor["properties"][field] == top["properties"][field], field
+    # the bed_applied conditional is the same in both
+    (bed_rule,) = non_poor["allOf"]
+    for key in ("if", "then", "else"):
+        assert bed_rule[key] == top[key], key
+
+
+def test_publish_latest_schema_rejects_poor_light(
+    series_root: Path, tmp_path: Path
+) -> None:
+    doc = _valid_latest(series_root, tmp_path)
+    doc["quality_light"] = "POOR"
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("latest", doc)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("hyacinth_corrected_ha", None),
+        ("pct_reservoir_corrected", None),
+        ("cover_band", None),
+    ],
+)
+def test_publish_series_schema_bed_applied_requires_corrected(
+    series_root: Path, tmp_path: Path, key: str, value: object
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    index = next(
+        i
+        for i, scene in enumerate(doc["scenes"])
+        if scene["quality_light"] != "POOR" and scene["bed_applied"]
+    )
+    publish.validate("series", doc)
+    _mutate_scene(doc, index, key, value)
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)

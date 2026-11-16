@@ -91,7 +91,7 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 | --- | --- | --- | --- | --- |
 | `date` | string `YYYY-MM-DD` | — | never | UTC acquisition date. |
 | `item_id` | string | — | never | Exact STAC item id of the scene used. |
-| `quality_light` | enum `GOOD`, `DOUBTFUL`, `POOR` | — | never | Scene quality light. `latest.json` is always GOOD or DOUBTFUL. |
+| `quality_light` | enum `GOOD`, `DOUBTFUL`, `POOR` | — | never | Scene quality light. `latest.json` is always GOOD or DOUBTFUL (its schema rejects POOR). |
 | `regime` | enum `CLEAN`, `EXPOSED_BED`, `TURBIDITY` | — | POOR scene | Optical regime of the scene. |
 | `valid_frac` | number 0–1 | fraction | never | Visible (cloud-free, observed) fraction of the reservoir. |
 | `cloud_frac` | number 0–1 | fraction | POOR scene | Clouded fraction of the reservoir. |
@@ -111,7 +111,8 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 
 When `bed_applied` is false, every `*_corrected` field and `cover_band`
 are `null` and `bed_reason` says why; smolf never substitutes the raw
-figure. A POOR entry in `series.json` carries `date`, `item_id`,
+figure. When it is true, they are all non-null. Both schemas define every
+non-POOR scene identically (`tests/test_publish.py` keeps them in step). A POOR entry in `series.json` carries `date`, `item_id`,
 `quality_light` (POOR) and `valid_frac`, and `null` for every other field.
 
 ## `latest.json`

@@ -13,8 +13,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from smol_frontier import __version__, publish, series
+from smol_frontier import __version__, aoi, publish, series
 from smol_frontier.cli import app
+from smol_frontier.hydro import levels
 
 RUN_ID = "20240110T120000"
 
@@ -132,6 +133,33 @@ def _write_run(
     return run_dir
 
 
+_LEVELS_HEADER = (
+    "Header line\r\n\r\n"
+    "Estacion,Fecha,Nivel(m),Precipitacion(mm),VolumenAlm(Mm3),"
+    "ObraToma(m3/s),Vertedor(m3/s),Derrame(m3/s),Evaporacion(mm)\r\n"
+)
+
+
+def _write_levels(path: Path, rows: list[tuple[str, str]]) -> Path:
+    """Write a minimal SIH level CSV with (date, level) rows."""
+    body = "".join(f"ENDHD,{day},{level},,,,,,\r\n" for day, level in rows)
+    path.write_bytes((_LEVELS_HEADER + body).encode("utf-8"))
+    return path
+
+
+@pytest.fixture(autouse=True)
+def levels_file(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> Path:
+    """Tmp level record (last level 2024-01-09), so no test reads data/hydro."""
+    path = _write_levels(
+        tmp_path_factory.mktemp("hydro") / "ENDHD.csv",
+        [("2024-01-08", "2009.5"), ("2024-01-09", "2010.126"), ("2024-01-10", "")],
+    )
+    monkeypatch.setattr(levels, "DEFAULT_LEVELS_PATH", path)
+    return path
+
+
 @pytest.fixture
 def series_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "series"
@@ -148,7 +176,9 @@ def _latest(out: Path) -> dict:
     return json.loads((out / "latest.json").read_text(encoding="utf-8"))
 
 
-def test_publish_latest_golden_values(series_root: Path, tmp_path: Path) -> None:
+def test_publish_latest_golden_values(
+    series_root: Path, tmp_path: Path, levels_file: Path
+) -> None:
     _write_run(series_root)
     out = tmp_path / "pub"
     result = _publish(out, "--run", RUN_ID)
@@ -177,6 +207,26 @@ def test_publish_latest_golden_values(series_root: Path, tmp_path: Path) -> None
         "cover_band": "RED",
         "schema_version": "1.0.0",
         "smolf_version": __version__,
+        "newest_acquisition": {
+            "date": "2024-01-05",
+            "item_id": "S2A_14QMH_20240105_0_L2A",
+            "quality_light": "POOR",
+            "valid_frac": 0.4322,
+        },
+        "run_counts": {"ok": 3, "skipped": 1, "errors": 1},
+        "run_id": RUN_ID,
+        "series_sha256": "cd" * 32,
+        "reservoir_area_ha": round(aoi.reservoir_area_ha(), 2),
+        "constants": {
+            "frac_publishable": 0.95,
+            "green_max_pct": 30.0,
+            "red_min_pct": 50.0,
+        },
+        "current_level": {
+            "date": "2024-01-09",
+            "level_m": 2010.13,
+            "levels_sha256": series.sha256_file(levels_file),
+        },
     }
 
 
@@ -342,6 +392,134 @@ def test_publish_latest_invalid_output_exit_1_writes_nothing(
     assert sorted(p.name for p in tmp_path.iterdir()) == ["series"]
 
 
+def test_publish_latest_newest_acquisition_ok_scene_with_row_light(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [
+        _record("2024-01-01", "A", "ok"),
+        _record("2024-01-02", "B", "ok", light="DOUBTFUL", valid_frac=0.91236),
+        _record("2024-01-03", "C", "error"),
+    ]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    assert _latest(out)["newest_acquisition"] == {
+        "date": "2024-01-02",
+        "item_id": "B",
+        "quality_light": "DOUBTFUL",
+        "valid_frac": 0.9124,
+    }
+
+
+def test_publish_latest_newest_acquisition_never_error(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [_record("2024-01-01", "A", "ok"), _record("2024-01-09", "Z", "error")]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    assert _latest(out)["newest_acquisition"]["item_id"] == "A"
+
+
+def test_publish_latest_newest_poor_while_scene_stays_newest_ok(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    doc = _latest(out)
+    assert doc["newest_acquisition"]["quality_light"] == "POOR"
+    assert doc["newest_acquisition"]["date"] == "2024-01-05"
+    assert doc["date"] == "2024-01-04"
+
+
+def test_publish_latest_run_counts_and_ids_equal_manifest(
+    series_root: Path, tmp_path: Path
+) -> None:
+    run_dir = _write_run(series_root)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    doc = _latest(out)
+    expected = {k: manifest["counts"][k] for k in ("ok", "skipped", "errors")}
+    assert doc["run_counts"] == expected
+    assert doc["run_id"] == manifest["run_id"]
+    assert doc["series_sha256"] == manifest["series_sha256"]
+
+
+def test_publish_latest_constants_and_area_from_settings(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    monkeypatch.setattr(aoi, "reservoir_area_ha", lambda: 1000.126)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    doc = _latest(out)
+    assert doc["reservoir_area_ha"] == 1000.13
+    assert doc["constants"] == {
+        "frac_publishable": publish.settings.FRAC_PUBLISHABLE,
+        "green_max_pct": publish.settings.GREEN_MAX_PCT,
+        "red_min_pct": publish.settings.RED_MIN_PCT,
+    }
+
+
+def test_publish_latest_level_is_last_day_with_level_not_wall_clock(
+    series_root: Path, tmp_path: Path, levels_file: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    assert _latest(out)["current_level"] == {
+        "date": "2024-01-09",
+        "level_m": 2010.13,
+        "levels_sha256": series.sha256_file(levels_file),
+    }
+
+
+def test_publish_latest_level_update_changes_only_current_level(
+    series_root: Path, tmp_path: Path, levels_file: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    before = _latest(out)
+    _write_levels(levels_file, [("2024-01-09", "2010.126"), ("2024-01-10", "2011.0")])
+    assert _publish(out).exit_code == 0
+    after = _latest(out)
+    assert after["current_level"]["date"] == "2024-01-10"
+    assert {k: v for k, v in after.items() if k != "current_level"} == {
+        k: v for k, v in before.items() if k != "current_level"
+    }
+
+
+def test_publish_latest_level_empty_record_is_null_exit_0(
+    series_root: Path, tmp_path: Path, levels_file: Path
+) -> None:
+    _write_run(series_root)
+    _write_levels(levels_file, [("2024-01-09", ""), ("2024-01-10", "")])
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    assert _latest(out)["current_level"] is None
+
+
+def test_publish_latest_level_missing_file_is_null(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    result = CliRunner().invoke(app, ["publish", "--out", str(out)])
+    assert result.exit_code == 0
+    assert publish.current_level(tmp_path / "absent.csv") is None
+
+
+def test_publish_current_level_no_level_rows(tmp_path: Path) -> None:
+    empty = _write_levels(tmp_path / "empty.csv", [])
+    nan_only = _write_levels(tmp_path / "nan.csv", [("2024-01-01", "")])
+    assert publish.current_level(empty) is None
+    assert publish.current_level(nan_only) is None
+
+
 # --- schema negatives (pure, no command) ---------------------------------
 
 
@@ -379,6 +557,34 @@ def test_publish_latest_schema_tolerates_extra_fields(
         ("valid_frac", 1.5),
         ("dense_ha", -1.0),
         ("date", "2024-01-04T10:00:00Z"),
+        ("newest_acquisition", publish),
+        ("run_counts", publish),
+        ("run_id", publish),
+        ("series_sha256", publish),
+        ("reservoir_area_ha", publish),
+        ("constants", publish),
+        ("current_level", publish),
+        ("series_sha256", "abc"),
+        ("reservoir_area_ha", "1261.75"),
+        ("reservoir_area_ha", 0),
+        ("run_counts", {"ok": 1, "skipped": 0}),
+        ("run_counts", {"ok": 1, "skipped": 0, "errors": -1}),
+        ("newest_acquisition", {"date": "2024-01-05", "item_id": "A"}),
+        (
+            "newest_acquisition",
+            {
+                "date": "2024-01-05",
+                "item_id": "A",
+                "quality_light": "BUENA",
+                "valid_frac": 0.5,
+            },
+        ),
+        ("constants", {"frac_publishable": 0.95, "green_max_pct": 30.0}),
+        ("current_level", {"date": "2024-01-09", "level_m": 2010.1}),
+        (
+            "current_level",
+            {"date": "2024-01-09", "level_m": "x", "levels_sha256": "ab" * 32},
+        ),
     ],
 )
 def test_publish_latest_schema_rejects_bad_docs(

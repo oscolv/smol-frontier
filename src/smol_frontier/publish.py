@@ -13,6 +13,7 @@ byte-identical files.
 """
 
 import json
+import math
 import shutil
 import tempfile
 from functools import cache
@@ -21,8 +22,9 @@ from pathlib import Path
 
 from jsonschema import Draft202012Validator
 
-from smol_frontier import __version__, series
+from smol_frontier import __version__, aoi, series
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro import levels
 
 __all__ = [
     "ALLOWED_FILES",
@@ -31,6 +33,7 @@ __all__ = [
     "ContractInvalid",
     "PublishRefused",
     "canonical_json",
+    "current_level",
     "latest_document",
     "publish_run",
     "select_run",
@@ -183,11 +186,59 @@ def select_run(series_root: Path, run_id: str | None) -> Path:
     return run_dir
 
 
-def latest_document(records: list[dict[str, object]], run_id: str) -> dict:
+def _newest_acquisition(records: list[dict[str, object]]) -> dict[str, object]:
+    """Newest scene of the run with status ok or skipped (never error).
+
+    A skipped scene is POOR by construction (valid_frac under the minimum);
+    an ok scene carries the light of its row. Records are sorted by date.
+    """
+    seen = [record for record in records if record["status"] in ("ok", "skipped")]
+    record = seen[-1]
+    if record["status"] == "ok":
+        row = record["row"]
+        assert isinstance(row, dict)
+        light = row["light"]
+    else:
+        light = "POOR"
+    return {
+        "date": record["date"],
+        "item_id": record["item_id_used"],
+        "quality_light": light,
+        "valid_frac": _round(record["valid_frac"], _DECIMALS_FRACTION),
+    }
+
+
+def current_level(levels_path: Path | None = None) -> dict[str, object] | None:
+    """Last day with a level in the SIH record, or None when there is none.
+
+    Independent of the wall clock and of the run. A missing file counts as
+    no record. ``levels_path`` defaults to the committed level record.
+    """
+    path = Path(levels.DEFAULT_LEVELS_PATH if levels_path is None else levels_path)
+    if not path.is_file():
+        return None
+    rows = [row for row in levels.load_levels(path) if not math.isnan(row.level_m)]
+    if not rows:
+        return None
+    last = max(rows, key=lambda row: row.date)
+    return {
+        "date": last.date.isoformat(),
+        "level_m": round(last.level_m, _DECIMALS_DEFAULT),
+        "levels_sha256": series.sha256_file(path),
+    }
+
+
+def latest_document(
+    records: list[dict[str, object]],
+    manifest: dict[str, object],
+    levels_path: Path | None = None,
+) -> dict:
     """``latest.json`` for the last ``ok`` record (records sorted by date).
 
+    Carries the run context from the manifest and the current water level.
     Raises PublishRefused when no record has figures.
     """
+    run_id = str(manifest["run_id"])
     ok = [record for record in records if record["status"] == "ok"]
     if not ok:
         msg = f"run {run_id} has no scene with figures (no ok scene)"
@@ -209,6 +260,19 @@ def latest_document(records: list[dict[str, object]], run_id: str) -> dict:
         for field in _CORRECTED_FIELDS:
             document[field] = None
     document["cover_band"] = _cover_band(document["pct_reservoir_corrected"])
+    counts = manifest["counts"]
+    assert isinstance(counts, dict)
+    document["newest_acquisition"] = _newest_acquisition(records)
+    document["run_counts"] = {key: counts[key] for key in ("ok", "skipped", "errors")}
+    document["run_id"] = run_id
+    document["series_sha256"] = manifest["series_sha256"]
+    document["reservoir_area_ha"] = round(aoi.reservoir_area_ha(), _DECIMALS_DEFAULT)
+    document["constants"] = {
+        "frac_publishable": settings.FRAC_PUBLISHABLE,
+        "green_max_pct": settings.GREEN_MAX_PCT,
+        "red_min_pct": settings.RED_MIN_PCT,
+    }
+    document["current_level"] = current_level(levels_path)
     return document
 
 
@@ -253,6 +317,7 @@ def publish_run(
     run_id: str | None = None,
     out_dir: Path | None = None,
     series_root: Path | None = None,
+    levels_path: Path | None = None,
 ) -> Path:
     """Publish the contract for one run; return the output directory.
 
@@ -265,7 +330,7 @@ def publish_run(
     target = OUTPUT_DIR if out_dir is None else Path(out_dir)
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
-    latest = latest_document(records, run_dir.name)
+    latest = latest_document(records, _read_manifest(run_dir), levels_path)
     validate("latest", latest)
     _write_contract(target, {"latest.json": canonical_json(latest)})
     return target

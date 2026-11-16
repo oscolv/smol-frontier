@@ -1514,3 +1514,76 @@ def test_publish_index_replaces_previous_output(
     first = _index(out)
     assert _publish(out, "--run", RUN_ID).exit_code == 0
     assert _index(out)["files"] == first["files"]
+
+
+# --- --out safety -----------------------------------------------------------
+
+
+def test_publish_out_foreign_dir_refused_and_untouched(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "precious"
+    out.mkdir()
+    (out / "data.txt").write_text("keep me")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "not a previous publish" in lines[0]
+    assert (out / "data.txt").read_text() == "keep me"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["precious", "series"]
+
+
+def test_publish_out_contract_plus_foreign_file_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    (out / "map" / "notes.txt").write_text("keep me")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "map/notes.txt" in result.output
+    assert (out / "map" / "notes.txt").read_text() == "keep me"
+
+
+def test_publish_out_allowlisted_files_without_index_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    out.mkdir()
+    (out / "latest.json").write_text("{}")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert (out / "latest.json").read_text() == "{}"
+
+
+def test_publish_out_empty_dir_allowed(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    out.mkdir()
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert (out / "publish.json").is_file()
+
+
+def test_publish_out_file_refused(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    out.write_text("keep me")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert out.read_text() == "keep me"
+
+
+def test_publish_out_contract_plus_foreign_empty_dir_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    (out / "backup").mkdir()
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert (out / "backup").is_dir()

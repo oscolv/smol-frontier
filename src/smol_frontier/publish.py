@@ -55,6 +55,7 @@ __all__ = [
     "PublishedMap",
     "build_map",
     "canonical_json",
+    "check_out_dir",
     "current_level",
     "is_allowed",
     "latest_document",
@@ -82,6 +83,8 @@ ALLOWED_FILES = frozenset({"latest.json", "series.json", "publish.json"})
 # WHY: the integrity index is written last, over the other staged files; it
 #   is the only file that never lists itself.
 INDEX_FILE = "publish.json"
+# WHY: the one subdirectory a contract has (holds the map files).
+_MAP_DIR = "map"
 # WHY: the only other files allowed — the latest scene's map, one level deep
 #   under map/, named <date>_<item_id> (no path separators in the id).
 ALLOWED_MAP_PATTERN = re.compile(
@@ -538,6 +541,37 @@ def series_document(
     }
 
 
+def check_out_dir(out_dir: Path) -> None:
+    """Refuse an ``out_dir`` that publish could not safely replace.
+
+    WHY: the swap renames ``out_dir`` away and deletes it, so it must only
+    ever hold a previous contract. A missing or empty directory is fine; a
+    non-empty one must contain ``publish.json`` and nothing outside the
+    allowlist. Anything else (a file, a foreign directory) is refused before
+    staging, so ``--out`` can never destroy unrelated data.
+    """
+    if not out_dir.exists() and not out_dir.is_symlink():
+        return
+    if not out_dir.is_dir():
+        msg = f"--out {out_dir} exists and is not a directory"
+        raise PublishRefused(msg)
+    entries = sorted(out_dir.rglob("*"))
+    if not entries:
+        return
+    foreign = [
+        rel
+        for rel in (path.relative_to(out_dir).as_posix() for path in entries)
+        if not is_allowed(rel) and rel != _MAP_DIR
+    ]
+    if not (out_dir / INDEX_FILE).is_file() or foreign:
+        detail = f" (foreign: {', '.join(foreign[:3])})" if foreign else ""
+        msg = (
+            f"--out {out_dir} is not a previous publish (no {INDEX_FILE} or "
+            f"files outside the allowlist){detail}"
+        )
+        raise PublishRefused(msg)
+
+
 def _swap_in(staging: Path, out_dir: Path) -> None:
     """Replace ``out_dir`` with ``staging`` by rename; restore it on failure."""
     if not out_dir.exists():
@@ -593,6 +627,7 @@ def _write_contract(
         if not is_allowed(name):
             msg = f"refusing to publish a file outside the allowlist: {name}"
             raise ValueError(msg)
+    check_out_dir(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.staging-", dir=out_dir.parent)
@@ -632,6 +667,7 @@ def publish_run(
     # WHY late binding: tests point series.OUTPUT_DIR / OUTPUT_DIR at tmp dirs.
     root = series.OUTPUT_DIR if series_root is None else Path(series_root)
     target = OUTPUT_DIR if out_dir is None else Path(out_dir)
+    check_out_dir(target)  # fail fast; checked again right before staging
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     manifest = _read_manifest(run_dir)

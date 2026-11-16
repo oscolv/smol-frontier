@@ -1,0 +1,407 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oscolv/smol-frontier/schemas/series.schema.json",
+  "title": "smolf series.json",
+  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac and null for every other field. Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). Additional properties are allowed.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "smolf_version",
+    "run_id",
+    "series_sha256",
+    "scenes"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+    },
+    "smolf_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "run_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "series_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "scenes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/scene"
+      }
+    }
+  },
+  "$defs": {
+    "date": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "percent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100
+    },
+    "area": {
+      "type": "number",
+      "minimum": 0
+    },
+    "area_or_null": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "scene": {
+      "type": "object",
+      "required": [
+        "date",
+        "item_id",
+        "quality_light",
+        "regime",
+        "valid_frac",
+        "cloud_frac",
+        "dense_ha",
+        "interface_ha",
+        "hyacinth_raw_ha",
+        "pct_reservoir_raw",
+        "bed_applied",
+        "bed_reason",
+        "level_m",
+        "removed_ha",
+        "dense_corrected_ha",
+        "interface_corrected_ha",
+        "hyacinth_corrected_ha",
+        "pct_reservoir_corrected",
+        "cover_band"
+      ],
+      "properties": {
+        "date": {
+          "$ref": "#/$defs/date"
+        },
+        "item_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quality_light": {
+          "enum": [
+            "GOOD",
+            "DOUBTFUL",
+            "POOR"
+          ]
+        },
+        "regime": {
+          "enum": [
+            "CLEAN",
+            "EXPOSED_BED",
+            "TURBIDITY",
+            null
+          ]
+        },
+        "valid_frac": {
+          "$ref": "#/$defs/fraction"
+        },
+        "cloud_frac": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fraction"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dense_ha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/area"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interface_ha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/area"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hyacinth_raw_ha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/area"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pct_reservoir_raw": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/percent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "bed_applied": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "bed_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "level_m": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "removed_ha": {
+          "$ref": "#/$defs/area_or_null"
+        },
+        "dense_corrected_ha": {
+          "$ref": "#/$defs/area_or_null"
+        },
+        "interface_corrected_ha": {
+          "$ref": "#/$defs/area_or_null"
+        },
+        "hyacinth_corrected_ha": {
+          "$ref": "#/$defs/area_or_null"
+        },
+        "pct_reservoir_corrected": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/percent"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cover_band": {
+          "enum": [
+            "GREEN",
+            "YELLOW",
+            "RED",
+            null
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "quality_light": {
+            "const": "POOR"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "regime": {
+            "type": "null"
+          },
+          "cloud_frac": {
+            "type": "null"
+          },
+          "dense_ha": {
+            "type": "null"
+          },
+          "interface_ha": {
+            "type": "null"
+          },
+          "hyacinth_raw_ha": {
+            "type": "null"
+          },
+          "pct_reservoir_raw": {
+            "type": "null"
+          },
+          "bed_applied": {
+            "type": "null"
+          },
+          "bed_reason": {
+            "type": "null"
+          },
+          "level_m": {
+            "type": "null"
+          },
+          "removed_ha": {
+            "type": "null"
+          },
+          "dense_corrected_ha": {
+            "type": "null"
+          },
+          "interface_corrected_ha": {
+            "type": "null"
+          },
+          "hyacinth_corrected_ha": {
+            "type": "null"
+          },
+          "pct_reservoir_corrected": {
+            "type": "null"
+          },
+          "cover_band": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "description": "A scene with figures: the same definitions as the per-scene fields of latest.json (kept identical by a test).",
+        "properties": {
+          "date": {
+            "description": "UTC acquisition date.",
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+          },
+          "item_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "quality_light": {
+            "description": "Never POOR here: a POOR scene has no figures.",
+            "enum": [
+              "GOOD",
+              "DOUBTFUL"
+            ]
+          },
+          "regime": {
+            "enum": [
+              "CLEAN",
+              "EXPOSED_BED",
+              "TURBIDITY"
+            ]
+          },
+          "valid_frac": {
+            "$ref": "#/$defs/fraction"
+          },
+          "cloud_frac": {
+            "$ref": "#/$defs/fraction"
+          },
+          "dense_ha": {
+            "$ref": "#/$defs/area"
+          },
+          "interface_ha": {
+            "$ref": "#/$defs/area"
+          },
+          "hyacinth_raw_ha": {
+            "$ref": "#/$defs/area"
+          },
+          "pct_reservoir_raw": {
+            "$ref": "#/$defs/percent"
+          },
+          "bed_applied": {
+            "type": "boolean"
+          },
+          "bed_reason": {
+            "type": "string"
+          },
+          "level_m": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "removed_ha": {
+            "$ref": "#/$defs/area_or_null"
+          },
+          "dense_corrected_ha": {
+            "$ref": "#/$defs/area_or_null"
+          },
+          "interface_corrected_ha": {
+            "$ref": "#/$defs/area_or_null"
+          },
+          "hyacinth_corrected_ha": {
+            "$ref": "#/$defs/area_or_null"
+          },
+          "pct_reservoir_corrected": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/percent"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cover_band": {
+            "enum": [
+              "GREEN",
+              "YELLOW",
+              "RED",
+              null
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "bed_applied": {
+                  "const": false
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "dense_corrected_ha": {
+                  "type": "null"
+                },
+                "interface_corrected_ha": {
+                  "type": "null"
+                },
+                "hyacinth_corrected_ha": {
+                  "type": "null"
+                },
+                "pct_reservoir_corrected": {
+                  "type": "null"
+                },
+                "cover_band": {
+                  "type": "null"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "dense_corrected_ha": {
+                  "type": "number"
+                },
+                "interface_corrected_ha": {
+                  "type": "number"
+                },
+                "hyacinth_corrected_ha": {
+                  "type": "number"
+                },
+                "pct_reservoir_corrected": {
+                  "type": "number"
+                },
+                "cover_band": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

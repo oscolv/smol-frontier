@@ -1,6 +1,6 @@
 # Design decisions
 
-Eleven project rules, each with its one-line reason and where it is
+Thirteen project rules, each with its one-line reason and where it is
 enforced in this repo. Anything not implemented yet says **planned**.
 
 ## 1. Installable package, real CLI entry point
@@ -126,3 +126,27 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `HASHED_INPUT_PATHS`, `is_dirty()`), `hydro/levels.py`
   (`last_day_with_level()`), `cli.py` (exit 1 on `StaleLevelsError`),
   `tests/test_series.py`.
+
+## 13. Neutral, versioned publish contract
+
+- **Rule:** `publish` emits a neutral, versioned contract; the run manifest
+  is provenance, not contract. `smolf publish` derives a fixed allowlist of
+  files (`latest.json`, `series.json`, `publish.json`, the latest scene's
+  map) from one complete, clean run; each JSON file carries
+  `schema_version` and is validated against its packaged JSON Schema before
+  an atomic swap. A schema accepts any version with its major, so only
+  optional fields are additive (minor); any enum change is breaking (major).
+  Every figure is published as computed — nothing is hidden, filtered or
+  substituted — and display gates belong to the downstream consumer.
+- **Why:** a consumer that read the run directory would couple to internal
+  layout, recompute percentages or bands (two numbers for one thing), and
+  have no way to detect a breaking change. A neutral contract with the
+  constants it needs keeps one source for every number; versioned schemas
+  make upgrades deliberate; the raster guard and the allowlist make leaking
+  source imagery impossible by construction.
+- **Where in this repo:** `src/smol_frontier/publish.py` (`publish_run()`,
+  `SCHEMA_VERSION`, `ALLOWED_FILES`), `src/smol_frontier/schemas/`,
+  `classify/geotiff.py` (`write_published_geotiff()` and `write_display_png()`, the uint8 0–5 guard),
+  `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
+  `docs/contract.md`, `tests/test_publish.py`,
+  `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.

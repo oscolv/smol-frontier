@@ -66,6 +66,7 @@ __all__ = [
     "input_hashes",
     "list_extend_targets",
     "list_reference_targets",
+    "load_records",
     "new_run_id",
     "process_scene",
     "utc_now",
@@ -446,7 +447,7 @@ def _write_scene_json(scenes_dir: Path, record: dict[str, object]) -> Path:
     return path
 
 
-def _load_records(scenes_dir: Path) -> list[dict[str, object]]:
+def load_records(scenes_dir: Path) -> list[dict[str, object]]:
     """Load every scene JSON, sorted by (date, item id)."""
     records = [
         json.loads(path.read_text(encoding="utf-8"))
@@ -632,7 +633,7 @@ def build_run(
                 for future in futures:
                     future.cancel()
                 raise
-    records = _load_records(scenes_dir)
+    records = load_records(scenes_dir)
     ok_records = [record for record in records if record["status"] == "ok"]
     series_path = run_dir / SERIES_CSV_NAME
     write_series_csv(series_path, ok_records)

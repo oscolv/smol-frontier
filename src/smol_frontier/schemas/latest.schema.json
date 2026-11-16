@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/oscolv/smol-frontier/schemas/latest.schema.json",
+  "title": "smolf latest.json",
+  "description": "The latest scene of a series run that has figures (status ok, quality GOOD or DOUBTFUL). Hectares, percentages and levels are rounded to 2 decimals, fractions to 4. Additional properties are allowed.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "smolf_version",
+    "date",
+    "item_id",
+    "quality_light",
+    "regime",
+    "valid_frac",
+    "cloud_frac",
+    "dense_ha",
+    "interface_ha",
+    "hyacinth_raw_ha",
+    "pct_reservoir_raw",
+    "bed_applied",
+    "bed_reason",
+    "level_m",
+    "removed_ha",
+    "dense_corrected_ha",
+    "interface_corrected_ha",
+    "hyacinth_corrected_ha",
+    "pct_reservoir_corrected",
+    "cover_band",
+    "newest_acquisition",
+    "run_counts",
+    "run_id",
+    "series_sha256",
+    "reservoir_area_ha",
+    "constants",
+    "current_level",
+    "map"
+  ],
+  "properties": {
+    "schema_version": {"type": "string", "pattern": "^1\\.[0-9]+\\.[0-9]+$"},
+    "smolf_version": {"type": "string", "minLength": 1},
+    "date": {
+      "description": "UTC acquisition date.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+    },
+    "item_id": {"type": "string", "minLength": 1},
+    "quality_light": {
+      "description": "Never POOR here: a POOR scene has no figures.",
+      "enum": ["GOOD", "DOUBTFUL"]
+    },
+    "regime": {"enum": ["CLEAN", "EXPOSED_BED", "TURBIDITY"]},
+    "valid_frac": {"$ref": "#/$defs/fraction"},
+    "cloud_frac": {"$ref": "#/$defs/fraction"},
+    "dense_ha": {"$ref": "#/$defs/area"},
+    "interface_ha": {"$ref": "#/$defs/area"},
+    "hyacinth_raw_ha": {"$ref": "#/$defs/area"},
+    "pct_reservoir_raw": {"$ref": "#/$defs/percent"},
+    "bed_applied": {"type": "boolean"},
+    "bed_reason": {"type": "string"},
+    "level_m": {"type": ["number", "null"]},
+    "removed_ha": {"$ref": "#/$defs/area_or_null"},
+    "dense_corrected_ha": {"$ref": "#/$defs/area_or_null"},
+    "interface_corrected_ha": {"$ref": "#/$defs/area_or_null"},
+    "hyacinth_corrected_ha": {"$ref": "#/$defs/area_or_null"},
+    "pct_reservoir_corrected": {
+      "anyOf": [{"$ref": "#/$defs/percent"}, {"type": "null"}]
+    },
+    "cover_band": {"enum": ["GREEN", "YELLOW", "RED", null]},
+    "newest_acquisition": {
+      "description": "Newest scene of the run of any quality (ok or skipped, never error); may be POOR and newer than the scene above.",
+      "type": "object",
+      "required": ["date", "item_id", "quality_light", "valid_frac"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date"},
+        "item_id": {"type": "string", "minLength": 1},
+        "quality_light": {"enum": ["GOOD", "DOUBTFUL", "POOR"]},
+        "valid_frac": {"$ref": "#/$defs/fraction"}
+      }
+    },
+    "run_counts": {
+      "type": "object",
+      "required": ["ok", "skipped", "errors"],
+      "properties": {
+        "ok": {"type": "integer", "minimum": 0},
+        "skipped": {"type": "integer", "minimum": 0},
+        "errors": {"type": "integer", "minimum": 0}
+      }
+    },
+    "run_id": {"type": "string", "minLength": 1},
+    "series_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reservoir_area_ha": {"type": "number", "exclusiveMinimum": 0},
+    "constants": {
+      "description": "Thresholds a consumer needs for its own gates.",
+      "type": "object",
+      "required": ["frac_publishable", "green_max_pct", "red_min_pct"],
+      "properties": {
+        "frac_publishable": {"$ref": "#/$defs/fraction"},
+        "green_max_pct": {"$ref": "#/$defs/percent"},
+        "red_min_pct": {"$ref": "#/$defs/percent"}
+      }
+    },
+    "current_level": {
+      "description": "Last day with a level in the SIH record (independent of the scene); null when the record has none.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": ["date", "level_m", "levels_sha256"],
+          "properties": {
+            "date": {"$ref": "#/$defs/date"},
+            "level_m": {"type": "number"},
+            "levels_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        {"type": "null"}
+      ]
+    },
+    "map": {
+      "description": "Relative paths of the latest scene's map files inside the published directory. geotiff: uint8 classes 0-5 (0 nodata, 1 water, 2 dense hyacinth, 3 interface, 4 bare soil, 5 removed by exposed-bed correction), native scene CRS and 10 m grid.",
+      "type": "object",
+      "required": ["geotiff", "png", "bounds"],
+      "properties": {
+        "geotiff": {
+          "type": "string",
+          "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.tif$"
+        },
+        "png": {
+          "description": "RGBA PNG warped to EPSG:3857, same classes coloured with the configured palette; nodata fully transparent.",
+          "type": "string",
+          "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.png$"
+        },
+        "bounds": {
+          "description": "EPSG:4326 extent of the PNG as [[south, west], [north, east]].",
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+              {"type": "number", "minimum": -90, "maximum": 90},
+              {"type": "number", "minimum": -180, "maximum": 180}
+            ]
+          }
+        }
+      }
+    }
+  },
+  "if": {"properties": {"bed_applied": {"const": false}}},
+  "then": {
+    "properties": {
+      "dense_corrected_ha": {"type": "null"},
+      "interface_corrected_ha": {"type": "null"},
+      "hyacinth_corrected_ha": {"type": "null"},
+      "pct_reservoir_corrected": {"type": "null"},
+      "cover_band": {"type": "null"}
+    }
+  },
+  "else": {
+    "properties": {
+      "dense_corrected_ha": {"type": "number"},
+      "interface_corrected_ha": {"type": "number"},
+      "hyacinth_corrected_ha": {"type": "number"},
+      "pct_reservoir_corrected": {"type": "number"},
+      "cover_band": {"type": "string"}
+    }
+  },
+  "$defs": {
+    "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "fraction": {"type": "number", "minimum": 0, "maximum": 1},
+    "percent": {"type": "number", "minimum": 0, "maximum": 100},
+    "area": {"type": "number", "minimum": 0},
+    "area_or_null": {"type": ["number", "null"], "minimum": 0}
+  }
+}

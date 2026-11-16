@@ -29,6 +29,8 @@ The pipeline in order, one line per stage:
   and flood-stage map (`hydro/flood_map.py`, `smolf hydro flood-map`)
 - Series builder + manifest — `series.py` (`smolf series build`, resumable;
   a series is identified by its `series.csv` sha256, not by date)
+- Publish contract — `publish.py` + `schemas/` (`smolf publish`; neutral,
+  versioned JSON + latest map from one complete run; see `docs/contract.md`)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene
   outputs under `outputs/`)
 - Frontier verification layer + agent — plugs in after the corrected
@@ -52,6 +54,9 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `outputs/series/` — series runs, one directory per run id with scene
   JSONs, `series.csv`, and `manifest.json` (gitignored, regenerable via
   `smolf series build`).
+- `outputs/publish/` — the published data contract (`latest.json`,
+  `series.json`, `publish.json`, the latest scene's map; gitignored,
+  regenerable via `smolf publish`).
 
 ## Parameters and provenance
 
@@ -128,3 +133,17 @@ The author's prior research and the SIH data are in Spanish:
 - Commits: create a commit only when the user asks; conventional commit
   messages; no trailers. All code in this repository is written with Muse
   Code during the hackathon, as disclosed in README.md and PRIOR_WORK.md.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues of `oscolv/smol-frontier` (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: glossary in this file's `## Glossary` (until a root `GLOSSARY.md` exists), decisions in `docs/decisions.md` and `docs/adr/`. See `docs/agents/domain.md`.

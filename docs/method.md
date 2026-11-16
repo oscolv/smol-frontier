@@ -219,3 +219,50 @@ scenes, median |Δ| 0.01 ha, p95 0.11 ha, max 0.43 ha (2023-10-28
 fallback, 0 errors — verdict PASS. 206 scenes sit at Δ 0.00 ha. The series
 builder reproduces the gate's raw figures exactly (max |Δ| 0.00 ha, light
 and regime 465/465 against that gate CSV).
+
+## 11. Publish contract (`publish.py`, `smolf publish`)
+
+Derives a versioned data contract from one series run (`--run`, default
+the newest run whose manifest status is complete) into `outputs/publish/`
+(`--out` overrides): `latest.json` (the last `ok` scene plus run context,
+constants and the current SIH level), `series.json` (every `ok` and POOR
+scene; errors excluded), `map/<date>_<item_id>.tif` and `.png` for the
+latest scene, and the integrity index `publish.json`. Field by field:
+`docs/contract.md`; schemas: `src/smol_frontier/schemas/`
+(`SCHEMA_VERSION = "1.0.0"`). Figures are copied from the run rows and
+rounded like `series.csv` (2 decimals; fractions 4); nothing is filtered.
+`cover_band` is `settings.traffic_light()` (`GREEN_MAX_PCT = 30.0`,
+`RED_MIN_PCT = 50.0`) on the 2-decimal `pct_reservoir_corrected`, and
+`null` with every corrected figure when the bed correction was not
+applied.
+
+Runs do not persist class maps, so the latest scene is re-classified from
+the scene cache after its sha256 matches the record's `cache_sha256` (a
+missing scene is re-ingested by exact item id), and its per-class hectares
+must equal the run row to the hundredth. The published map adds class
+`CLASS_BED_REMOVED = 5` (`COLOR_BED_REMOVED`) through the pure
+`exposed_bed_mask()` in `hydro/bed.py`, using the row's `level_m` (no fresh
+level lookup) and the margin **recomputed** from that level with the
+committed stage–area curve — the run's own code path (`bed_margin()`).
+The row's `margin_m` is rounded to 2 decimals and cannot reproduce the
+run's removal: pixels whose stage lies between the rounded and the
+full-precision margin would flip. Publish therefore refuses (exit 2) when
+the curve's or the flood-stage map's sha256 differs from the run
+manifest's inputs, when the recomputed margin does not round to the row's
+`margin_m`, or when class-5 pixels × `PIXEL_HA = 0.01` differ from
+`removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
+run, no `ok` scene, cache hash mismatch, hectare mismatch. A schema or
+raster-guard failure of smolf's own output is a bug (exit 1). Rasters go
+only through the guarded writer (uint8, values 0–5), files only through the
+allowlist, and the directory is swapped in by rename after validation.
+
+Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`
+2026-10-12, `hyacinth_corrected_ha` 818.34, `pct_reservoir_corrected`
+64.86, GOOD, CLEAN, RED, `smolf_version` 0.2.0, `schema_version` 1.0.0.
+The 2024-06-09 control (Planetary Computer copy) publishes raw 432.25 ha →
+corrected 13.74 ha, `removed_ha` 418.51, EXPOSED_BED, with 41 851 class-5
+pixels (418.51 ha).
+
+Sources: `tests/test_publish.py` (fixture run end to end, refusals,
+schema negatives, guard, class-5 mask); `tests/test_publish_regression.py`
+(cache-gated control scenes); `tests/test_contract_doc.py`.

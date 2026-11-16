@@ -1607,3 +1607,44 @@ def test_publish_out_contract_plus_foreign_empty_dir_refused(
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 2, result.output
     assert (out / "backup").is_dir()
+
+
+# --- schema versioning --------------------------------------------------------
+
+
+def _schema(name: str) -> dict:
+    return publish._validator(name).schema
+
+
+@pytest.mark.parametrize("name", ["latest", "series", "publish"])
+def test_publish_schema_version_pattern_major_matches_code(name: str) -> None:
+    rule = _schema(name)["properties"]["schema_version"]
+    assert rule["type"] == "string"
+    major = publish.SCHEMA_VERSION.split(".")[0]
+    assert rule["pattern"] == rf"^{major}\.[0-9]+\.[0-9]+$"
+
+
+@pytest.mark.parametrize("name", ["latest", "series", "publish"])
+def test_publish_schema_accepts_later_minor_rejects_other_major(
+    series_root: Path, tmp_path: Path, name: str
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    doc = json.loads((out / f"{name}.json").read_text(encoding="utf-8"))
+    for later in ("1.0.1", "1.7.0", "1.12.3"):
+        publish.validate(name, {**doc, "schema_version": later})
+    for other in ("2.0.0", "0.9.0", "1.0", "v1.0.0", "1.0.0-rc1", 1):
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate(name, {**doc, "schema_version": other})
+
+
+def test_publish_writes_exactly_the_code_schema_version(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    for name in ("latest.json", "series.json", "publish.json"):
+        doc = json.loads((out / name).read_text(encoding="utf-8"))
+        assert doc["schema_version"] == publish.SCHEMA_VERSION, name

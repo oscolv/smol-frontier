@@ -121,7 +121,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | const `"1.0.0"` | — | no | Contract version. |
+| `schema_version` | string `1.x.y` | — | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
 | `smolf_version` | string | — | no | smolf version that wrote the file (`0.2.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
@@ -152,7 +152,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | const `"1.0.0"` | no | Contract version. |
+| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -167,7 +167,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | const `"1.0.0"` | no | Contract version. |
+| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -245,20 +245,25 @@ not applied, no pixel is class 5.
 
 ## Versioning
 
-- `schema_version` is the contract version, pinned in each schema with
-  `const`; `smolf_version` is the software version. They are distinct: a
-  smolf release may leave the contract unchanged.
+- `schema_version` is the contract version; `smolf_version` is the
+  software version. They are distinct: a smolf release may leave the
+  contract unchanged. smolf writes exactly its own `schema_version`; each
+  schema accepts any version with the same major (pattern
+  `^1\.[0-9]+\.[0-9]+$`), so files from a later minor release still
+  validate against an older tag's schemas.
 - Every contract change bumps the smolf version and is released under a
   git tag. The contract starts at `schema_version` 1.0.0, first released
   as smolf `v0.2.0`.
 - **Breaking (major `schema_version`):** removing or renaming a field,
-  changing a type, unit or meaning, removing an enum value, or making a
-  required field optional.
-- **Additive (minor `schema_version`):** adding an optional field, or an
-  enum value consumers may ignore.
+  changing a type, unit or meaning, adding or removing an enum value
+  (enums are closed, so a new value fails an older schema), making a
+  required field optional, or adding a required field.
+- **Additive (minor `schema_version`):** adding an optional field. Nothing
+  else is minor.
 - Each schema's `$id` is a stable, unversioned identifier ending in
   `<name>.schema.json`; the version lives only in `schema_version`.
   Schemas are not copied into the output directory.
-- Consumers should pin a smolf tag, take the three schemas from that tag,
-  validate every file before use, and reject files whose
-  `schema_version` major differs from the pinned one.
+- Consumers should pin a smolf tag, take the three schemas from that tag
+  and validate every file with them before use. Those schemas accept any
+  `1.x.y`, so a later minor release keeps validating and a new major
+  release is rejected until the consumer moves to its tag.

@@ -72,9 +72,12 @@ __all__ = [
 #   `--out` overrides it.
 OUTPUT_DIR = PROJECT_ROOT / "outputs/publish"
 
-# WHY: contract version carried by every document and pinned with `const` in
-#   each schema. Bump the major on any breaking change (rename/remove a field,
-#   change a type, unit or meaning), the minor on additive ones.
+# WHY: contract version written into every document. Each schema accepts any
+#   version with this major (pattern ^1\.[0-9]+\.[0-9]+$), so a consumer
+#   validating with the schemas of the tag it pinned keeps accepting later
+#   minor releases. Bump the major on any breaking change (rename/remove a
+#   field, change a type, unit or meaning, add or remove an enum value), the
+#   minor on additive ones (a new optional field).
 SCHEMA_VERSION = "1.0.0"
 
 # WHY: allowlist — the only files `publish` may ever write, so nothing

@@ -132,8 +132,10 @@ enforced in this repo. Anything not implemented yet says **planned**.
 - **Rule:** `publish` emits a neutral, versioned contract; the run manifest
   is provenance, not contract. `smolf publish` derives a fixed allowlist of
   files (`latest.json`, `series.json`, `publish.json`, the latest scene's
-  map) from one complete, clean run; each JSON file has a packaged JSON
-  Schema pinned by `schema_version` and is validated before an atomic swap.
+  map) from one complete, clean run; each JSON file carries
+  `schema_version` and is validated against its packaged JSON Schema before
+  an atomic swap. A schema accepts any version with its major, so only
+  optional fields are additive (minor); any enum change is breaking (major).
   Every figure is published as computed — nothing is hidden, filtered or
   substituted — and display gates belong to the downstream consumer.
 - **Why:** a consumer that read the run directory would couple to internal

@@ -9,6 +9,8 @@ documents directly against the packaged schema.
 import copy
 import hashlib
 import json
+import os
+import re
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -1713,3 +1715,113 @@ def test_publish_series_schema_bed_applied_requires_corrected(
     _mutate_scene(doc, index, key, value)
     with pytest.raises(publish.ContractInvalid):
         publish.validate("series", doc)
+
+
+# --- NaN, corrupt manifests -----------------------------------------------------
+
+
+def test_publish_canonical_json_rejects_nan() -> None:
+    for bad in (float("nan"), float("inf")):
+        with pytest.raises(publish.ContractInvalid, match="not valid JSON"):
+            publish.canonical_json({"scenes": [{"level_m": bad}]})
+
+
+def test_publish_nan_in_document_exit_1_writes_nothing(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = _default_records()
+    records[0] = _record(
+        "2024-01-01", "S2A_14QMH_20240101_0_L2A", "ok", level_m=float("nan")
+    )
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 1, result.output
+    assert result.output.startswith("error:")
+    assert not out.exists()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["series"]
+
+
+def test_publish_default_run_skips_corrupt_manifest(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root, "20240101T000000", [_record("2024-01-01", "A", "ok")])
+    broken = _write_run(
+        series_root, "20240102T000000", [_record("2024-01-02", "B", "ok")]
+    )
+    text = (broken / "manifest.json").read_text()
+    (broken / "manifest.json").write_text(text[: len(text) // 2])
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    assert _latest(out)["item_id"] == "A"
+
+
+@pytest.mark.parametrize("content", [b'{"run_id": "trunc', b"\xff\xfe", b"[1, 2]"])
+def test_publish_explicit_run_corrupt_manifest_exit_2(
+    series_root: Path, tmp_path: Path, content: bytes
+) -> None:
+    run_dir = _write_run(series_root)
+    (run_dir / "manifest.json").write_bytes(content)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "manifest" in lines[0]
+    assert not out.exists()
+
+
+@pytest.mark.skipif(
+    not hasattr(os, "geteuid") or os.geteuid() == 0,
+    reason="needs a non-root POSIX user (root ignores directory permissions)",
+)
+def test_publish_undeletable_previous_does_not_fail(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    (out / "map").chmod(0o555)  # its files cannot be unlinked
+    try:
+        result = _publish(out, "--run", RUN_ID)
+        assert result.exit_code == 0, result.output
+        assert (out / "publish.json").is_file()
+    finally:
+        for path in tmp_path.glob(".pub.previous-*/map"):
+            path.chmod(0o755)
+
+
+def test_publish_malformed_row_is_contract_invalid() -> None:
+    record = _record("2024-01-01", "A", "ok")
+    record["row"] = ["not", "a", "row"]
+    manifest = {"run_id": RUN_ID, "counts": {"ok": 1, "skipped": 0, "errors": 0}}
+    with pytest.raises(publish.ContractInvalid, match="row of A"):
+        publish.latest_document([record], manifest)
+    with pytest.raises(publish.ContractInvalid, match="row of A"):
+        publish.series_document([record], manifest)
+
+
+# --- map-name patterns ------------------------------------------------------------
+
+
+def test_publish_map_patterns_agree_across_code_and_schemas() -> None:
+    allowed = publish.ALLOWED_MAP_PATTERN.pattern
+    suffixes = r"\.(?:tif|png)"
+    assert allowed.endswith(suffixes)
+    stem = allowed.removesuffix(suffixes)
+    latest_map = _schema("latest")["properties"]["map"]["properties"]
+    assert latest_map["geotiff"]["pattern"] == rf"^{stem}\.tif$"
+    assert latest_map["png"]["pattern"] == rf"^{stem}\.png$"
+    documents = sorted(publish.ALLOWED_FILES - {publish.INDEX_FILE})
+    index_path = _schema("publish")["properties"]["files"]["items"]["properties"]
+    expected = "|".join([*(re.escape(name) for name in documents), allowed])
+    assert index_path["path"]["pattern"] == f"^(?:{expected})$"
+
+
+def test_publish_map_and_png_paths_share_one_stem() -> None:
+    record = {"date": "2024-01-04", "item_id_used": "S2B_X"}
+    assert publish.map_path(record) == "map/2024-01-04_S2B_X.tif"
+    assert publish.png_path(record) == "map/2024-01-04_S2B_X.png"
+    for path in (publish.map_path(record), publish.png_path(record)):
+        assert publish.is_allowed(path)

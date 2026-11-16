@@ -61,6 +61,7 @@ __all__ = [
     "latest_document",
     "latest_record",
     "map_path",
+    "png_path",
     "publish_index",
     "publish_run",
     "select_run",
@@ -169,14 +170,19 @@ def is_allowed(name: str) -> bool:
     return name in ALLOWED_FILES or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
 
 
+def _map_stem(record: dict[str, object]) -> str:
+    """The one place a map file name is derived: ``map/<date>_<item_id>``."""
+    return f"{_MAP_DIR}/{record['date']}_{record['item_id_used']}"
+
+
 def map_path(record: dict[str, object]) -> str:
     """Relative path of a scene's map GeoTIFF: ``map/<date>_<item_id>.tif``."""
-    return f"map/{record['date']}_{record['item_id_used']}.tif"
+    return f"{_map_stem(record)}.tif"
 
 
 def png_path(record: dict[str, object]) -> str:
     """Relative path of a scene's display PNG: ``map/<date>_<item_id>.png``."""
-    return f"map/{record['date']}_{record['item_id_used']}.png"
+    return f"{_map_stem(record)}.png"
 
 
 @cache
@@ -207,8 +213,19 @@ def validate(name: str, document: dict[str, object]) -> None:
 
 
 def canonical_json(document: dict[str, object]) -> str:
-    """Canonical JSON text: sorted keys, 2-space indent, trailing newline."""
-    return json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    """Canonical JSON text: sorted keys, 2-space indent, trailing newline.
+
+    Raises ContractInvalid for NaN or infinity: they are not valid JSON and a
+    consumer's parser would reject (or silently mangle) the file.
+    """
+    try:
+        text = json.dumps(
+            document, indent=2, sort_keys=True, ensure_ascii=False, allow_nan=False
+        )
+    except ValueError as exc:
+        msg = f"document is not valid JSON: {exc}"
+        raise ContractInvalid(msg) from exc
+    return text + "\n"
 
 
 def _round(value: object, decimals: int | None) -> object:
@@ -226,20 +243,44 @@ def _cover_band(pct_published: object) -> str | None:
 
 
 def _read_manifest(run_dir: Path) -> dict[str, object]:
-    return json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    """The run's manifest; raise PublishRefused if unreadable or not an object."""
+    path = run_dir / "manifest.json"
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:  # ValueError covers JSON and UTF-8 errors
+        msg = f"run {run_dir.name} has an unreadable manifest.json: {exc}"[:300]
+        raise PublishRefused(msg) from exc
+    if not isinstance(manifest, dict):
+        msg = f"run {run_dir.name} has a manifest.json that is not a JSON object"
+        raise PublishRefused(msg)
+    return manifest
+
+
+def _is_complete(run_dir: Path) -> bool:
+    """True for a run whose manifest is readable and says complete.
+
+    WHY: default selection skips unreadable manifests, so one truncated run
+    (e.g. an interrupted build) cannot block every default publish.
+    """
+    try:
+        return _read_manifest(run_dir).get("status") == "complete"
+    except PublishRefused:
+        return False
 
 
 def select_run(series_root: Path, run_id: str | None) -> Path:
     """Run directory to publish: ``run_id``, or the newest complete run.
 
-    Raises PublishRefused for an unknown run, no complete run, a run that is
-    not complete, or a run built from a dirty tree.
+    Default selection skips runs whose manifest is unreadable. Raises
+    PublishRefused for an unknown run, no complete run, a run that is not
+    complete or whose manifest is unreadable, or a run built from a dirty
+    tree.
     """
     if run_id is None:
         complete = [
             path.parent
             for path in sorted(series_root.glob("*/manifest.json"))
-            if _read_manifest(path.parent).get("status") == "complete"
+            if _is_complete(path.parent)
         ]
         if not complete:
             msg = f"no complete run under {series_root}"
@@ -261,6 +302,14 @@ def select_run(series_root: Path, run_id: str | None) -> Path:
     return run_dir
 
 
+def _require_dict(value: object, what: str) -> dict:
+    """``value`` if it is a dict; else ContractInvalid (a malformed run input)."""
+    if not isinstance(value, dict):
+        msg = f"{what} is not a JSON object (got {type(value).__name__})"
+        raise ContractInvalid(msg)
+    return value
+
+
 def _newest_acquisition(records: list[dict[str, object]]) -> dict[str, object]:
     """Newest scene of the run with status ok or skipped (never error).
 
@@ -270,8 +319,7 @@ def _newest_acquisition(records: list[dict[str, object]]) -> dict[str, object]:
     seen = [record for record in records if record["status"] in ("ok", "skipped")]
     record = seen[-1]
     if record["status"] == "ok":
-        row = record["row"]
-        assert isinstance(row, dict)
+        row = _require_dict(record["row"], f"row of {record['item_id_used']}")
         light = row["light"]
     else:
         light = "POOR"
@@ -322,8 +370,7 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
             entry[field] = None
         entry["valid_frac"] = _round(record["valid_frac"], _DECIMALS_FRACTION)
         return entry
-    row = record["row"]
-    assert isinstance(row, dict)
+    row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     entry = {
         "date": row["date"],
         "item_id": record["item_id_used"],
@@ -360,8 +407,7 @@ def latest_document(
         "smolf_version": __version__,
         **_scene_entry(record),
     }
-    counts = manifest["counts"]
-    assert isinstance(counts, dict)
+    counts = _require_dict(manifest["counts"], "manifest counts")
     document["newest_acquisition"] = _newest_acquisition(records)
     document["run_counts"] = {key: counts[key] for key in ("ok", "skipped", "errors")}
     document["run_id"] = run_id
@@ -489,8 +535,7 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
     Class 5 uses the run row's level and the margin recomputed from it
     (never a fresh level lookup), and only when the correction was applied.
     """
-    row = record["row"]
-    assert isinstance(row, dict)
+    row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     item_id = record["item_id_used"]
     ing = _cached_scene(record)
     result = classify_scene(ing)
@@ -587,7 +632,10 @@ def _swap_in(staging: Path, out_dir: Path) -> None:
     except BaseException:
         previous.rename(out_dir)
         raise
-    shutil.rmtree(previous)
+    # WHY ignore errors: the new contract is already in place; a leftover of
+    #   the previous one (e.g. a file someone holds open) must not turn a
+    #   successful publish into a failure.
+    shutil.rmtree(previous, ignore_errors=True)
 
 
 def publish_index(
@@ -616,17 +664,17 @@ def _write_contract(
     documents: dict[str, str],
     run_id: str,
     series_sha256: str,
-    maps: dict[str, PublishedMap] | None = None,
+    maps: list[tuple[str, str, PublishedMap]] | None = None,
 ) -> None:
     """Write allowlisted files into a sibling staging dir, then swap it in.
 
-    Maps (keyed by their GeoTIFF path; the PNG sits beside it) go through the
-    guarded raster writers only (uint8, classes 0-5). ``publish.json`` is
-    built last from the bytes actually staged and validated before the swap.
+    Maps, given as (GeoTIFF path, PNG path, layer), go through the guarded
+    raster writers only (uint8, classes 0-5). ``publish.json`` is built last
+    from the bytes actually staged and validated before the swap.
     """
-    maps = {} if maps is None else maps
-    pngs = {Path(name).with_suffix(".png").as_posix(): name for name in maps}
-    for name in [*documents, *maps, *pngs]:
+    maps = [] if maps is None else maps
+    map_names = [name for tif, png, _ in maps for name in (tif, png)]
+    for name in [*documents, *map_names]:
         if not is_allowed(name):
             msg = f"refusing to publish a file outside the allowlist: {name}"
             raise ValueError(msg)
@@ -641,11 +689,13 @@ def _write_contract(
     try:
         for name, text in documents.items():
             (staging / name).write_text(text, encoding="utf-8")
-        for name, layer in maps.items():
-            target = staging / name
-            target.parent.mkdir(mode=0o755, exist_ok=True)
-            write_published_geotiff(target, layer.class_map, layer.transform, layer.crs)
-            write_display_png(staging / Path(name).with_suffix(".png"), layer.display)
+        for tif, png, layer in maps:
+            for name in (tif, png):
+                (staging / name).parent.mkdir(mode=0o755, exist_ok=True)
+            write_published_geotiff(
+                staging / tif, layer.class_map, layer.transform, layer.crs
+            )
+            write_display_png(staging / png, layer.display)
         index = publish_index(staging, run_id, series_sha256, series.utc_now())
         validate("publish", index)
         (staging / INDEX_FILE).write_text(canonical_json(index), encoding="utf-8")
@@ -678,8 +728,7 @@ def publish_run(
     series_doc = series_document(records, manifest)
     record = latest_record(records)
     layer = build_map(record, manifest)
-    latest_map = latest["map"]
-    assert isinstance(latest_map, dict)
+    latest_map = _require_dict(latest["map"], "latest.json map")
     latest_map["bounds"] = layer.display.bounds
     validate("latest", latest)
     validate("series", series_doc)
@@ -691,6 +740,6 @@ def publish_run(
         },
         str(manifest["run_id"]),
         str(manifest["series_sha256"]),
-        {map_path(record): layer},
+        [(map_path(record), png_path(record), layer)],
     )
     return target

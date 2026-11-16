@@ -27,6 +27,8 @@ uv run smolf levels update           # refresh the SIH water-level record
 uv run smolf levels show 2026-10-12  # level for one exact day (no interpolation)
 uv run smolf hydro curve             # build the stage–area curve
 uv run smolf hydro flood-map         # build the per-pixel flood-stage map
+uv run smolf series build            # build or resume the hyacinth time series
+uv run smolf publish                 # publish the versioned data contract
 uv run pytest                        # tests (no network; live tests need SMOLF_LIVE=1)
 ```
 

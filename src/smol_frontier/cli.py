@@ -454,9 +454,10 @@ def publish(
 
     Refuses (exit 2) incomplete or dirty runs, runs with no scene that has
     figures, and a latest scene whose re-classified map disagrees with the
-    run (cache, flood-stage map, hectares); an output failing its own schema
-    or the raster guard is a bug (exit 1). The
-    output directory is replaced atomically; on any failure it is untouched.
+    run (cache, flood-stage map, hectares), and an --out directory that is
+    not a previous publish; an output failing its own schema or the raster
+    guard is a bug (exit 1). The output directory is replaced atomically; on
+    any failure it is untouched.
     """
     try:
         out_dir = publish_run(run_id=run, out_dir=out)

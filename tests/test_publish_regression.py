@@ -3,10 +3,12 @@
 Each test builds a one-scene run directory in tmp_path from a committed
 scene record (tests/fixtures/publish_regression/) and publishes it for
 real: hash-verified cache read, re-classification, class-5 mask, schema
-validation, atomic write. The records are real: the 2026-10-12 one is
-copied verbatim from series run 20261030T031055 (Earth Search); the
-2024-06-09 one is the Planetary Computer copy of the dry-season control
-scene, the backend the control values in AGENTS.md were measured on.
+validation, atomic write. Provenance of the two records differs: the
+2026-10-12 one comes from a real series run (copied verbatim from run
+20261030T031055, Earth Search); the 2024-06-09 one was generated once from
+the cached Planetary Computer copy of the dry-season control scene with
+the pipeline's own code (no series run covers it), so its values are the
+AGENTS.md control values.
 
 Skips with a clear reason when the scene is not cached (CI) or the local
 cache file is not the one the record was built from (a re-fetch): a cache

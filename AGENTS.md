@@ -54,6 +54,9 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `outputs/series/` — series runs, one directory per run id with scene
   JSONs, `series.csv`, and `manifest.json` (gitignored, regenerable via
   `smolf series build`).
+- `outputs/publish/` — the published data contract (`latest.json`,
+  `series.json`, `publish.json`, the latest scene's map; gitignored,
+  regenerable via `smolf publish`).
 
 ## Parameters and provenance
 

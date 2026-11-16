@@ -229,8 +229,13 @@ not applied, no pixel is class 5.
 
 `publish` refuses (exit 2) when:
 
+- the output directory exists, is not empty, and is not a previous
+  publish (no `publish.json`, or any file outside the allowlist): smolf
+  only ever replaces its own contract, never unrelated data;
 - the run is unknown, or there is no complete run (default selection is
-  the newest run, by run id, whose manifest status is complete);
+  the newest run, by run id, whose manifest is readable and whose status is
+  complete; a run with a corrupt manifest is skipped);
+- the run given with `--run` has an unreadable manifest;
 - the run is not complete, or its code fingerprint is dirty;
 - the run has no scene with figures (no `ok` scene);
 - the latest scene's cached file does not hash to the run's record (a

@@ -253,7 +253,9 @@ the curve's or the flood-stage map's sha256 differs from the run
 manifest's inputs, when the recomputed margin does not round to the row's
 `margin_m`, or when class-5 pixels × `PIXEL_HA = 0.01` differ from
 `removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
-run, no `ok` scene, cache hash mismatch, hectare mismatch. A schema or
+run, unreadable manifest of an explicit `--run` (default selection skips
+it), no `ok` scene, cache hash mismatch, hectare mismatch, and an `--out`
+directory that is non-empty but not a previous publish. A schema or
 raster-guard failure of smolf's own output is a bug (exit 1). Rasters go
 only through the guarded writers (uint8, values 0–5), files only through the
 allowlist, and the directory is swapped in by rename after validation.

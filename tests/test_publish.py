@@ -183,7 +183,7 @@ def test_publish_latest_golden_values(
     out = tmp_path / "pub"
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 0, result.output
-    assert sorted(p.name for p in out.iterdir()) == ["latest.json"]
+    assert sorted(p.name for p in out.iterdir()) == ["latest.json", "series.json"]
     assert _latest(out) == {
         "date": "2024-01-04",
         "item_id": "S2B_14QMH_20240104_0_L2A",
@@ -615,3 +615,175 @@ def test_publish_latest_output_dir_is_world_readable(
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 0
     assert out.stat().st_mode & 0o755 == 0o755
+
+
+# --- series.json ----------------------------------------------------------
+
+
+def _series(out: Path) -> dict:
+    return json.loads((out / "series.json").read_text(encoding="utf-8"))
+
+
+def _series_run(series_root: Path, tmp_path: Path) -> dict:
+    records = _default_records()
+    records.append(
+        _record("2024-01-06", "S2A_14QMH_20240106_0_L2A", "ok", bed_applied=False)
+    )
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    return _series(out)
+
+
+def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> None:
+    doc = _series_run(series_root, tmp_path)
+    scenes = doc["scenes"]
+    assert [s["date"] for s in scenes] == [
+        "2024-01-01",
+        "2024-01-02",
+        "2024-01-04",
+        "2024-01-05",
+        "2024-01-06",
+    ]
+    assert doc["run_id"] == RUN_ID
+    assert doc["series_sha256"] == "cd" * 32
+    assert doc["schema_version"] == "1.0.0"
+    assert doc["smolf_version"] == __version__
+    assert [s["quality_light"] for s in scenes] == [
+        "GOOD",
+        "DOUBTFUL",
+        "GOOD",
+        "POOR",
+        "GOOD",
+    ]
+
+
+def test_publish_series_sorted_ascending_for_unsorted_records(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = list(reversed(_default_records()))
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    dates = [s["date"] for s in _series(out)["scenes"]]
+    assert dates == sorted(dates)
+
+
+def test_publish_series_poor_entry_is_all_null(
+    series_root: Path, tmp_path: Path
+) -> None:
+    poor = _series_run(series_root, tmp_path)["scenes"][3]
+    assert poor["item_id"] == "S2A_14QMH_20240105_0_L2A"
+    assert poor["valid_frac"] == 0.4322
+    nulls = {k for k, v in poor.items() if v is None}
+    assert nulls == set(poor) - {"date", "item_id", "quality_light", "valid_frac"}
+    assert poor["hyacinth_raw_ha"] is None
+    assert poor["bed_applied"] is None
+    assert poor["regime"] is None
+
+
+def test_publish_series_entry_matches_latest_fields(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    latest = _latest(out)
+    entry = next(s for s in _series(out)["scenes"] if s["date"] == latest["date"])
+    assert entry == {k: latest[k] for k in entry}
+    assert entry["regime"] == "EXPOSED_BED"
+
+
+def test_publish_series_bed_not_applied_nulls(
+    series_root: Path, tmp_path: Path
+) -> None:
+    entry = _series_run(series_root, tmp_path)["scenes"][4]
+    assert entry["bed_applied"] is False
+    assert entry["hyacinth_corrected_ha"] is None
+    assert entry["cover_band"] is None
+    assert entry["hyacinth_raw_ha"] == 631.11
+
+
+def test_publish_series_byte_identical_and_canonical(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    a, b = tmp_path / "a", tmp_path / "b"
+    assert _publish(a).exit_code == 0
+    assert _publish(b).exit_code == 0
+    text = (a / "series.json").read_text(encoding="utf-8")
+    assert text == (b / "series.json").read_text(encoding="utf-8")
+    assert text == publish.canonical_json(json.loads(text))
+
+
+def test_publish_series_in_allowlist(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    assert {p.name for p in out.iterdir()} == {"latest.json", "series.json"}
+
+
+def test_publish_series_schema_accepts_and_tolerates_extras(
+    series_root: Path, tmp_path: Path
+) -> None:
+    doc = _series_run(series_root, tmp_path)
+    publish.validate("series", doc)
+    doc["scenes"][0]["extra"] = 1
+    doc["extra"] = 1
+    publish.validate("series", doc)
+
+
+def _mutate_scene(doc: dict, index: int, key: str, value: object) -> None:
+    doc["scenes"][index][key] = value
+
+
+@pytest.mark.parametrize(
+    ("index", "key", "value"),
+    [
+        (3, "hyacinth_raw_ha", 10.0),  # POOR with figures
+        (3, "dense_ha", 1.0),
+        (3, "regime", "CLEAN"),
+        (3, "bed_applied", True),
+        (3, "quality_light", "BUENA"),  # unknown light
+        (0, "quality_light", "BUENA"),
+        (0, "regime", "clean"),
+        (0, "hyacinth_raw_ha", None),  # non-POOR must have figures
+        (0, "valid_frac", 1.5),
+        (0, "date", "2024-01-01T00:00:00Z"),
+        (4, "hyacinth_corrected_ha", 5.0),  # bed not applied
+    ],
+)
+def test_publish_series_schema_rejects_bad_entries(
+    series_root: Path, tmp_path: Path, index: int, key: str, value: object
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    _mutate_scene(doc, index, key, value)
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)
+
+
+@pytest.mark.parametrize("key", ["scenes", "run_id", "series_sha256", "schema_version"])
+def test_publish_series_schema_rejects_missing_top_level(
+    series_root: Path, tmp_path: Path, key: str
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    del doc[key]
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)
+
+
+def test_publish_series_invalid_output_exit_1_writes_nothing(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    real = publish.series_document
+
+    def bad(*args: object) -> dict:
+        doc = real(*args)
+        doc["scenes"][0]["quality_light"] = "BUENA"
+        return doc
+
+    monkeypatch.setattr(publish, "series_document", bad)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 1
+    assert not out.exists()

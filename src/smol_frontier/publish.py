@@ -37,6 +37,7 @@ __all__ = [
     "latest_document",
     "publish_run",
     "select_run",
+    "series_document",
     "validate",
 ]
 
@@ -51,7 +52,7 @@ SCHEMA_VERSION = "1.0.0"
 
 # WHY: allowlist — the only files `publish` may ever write, so nothing
 #   unexpected (e.g. source imagery) can reach the published directory.
-ALLOWED_FILES = frozenset({"latest.json"})
+ALLOWED_FILES = frozenset({"latest.json", "series.json"})
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
@@ -228,6 +229,42 @@ def current_level(levels_path: Path | None = None) -> dict[str, object] | None:
     }
 
 
+def _scene_entry(record: dict[str, object]) -> dict[str, object]:
+    """Per-scene contract fields (C11) of an ``ok`` or ``skipped`` record.
+
+    Shared by ``latest.json`` and ``series.json``. A skipped (POOR) scene has
+    no row: it carries date, item_id, quality_light, valid_frac and null for
+    every other field.
+    """
+    if record["status"] == "skipped":
+        entry: dict[str, object] = {
+            "date": record["date"],
+            "item_id": record["item_id_used"],
+            "quality_light": "POOR",
+            "regime": None,
+            "cover_band": None,
+        }
+        for field, decimals in _SCENE_FIELDS:
+            entry[field] = None
+        entry["valid_frac"] = _round(record["valid_frac"], _DECIMALS_FRACTION)
+        return entry
+    row = record["row"]
+    assert isinstance(row, dict)
+    entry = {
+        "date": row["date"],
+        "item_id": record["item_id_used"],
+        "quality_light": row["light"],
+        "regime": _REGIME.get(str(row["regime"]), row["regime"]),
+    }
+    for field, decimals in _SCENE_FIELDS:
+        entry[field] = _round(row[field], decimals)
+    if not row["bed_applied"]:
+        for field in _CORRECTED_FIELDS:
+            entry[field] = None
+    entry["cover_band"] = _cover_band(entry["pct_reservoir_corrected"])
+    return entry
+
+
 def latest_document(
     records: list[dict[str, object]],
     manifest: dict[str, object],
@@ -244,22 +281,11 @@ def latest_document(
         msg = f"run {run_id} has no scene with figures (no ok scene)"
         raise PublishRefused(msg)
     record = ok[-1]
-    row = record["row"]
-    assert isinstance(row, dict)
     document: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "smolf_version": __version__,
-        "date": row["date"],
-        "item_id": record["item_id_used"],
-        "quality_light": row["light"],
-        "regime": _REGIME.get(str(row["regime"]), row["regime"]),
+        **_scene_entry(record),
     }
-    for field, decimals in _SCENE_FIELDS:
-        document[field] = _round(row[field], decimals)
-    if not row["bed_applied"]:
-        for field in _CORRECTED_FIELDS:
-            document[field] = None
-    document["cover_band"] = _cover_band(document["pct_reservoir_corrected"])
     counts = manifest["counts"]
     assert isinstance(counts, dict)
     document["newest_acquisition"] = _newest_acquisition(records)
@@ -274,6 +300,27 @@ def latest_document(
     }
     document["current_level"] = current_level(levels_path)
     return document
+
+
+def series_document(
+    records: list[dict[str, object]], manifest: dict[str, object]
+) -> dict:
+    """``series.json``: every ok and skipped scene, sorted by date.
+
+    Error scenes are excluded. No quality flags (C16): runs do not persist
+    them and publish never recomputes them.
+    """
+    scenes = sorted(
+        (_scene_entry(r) for r in records if r["status"] in ("ok", "skipped")),
+        key=lambda entry: (str(entry["date"]), str(entry["item_id"])),
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "smolf_version": __version__,
+        "run_id": str(manifest["run_id"]),
+        "series_sha256": manifest["series_sha256"],
+        "scenes": scenes,
+    }
 
 
 def _swap_in(staging: Path, out_dir: Path) -> None:
@@ -331,6 +378,14 @@ def publish_run(
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     latest = latest_document(records, _read_manifest(run_dir), levels_path)
+    series_doc = series_document(records, _read_manifest(run_dir))
     validate("latest", latest)
-    _write_contract(target, {"latest.json": canonical_json(latest)})
+    validate("series", series_doc)
+    _write_contract(
+        target,
+        {
+            "latest.json": canonical_json(latest),
+            "series.json": canonical_json(series_doc),
+        },
+    )
     return target

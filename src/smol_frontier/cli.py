@@ -4,6 +4,7 @@ import math
 import sys
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Annotated
 
 import numpy as np
@@ -40,6 +41,7 @@ from smol_frontier.hydro.levels import (
     load_levels,
     update_levels,
 )
+from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     OUTPUT_DIR as SERIES_OUTPUT_DIR,
@@ -435,6 +437,34 @@ def series_build(
         f" skipped={counts['skipped']} errors={counts['errors']}"
     )
     typer.echo(f"wall: {time.strftime('%H:%M:%S', time.gmtime(wall))}")
+
+
+@app.command("publish")
+def publish(
+    run: Annotated[
+        str | None,
+        typer.Option("--run", help="Run id (default: the newest complete run)."),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output directory (default: outputs/publish)."),
+    ] = None,
+) -> None:
+    """Publish the versioned data contract (latest.json) from one series run.
+
+    Refuses (exit 2) incomplete or dirty runs and runs with no scene that
+    has figures; an output failing its own schema is a bug (exit 1). The
+    output directory is replaced atomically; on any failure it is untouched.
+    """
+    try:
+        out_dir = publish_run(run_id=run, out_dir=out)
+    except PublishRefused as exc:
+        typer.echo(f"refused: {exc}")
+        raise typer.Exit(2)
+    except ContractInvalid as exc:
+        typer.echo(f"error: {exc}")
+        raise typer.Exit(1)
+    typer.echo(f"published: {out_dir / 'latest.json'}")
 
 
 if __name__ == "__main__":

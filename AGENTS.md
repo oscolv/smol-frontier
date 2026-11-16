@@ -128,3 +128,17 @@ The author's prior research and the SIH data are in Spanish:
 - Commits: create a commit only when the user asks; conventional commit
   messages; no trailers. All code in this repository is written with Muse
   Code during the hackathon, as disclosed in README.md and PRIOR_WORK.md.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues of `oscolv/smol-frontier` (via `gh`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: glossary in this file's `## Glossary` (until a root `GLOSSARY.md` exists), decisions in `docs/decisions.md` and `docs/adr/`. See `docs/agents/domain.md`.

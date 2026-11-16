@@ -9,6 +9,7 @@ import rasterio
 import smol_frontier.hydro.bed as bed_module
 from smol_frontier.config import settings
 from smol_frontier.hydro.bed import (
+    bed_margin,
     compute_bed_correction,
     correct_bed,
     cushion_ha,
@@ -232,3 +233,22 @@ def test_bed_mask_matches_compute_bed_correction_removed() -> None:
     assert out.margin_m is not None
     mask = exposed_bed_mask(class_map, flood, 2001.2, out.margin_m)
     assert float(mask.sum()) * 0.01 == pytest.approx(out.removed_ha)
+
+
+def test_bed_mask_margin_function_matches_compute_bed_correction() -> None:
+    stages = [2000.0, 2001.0, 2002.0, 2003.0]
+    areas = [0.1, 0.2, 0.9, 1.0]
+    out = compute_bed_correction(
+        np.array([[DENSE]]),
+        np.array([[2000.0]]),
+        2000.5,
+        stages,
+        areas,
+        areas,
+        areas,
+        100.0,
+    )
+    assert bed_margin(2000.5, stages, areas, areas, areas) == out.margin_m
+    assert bed_margin(2000.5, stages, areas, areas, areas) == pytest.approx(
+        2001 + 24 / 70
+    )

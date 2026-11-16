@@ -34,8 +34,8 @@ from smol_frontier import __version__, aoi, ingest, series
 from smol_frontier.classify.geotiff import write_published_geotiff
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.hydro import flood_map, levels
-from smol_frontier.hydro.bed import exposed_bed_mask
+from smol_frontier.hydro import curve, flood_map, levels
+from smol_frontier.hydro.bed import bed_margin, exposed_bed_mask
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.sources.stac import SceneMeta, get_scene
 
@@ -397,20 +397,54 @@ def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
     return ingest_scene(stub, cache_dir=cache_dir)
 
 
+def _check_input(manifest: dict[str, object], key: str, path: Path, label: str) -> None:
+    """Refuse unless ``path`` hashes to the run manifest's ``inputs[key]``."""
+    inputs = manifest.get("inputs")
+    expected = inputs.get(key) if isinstance(inputs, dict) else None
+    actual = series.sha256_file(path)
+    if expected is None or actual != expected:
+        msg = (
+            f"{label} sha256 ({actual}) differs from the run manifest "
+            f"inputs ({expected})"
+        )
+        raise PublishRefused(msg)
+
+
+def _run_margin(manifest: dict[str, object], row: dict[str, object]) -> float:
+    """Full-precision margin the run's bed correction used for the row level.
+
+    WHY recomputed: the run row stores ``margin_m`` rounded to 2 dp, while
+    the correction removed pixels with the full-precision margin; masking
+    with the rounded value moves pixels whose stage lies between the two
+    and breaks the removed_ha check. So the margin is recomputed from the
+    row's ``level_m`` (no level lookup) with the committed stage-area curve,
+    which must be the curve the run used and must reproduce the row margin.
+    """
+    path = curve.DEFAULT_CURVE_CSV_PATH
+    _check_input(manifest, "stage_area_curve_csv", path, "stage-area curve")
+    grid = curve.load_curve(path)
+    margin = bed_margin(
+        float(row["level_m"]),
+        grid.stage_m,
+        grid.area_km2,
+        grid.area_p2_5,
+        grid.area_p97_5,
+    )
+    if round(margin, 2) != round(float(row["margin_m"]), 2):
+        msg = (
+            f"recomputed margin {round(margin, 2)} m differs from the run "
+            f"margin_m {round(float(row['margin_m']), 2)} m"
+        )
+        raise PublishRefused(msg)
+    return margin
+
+
 def _flood_stage_for(
     manifest: dict[str, object], ing: ingest.IngestedScene, shape: tuple[int, ...]
 ) -> np.ndarray:
     """The flood-stage map the run used, on the scene's grid (else refuse)."""
-    inputs = manifest.get("inputs")
-    expected = inputs.get("flood_stage_tif") if isinstance(inputs, dict) else None
     path = flood_map.DEFAULT_FLOOD_PATH
-    actual = series.sha256_file(path)
-    if expected is None or actual != expected:
-        msg = (
-            f"flood-stage map sha256 ({actual}) differs from the run manifest "
-            f"inputs ({expected})"
-        )
-        raise PublishRefused(msg)
+    _check_input(manifest, "flood_stage_tif", path, "flood-stage map")
     flood, transform, crs = flood_map.load_flood_map(path)
     if (
         flood.shape != shape
@@ -427,8 +461,8 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
 
     Refuses (PublishRefused) when the cache hash, the per-class hectares,
     the flood-stage map hash or the removed hectares disagree with the run.
-    Class 5 uses the run row's level and margin, never a fresh lookup, and
-    only when the correction was applied.
+    Class 5 uses the run row's level and the margin recomputed from it
+    (never a fresh level lookup), and only when the correction was applied.
     """
     row = record["row"]
     assert isinstance(row, dict)
@@ -449,9 +483,8 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
     published = np.array(result.class_map, copy=True)
     if row["bed_applied"]:
         flood = _flood_stage_for(manifest, ing, published.shape)
-        removed = exposed_bed_mask(
-            published, flood, float(row["level_m"]), float(row["margin_m"])
-        )
+        margin = _run_margin(manifest, row)
+        removed = exposed_bed_mask(published, flood, float(row["level_m"]), margin)
         removed_ha = round(float(removed.sum()) * flood_map.PIXEL_HA, 2)
         if removed_ha != round(float(row["removed_ha"]), 2):
             msg = (

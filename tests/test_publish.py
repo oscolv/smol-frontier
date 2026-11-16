@@ -22,7 +22,8 @@ from smol_frontier import __version__, aoi, ingest, publish, series
 from smol_frontier.classify.geotiff import hex_to_rgba
 from smol_frontier.cli import app
 from smol_frontier.config import settings
-from smol_frontier.hydro import flood_map, levels
+from smol_frontier.hydro import curve, flood_map, levels
+from smol_frontier.hydro.bed import bed_margin
 from smol_frontier.sources.stac import SceneMeta
 
 RUN_ID = "20240110T120000"
@@ -57,6 +58,9 @@ def _flood_stage() -> np.ndarray:
     (2010.3 m), soil on safe bed, and no stage under the nodata strip."""
     flood = np.full((20, 20), 2000.0, dtype=np.float32)
     flood.reshape(-1)[:56] = 2011.0
+    # above the recomputed margin (2010.546) yet below the row's 2-dp
+    # margin (2010.55): class 5 only when the full-precision margin is used
+    flood[2, 15] = 2010.548
     flood[2, 16:] = 2010.3
     flood[3, :5] = 2010.3
     flood[19, :10] = 2011.0
@@ -66,6 +70,22 @@ def _flood_stage() -> np.ndarray:
 
 SAFE_BED_HYACINTH_PX = 56
 BAND_HYACINTH_PX = 9
+
+# WHY: a straight stage-area curve with zero bootstrap width, so the cushion
+#   is the model leg alone: at the row level 2010.123456 the margin is
+#   2010.123456 + cushion / (100 * slope) = 2010.545984, published 2010.55.
+CURVE_SLOPE_KM2_PER_M = 0.961
+FULL_MARGIN_M = 2010.545984
+
+
+def _write_curve(path: Path) -> Path:
+    rows = ["stage_m,volume_hm3,area_km2,area_km2_p2_5,area_km2_p97_5"]
+    for stage in (2000.0, 2020.0):
+        area = (stage - 2000.0) * CURVE_SLOPE_KM2_PER_M
+        rows.append(f"{stage},0.0,{area},{area},{area}")
+    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return path
+
 
 # WHY: the classifier hectares the fake classify reports — the default row's
 #   unrounded figures, so the hundredth check passes unless a test edits them.
@@ -111,9 +131,12 @@ def scene_env(
         dst.write(flood, 1)
     monkeypatch.setattr(ingest, "DEFAULT_CACHE_DIR", cache_dir)
     monkeypatch.setattr(flood_map, "DEFAULT_FLOOD_PATH", flood_path)
+    curve_path = _write_curve(base / "stage_area_curve.csv")
+    monkeypatch.setattr(curve, "DEFAULT_CURVE_CSV_PATH", curve_path)
     env = SimpleNamespace(
         cache_dir=cache_dir,
         flood_path=flood_path,
+        curve_path=curve_path,
         stac_calls=[],
         ingest_calls=[],
         download=_cache_bytes,
@@ -265,7 +288,10 @@ def _write_run(
         "scenes": [{k: v for k, v in r.items() if k != "row"} for r in records],
         "series_csv": "series.csv",
         "series_sha256": "cd" * 32,
-        "inputs": {"flood_stage_tif": series.sha256_file(flood_map.DEFAULT_FLOOD_PATH)},
+        "inputs": {
+            "flood_stage_tif": series.sha256_file(flood_map.DEFAULT_FLOOD_PATH),
+            "stage_area_curve_csv": series.sha256_file(curve.DEFAULT_CURVE_CSV_PATH),
+        },
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     return run_dir
@@ -975,25 +1001,59 @@ def test_publish_map_geotiff_written_with_class_5(
     assert array[0, 0] == REMOVED and expected[0, 0] == REMOVED
 
 
-def test_publish_map_uses_row_level_and_margin(
+def test_publish_map_fixture_margin_is_consistent() -> None:
+    grid = curve.load_curve(curve.DEFAULT_CURVE_CSV_PATH)
+    margin = bed_margin(
+        2010.123456, grid.stage_m, grid.area_km2, grid.area_p2_5, grid.area_p97_5
+    )
+    assert margin == pytest.approx(FULL_MARGIN_M, abs=1e-6)
+    assert round(margin, 2) == _row("2024-01-04", LATEST_ITEM)["margin_m"]
+
+
+def test_publish_map_uses_recomputed_full_precision_margin(
     series_root: Path, tmp_path: Path
 ) -> None:
-    # A margin below the band pixels' stage makes them safe bed too.
-    records = [
-        _record(
-            "2024-01-04",
-            LATEST_ITEM,
-            "ok",
-            margin_m=2010.2,
-            removed_ha=(SAFE_BED_HYACINTH_PX + BAND_HYACINTH_PX) * 0.01,
-        )
-    ]
-    _write_run(series_root, records=records)
+    # The pixel at 2010.548 m lies between the full margin and the row's
+    # 2-dp margin: the run removed it, so the map must too.
+    _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
     out = tmp_path / "pub"
     result = _publish(out)
     assert result.exit_code == 0, result.output
     array, _ = _map(out)
-    assert int((array == REMOVED).sum()) == SAFE_BED_HYACINTH_PX + BAND_HYACINTH_PX
+    assert array[2, 15] == REMOVED
+    assert int((array == REMOVED).sum()) == SAFE_BED_HYACINTH_PX
+
+
+def test_publish_map_row_margin_inconsistent_exit_2(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(
+        series_root,
+        records=[_record("2024-01-04", LATEST_ITEM, "ok", margin_m=2010.2)],
+    )
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "margin" in lines[0] and "2010.2" in lines[0]
+    assert not out.exists()
+
+
+def test_publish_map_stage_area_curve_hash_mismatch_exit_2(
+    series_root: Path, tmp_path: Path
+) -> None:
+    run_dir = _write_run(series_root)
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest["inputs"]["stage_area_curve_csv"] = "0" * 64
+    (run_dir / "manifest.json").write_text(json.dumps(manifest))
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "stage-area curve" in lines[0]
+    assert not out.exists()
 
 
 def test_publish_map_bed_not_applied_has_no_class_5(

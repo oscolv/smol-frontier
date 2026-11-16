@@ -28,6 +28,7 @@ from smol_frontier.hydro.levels import level_on
 
 __all__ = [
     "BedCorrection",
+    "bed_margin",
     "compute_bed_correction",
     "correct_bed",
     "cushion_ha",
@@ -76,6 +77,23 @@ def cushion_ha(
     return float(max(model, half_width))
 
 
+def bed_margin(
+    level: float,
+    stage_m: np.ndarray,
+    area_km2: np.ndarray,
+    area_p2_5: np.ndarray,
+    area_p97_5: np.ndarray,
+) -> float:
+    """Level-plus-margin in m (full precision): the stage whose area exceeds
+    the level's area by the uncertainty cushion, never below the level. Pure.
+    """
+    curve_h = np.asanyarray(stage_m, dtype=np.float64)
+    curve_a = np.asanyarray(area_km2, dtype=np.float64) * 100.0
+    level_area = float(np.interp(level, curve_h, curve_a))
+    cushion = cushion_ha(level, curve_h, area_p2_5, area_p97_5)
+    return max(level, float(np.interp(level_area + cushion, curve_a, curve_h)))
+
+
 def exposed_bed_mask(
     class_map: np.ndarray,
     flood_stage: np.ndarray,
@@ -115,11 +133,7 @@ def compute_bed_correction(
     s = settings
     classes = np.asanyarray(class_map)
     flood = np.asanyarray(flood_stage, dtype=np.float64)
-    curve_h = np.asanyarray(stage_m, dtype=np.float64)
-    curve_a = np.asanyarray(area_km2, dtype=np.float64) * 100.0
-    level_area = float(np.interp(level, curve_h, curve_a))
-    cushion = cushion_ha(level, curve_h, area_p2_5, area_p97_5)
-    margin = max(level, float(np.interp(level_area + cushion, curve_a, curve_h)))
+    margin = bed_margin(level, stage_m, area_km2, area_p2_5, area_p97_5)
 
     staged = flood != FLOOD_NODATA
     bed = staged & (flood > level)

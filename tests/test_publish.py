@@ -500,6 +500,25 @@ def test_publish_latest_default_run_is_newest_complete(
     assert _latest(out)["item_id"] == "B"
 
 
+def test_publish_latest_matches_last_series_scene_on_same_date(
+    series_root: Path, tmp_path: Path
+) -> None:
+    # Same-date scenes whose requested and used ids sort in opposite orders.
+    first = _record("2024-01-04", "U_B", "ok")
+    first["item_id_requested"] = "R_A"
+    second = _record("2024-01-04", "U_A", "ok")
+    second["item_id_requested"] = "R_B"
+    _write_run(series_root, records=[first, second])
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    scenes = json.loads((out / "series.json").read_text(encoding="utf-8"))["scenes"]
+    latest = _latest(out)
+    assert latest["item_id"] == scenes[-1]["item_id"] == "U_A"
+    for key in ("date", "item_id", "dense_ha", "level_m", "cover_band"):
+        assert latest[key] == scenes[-1][key]
+
+
 def test_publish_latest_is_canonical_and_byte_identical(
     series_root: Path, tmp_path: Path
 ) -> None:

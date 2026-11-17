@@ -129,7 +129,8 @@ def _newest_acquisition(records: list[dict[str, object]]) -> dict[str, object]:
     A skipped scene is POOR by construction (valid_frac under the minimum);
     an ok scene carries the light of its row. Records are sorted by date.
     """
-    seen = [record for record in records if record["status"] in ("ok", "skipped")]
+    ordered = sorted(records, key=series.record_sort_key)
+    seen = [record for record in ordered if record["status"] in ("ok", "skipped")]
     record = seen[-1]
     if record["status"] == "ok":
         row = _require_dict(record["row"], f"row of {record['item_id_used']}")
@@ -214,7 +215,7 @@ def latest_document(
     if not ok:
         msg = f"run {run_id} has no scene with figures (no ok scene)"
         raise PublishRefused(msg)
-    record = ok[-1]
+    record = latest_record(records)
     document: dict[str, object] = {
         "schema_version": SCHEMA_VERSION,
         "smolf_version": __version__,
@@ -239,7 +240,8 @@ def latest_document(
 
 def latest_record(records: list[dict[str, object]]) -> dict[str, object]:
     """The last ``ok`` record (the scene ``latest.json`` and the map describe)."""
-    return [record for record in records if record["status"] == "ok"][-1]
+    ordered = sorted(records, key=series.record_sort_key)
+    return [record for record in ordered if record["status"] == "ok"][-1]
 
 
 def series_document(
@@ -250,10 +252,11 @@ def series_document(
     Error scenes are excluded. No quality flags (C16): runs do not persist
     them and publish never recomputes them.
     """
-    scenes = sorted(
-        (_scene_entry(r) for r in records if r["status"] in ("ok", "skipped")),
-        key=lambda entry: (str(entry["date"]), str(entry["item_id"])),
-    )
+    scenes = [
+        _scene_entry(r)
+        for r in sorted(records, key=series.record_sort_key)
+        if r["status"] in ("ok", "skipped")
+    ]
     return {
         "schema_version": SCHEMA_VERSION,
         "smolf_version": __version__,

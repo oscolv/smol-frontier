@@ -32,6 +32,48 @@ uv run smolf publish                 # publish the versioned data contract
 uv run pytest                        # tests (no network; live tests need SMOLF_LIVE=1)
 ```
 
+## Daily job
+
+`smolf` can run as a scheduled daily job from a read-only code checkout:
+
+```sh
+export SMOLF_DATA_DIR=/path/to/writable/data
+uv run smolf levels update
+uv run smolf series build --extend
+uv run smolf publish
+```
+
+With `SMOLF_DATA_DIR` set (read at run time; unset or empty keeps the repo
+layout), every write goes under that folder:
+
+```text
+$SMOLF_DATA_DIR/
+  cache/                  ingested scenes
+  outputs/                classified GeoTIFFs
+  outputs/series/<run>/   series runs (scene JSONs, series.csv, manifest.json)
+  outputs/publish/        the published data contract
+  outputs/identity_gate/  identity gate reports
+  hydro/ENDHD.csv[.json]  the refreshed SIH level record and its sidecar
+```
+
+Until `hydro/ENDHD.csv` exists there, readers use the committed
+`data/hydro/ENDHD.csv`, and the first `levels update` validates the
+download against it. The other inputs (AOI, stage–area curve, flood-stage
+map, GSW raster, reference series) stay read-only in the checkout.
+
+`series build` exits 0 when the run completed, 2 on a precondition refusal
+(nothing written, retry later: stale level record, new-scene catalog
+unreachable, resume fingerprint mismatch) and 1 on anything else; see
+`docs/method.md` §9.
+
+Read-only checkout notes:
+
+- The run's code fingerprint calls `git`, so `git` must be installed and
+  the checkout's `.git` directory must be present.
+- When the job runs under a different user than the checkout's owner, git
+  refuses the repository; allow it once with
+  `git config --global --add safe.directory <checkout>`.
+
 ## Data
 
 - Sentinel-2 L2A: Copernicus Sentinel data (ESA), free and open access,

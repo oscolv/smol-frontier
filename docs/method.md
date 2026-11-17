@@ -161,9 +161,11 @@ the day's SIH level: hyacinth above the level plus an uncertainty margin is
 removed; hyacinth in the mirror or the margin band keeps counting. The
 class map itself is never changed — only the reported figures.
 
-- Levels: the committed SIH copy (`data/hydro/ENDHD.csv`), exact-day
-  lookup, never interpolated. Refreshes rejecting level revisions above
-  `LEVEL_REVISION_TOL_M = 0.05` m unless forced.
+- Levels: the committed SIH copy (`data/hydro/ENDHD.csv`), or the refreshed
+  copy under `SMOLF_DATA_DIR` once it exists, exact-day lookup, never
+  interpolated. Refreshes rejecting level revisions above
+  `LEVEL_REVISION_TOL_M = 0.05` m unless forced; the first refresh into a
+  data folder is validated against the committed copy.
 - Stage–area curve (`data/hydro/stage_area_curve.csv`): SIH pairs up to
   `CURVE_DATA_END = 2026-09-20`, `CURVE_BIN_M = 0.10` m bins with at least
   `CURVE_BIN_MIN_N = 5` days, fit up to `CURVE_FIT_H_MAX = 2017.5` m,

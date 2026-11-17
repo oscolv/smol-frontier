@@ -10,6 +10,7 @@ import hashlib
 import importlib
 import json
 import math
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -670,3 +671,25 @@ def test_code_and_other_data_changes_still_mark_the_tree_dirty() -> None:
     assert series.is_dirty(" M data/hydro/ENDHD.csv\n M src/smol_frontier/series.py\n")
     assert series.is_dirty("?? data/hydro/notes.txt\n")
     assert series.is_dirty("R  data/hydro/ENDHD.csv -> data/aoi/endho.gpkg\n")
+
+
+def test_config_hash_ignores_the_aoi_location(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A moved checkout must still resume (#24): AOI_PATH is a location."""
+    hashes = []
+    for name in ("a", "b"):
+        moved = replace(settings, AOI_PATH=tmp_path / name / "x.shp")
+        monkeypatch.setattr(series, "settings", moved)
+        hashes.append(series.config_hash())
+    assert hashes[0] == hashes[1]
+
+
+def test_config_hash_changes_with_a_threshold(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before = series.config_hash()
+    monkeypatch.setattr(
+        series, "settings", replace(settings, TAU_WATER=settings.TAU_WATER + 0.01)
+    )
+    assert series.config_hash() != before

@@ -183,11 +183,25 @@ def _freeze(value: object) -> object:
     return value
 
 
+# Settings fields that name where an input file lives, not what it holds.
+# Locations depend on where the checkout (or data folder) sits, so hashing
+# them would refuse `--resume` after the checkout moves (#24). The content of
+# those files is pinned by sha256 in `input_hashes()` instead.
+_CONFIG_HASH_EXCLUDED = frozenset({"AOI_PATH"})
+
+
 def config_hash() -> str:
-    """sha256 of a canonical JSON dump of the settings object (pure)."""
-    canonical = json.dumps(
-        _freeze(asdict(settings)), sort_keys=True, separators=(",", ":")
-    )
+    """sha256 of a canonical JSON dump of the settings object (pure).
+
+    Covers every threshold and parameter, but not input-file locations
+    (`_CONFIG_HASH_EXCLUDED`): their content is hashed by `input_hashes()`.
+    """
+    dump = {
+        key: value
+        for key, value in asdict(settings).items()
+        if key not in _CONFIG_HASH_EXCLUDED
+    }
+    canonical = json.dumps(_freeze(dump), sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

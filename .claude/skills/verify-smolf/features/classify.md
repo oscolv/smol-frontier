@@ -30,3 +30,5 @@ Preconditions:
 - The 2026-10-12 scene is served by Planetary Computer (`S2B_MSIL2A_…`). The bed correction reads the day's level from the level record, so a refreshed record can change `bed_level_m` but must not change the hectares on 2026-10-12.
 - Without `SMOLF_DATA_DIR` the map goes to the repo's `outputs/`. Always drive through `smolf-verify` so it lands in the run.
 - `boa_offset_applied looks wrong … using 0.0` on stderr is a known radiometry guard message, not a failure.
+- A `note:` line means the other catalog served the scene because the first product was anomalous. An anomalous product with no usable fallback prints `error: …` on stdout and exits 1.
+- `PERCENT NOT PUBLISHABLE` and `NO CORRECTION: <reason>` (instead of the `bed_*` lines) are valid outputs on other days. On the two control days the bed correction is applied.

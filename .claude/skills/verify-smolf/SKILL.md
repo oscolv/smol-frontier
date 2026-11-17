@@ -30,8 +30,8 @@ $V doctor "$RUN" --net
 
 Read-only. It needs `smolf: <version>` (the CLI validates `SMOLF_DATA_DIR` on every command), `git: clean`, and, for real-network features, HTTP 200 from Earth Search, Planetary Computer and the SIH. Act on what it says:
 
-- `git: DIRTY` means every series run records `dirty: true` and `publish` refuses it with exit 2. Commit or use `--ref`.
-- `smolf: FAIL ... must be an absolute path outside the checkout` means a bad `SMOLF_DATA_DIR`.
+- `git: DIRTY` lists every change, but a series run records `dirty: true` only for changes outside the hashed hydrology inputs (`data/hydro/ENDHD.csv`, the stage–area curve, the flood-stage map, their sidecars). A run with `dirty: true` is refused by `publish` with exit 2. Commit or use `--ref`.
+- `smolf: FAIL ... must be an absolute path outside the checkout` (relative value) or `... must be outside the checkout (<path>)` (value inside it) means a bad `SMOLF_DATA_DIR`.
 - `net: 000` means that feature's real path cannot be verified now. Report it as unverified. Do not swap in a mock.
 
 ## Drive
@@ -41,7 +41,7 @@ $V run "$RUN" <feature-id> -- <smolf args>    # e.g. -- classify 2026-10-12
 $V hectares "$RUN" <classified.tif>           # per-class hectares of a written map
 ```
 
-`run` executes `$SMOLF <args>` from `/tmp` with the run's `SMOLF_DATA_DIR`, prints stdout, and records `<n>-<feature-id>.cmd/.out/.err/.rc` in `$RUN/evidence/`. It always exits 0 itself. Read the recorded `.rc`.
+`run` executes `$SMOLF <args>` from `/tmp` with the run's `SMOLF_DATA_DIR`, prints stdout, and records `<n>-<feature-id>.cmd/.out/.err/.rc` in `$RUN/evidence/`. Once smolf has run, `run` exits 0 whatever smolf returned, so read the recorded `.rc`. A usage error of the helper itself (unknown option, missing run dir) exits 2 before smolf runs.
 
 Two `run` options inject into smolf's Python for that one command only, through a `sitecustomize.py` written to `$RUN/inject/`:
 

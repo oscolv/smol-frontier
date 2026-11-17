@@ -253,16 +253,18 @@ and regime 465/465 against that gate CSV).
 
 Derives a versioned data contract from one series run, named with `--run
 <id>` or chosen with `--latest` (the newest run, by run id, whose manifest
-status is complete; neither or both exits 2) into `outputs/publish/`
-(or `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the last `ok` scene plus run context,
-constants and the current SIH level), `series.json` (every `ok` and POOR
+is readable and whose status is complete; unreadable manifests are skipped;
+neither or both exits 2) into `outputs/publish/` (or
+`$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the
+last `ok` scene plus run context, constants and the current SIH level), `series.json` (every `ok` and POOR
 scene; errors excluded), `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
 (`SCHEMA_VERSION = "1.0.0"`, written exactly; each schema accepts any
 `1.x.y`, and only a new optional field is a minor change — see the
-versioning rules in `docs/contract.md`). Figures are copied from the run rows and
-rounded like `series.csv` (2 decimals; fractions 4); nothing is filtered.
+versioning rules in `docs/contract.md`). Scene records are sorted by date,
+then requested item id. Figures are copied from the run rows and rounded
+like `series.csv` (2 decimals; fractions 4); nothing is filtered.
 `cover_band` is `settings.traffic_light()` (`GREEN_MAX_PCT = 30.0`,
 `RED_MIN_PCT = 50.0`) on the 2-decimal `pct_reservoir_corrected`, and
 `null` with every corrected figure when the bed correction was not
@@ -280,15 +282,23 @@ The row's `margin_m` is rounded to 2 decimals and cannot reproduce the
 run's removal: pixels whose stage lies between the rounded and the
 full-precision margin would flip. Publish therefore refuses (exit 2) when
 the curve's or the flood-stage map's sha256 differs from the run
-manifest's inputs, when the recomputed margin does not round to the row's
+manifest's inputs (verified only when the correction was applied to the
+latest scene: without it no class 5 exists and neither input touches the
+published figures), when the recomputed margin does not round to the row's
 `margin_m`, or when class-5 pixels × `PIXEL_HA = 0.01` differ from
 `removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
 run, unreadable manifest of an explicit `--run` (`--latest` selection skips
 it), no `ok` scene, cache hash mismatch, hectare mismatch, and an `--out`
-directory that is non-empty but not a previous publish. A schema or
-raster-guard failure of smolf's own output is a bug (exit 1). Rasters go
-only through the guarded writers (uint8, values 0–5), files only through the
-allowlist, and the directory is swapped in by rename after validation.
+directory that is non-empty but not a previous publish (refused without
+walking its tree), a broken symlink in the `--out` path, or several
+leftover `.previous-*` directories. A schema or raster-guard failure of
+smolf's own output is a bug (exit 1). Rasters go only through the guarded
+writers (uint8, values 0–5), files only through the allowlist, and the
+directory is swapped in by rename after validation. `--out` is resolved
+to its real path first; at the start of a publish stale
+`.<name>.staging-*` directories are removed, a lone `.<name>.previous-*`
+is restored when `--out` is missing, and old previous directories are
+removed once `--out` is a valid contract.
 
 Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`
 2026-10-12, `hyacinth_corrected_ha` 818.34, `pct_reservoir_corrected`

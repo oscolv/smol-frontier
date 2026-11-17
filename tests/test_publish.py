@@ -177,9 +177,9 @@ def scene_env(
     def fake_classify(ing: object) -> SimpleNamespace:
         return SimpleNamespace(class_map=_class_map(), ha_per_class=dict(env.ha))
 
-    monkeypatch.setattr(publish, "get_scene", fake_get_scene)
-    monkeypatch.setattr(publish, "ingest_scene", fake_ingest_scene)
-    monkeypatch.setattr(publish, "classify_scene", fake_classify)
+    monkeypatch.setattr(publish.map, "get_scene", fake_get_scene)
+    monkeypatch.setattr(publish.map, "ingest_scene", fake_ingest_scene)
+    monkeypatch.setattr(publish.map, "classify_scene", fake_classify)
     return env
 
 
@@ -999,7 +999,7 @@ def test_publish_series_invalid_output_exit_1_writes_nothing(
         doc["scenes"][0]["quality_light"] = "BUENA"
         return doc
 
-    monkeypatch.setattr(publish, "series_document", bad)
+    monkeypatch.setattr(publish.writer, "series_document", bad)
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 1
     assert not out.exists()

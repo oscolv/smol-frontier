@@ -249,7 +249,7 @@ fallback, 0 errors — verdict PASS. 206 scenes sit at Δ 0.00 ha. The series
 builder reproduces the gate's raw figures exactly (max |Δ| 0.00 ha, light
 and regime 465/465 against that gate CSV).
 
-## 11. Publish contract (`publish.py`, `smolf publish`)
+## 11. Publish contract (`publish/`, `smolf publish`)
 
 Derives a versioned data contract from one series run, named with `--run
 <id>` or chosen with `--latest` (the newest run, by run id, whose manifest

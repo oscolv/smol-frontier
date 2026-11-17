@@ -256,12 +256,13 @@ Derives a versioned data contract from one series run, named with `--run
 is readable and whose status is complete; unreadable manifests are skipped;
 neither or both exits 2) into `outputs/publish/` (or
 `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the
-last `ok` scene plus run context, constants and the current SIH level),
+last `ok` scene plus run context, constants, the reservoir outline as an
+RFC 7946 MultiPolygon and the current SIH level),
 `series.json` (every `ok` and POOR scene; errors excluded),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "2.0.0"`, written exactly; each schema accepts any
+(`SCHEMA_VERSION = "2.1.0"`, written exactly; each schema accepts any
 `2.x.y`, and only a new optional field is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded

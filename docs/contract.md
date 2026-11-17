@@ -1,4 +1,4 @@
-# Publish contract (`schema_version` 2.0.0)
+# Publish contract (`schema_version` 2.1.0)
 
 What `smolf publish` writes and what a downstream consumer may rely on.
 The JSON Schemas packaged with smolf (`src/smol_frontier/schemas/`:
@@ -7,8 +7,8 @@ Schema draft 2020-12) are the source of truth; this document explains
 them field by field. `tests/test_contract_doc.py` fails if a schema
 property is missing here.
 
-First release containing this contract: smolf 0.3.0 (tag `v0.3.0`).
-Changes from 1.0.0 are listed under "Versioning".
+First release containing this contract: smolf 0.4.0 (tag `v0.4.0`).
+Changes from earlier versions are listed under "Versioning".
 
 ## Principles
 
@@ -20,7 +20,8 @@ Changes from 1.0.0 are listed under "Versioning".
   the series history and the published constants. The only scenes without
   figures are POOR scenes, which the pipeline already skips upstream.
 - **No recomputation downstream.** Every number a consumer displays
-  (percentages, cover band, reservoir area, thresholds) is in the contract.
+  (percentages, cover band, reservoir area and outline, thresholds) is in
+  the contract.
 - **Provenance, not contract.** The series run's `manifest.json` is
   internal provenance; it is never copied out. Each document carries
   `run_id` and `series_sha256` so any figure traces back to the exact run.
@@ -54,13 +55,13 @@ cache can never pair a new `latest.json` with an old map.
   are in the names: `_ha` hectares, `_m` metres above sea level (water
   stage), `pct_` percent (0–100), `_frac` fraction (0–1).
 - Rounding: hectares, percentages and water levels to 2 decimals;
-  fractions to 4 decimals.
+  fractions to 4 decimals; outline coordinates (degrees) to 6 decimals.
 - Dates: UTC acquisition date, ISO `YYYY-MM-DD`; no acquisition time in
-  2.0.0.
+  2.1.0.
 - `null` is explicit: a field defined by the schema is always present,
   with `null` where the value does not exist (never omitted).
 - Additional properties are allowed in every object, so a consumer pinned
-  to 2.0.0 keeps validating files from a later additive (minor) release.
+  to 2.1.0 keeps validating files from a later additive (minor) release.
 
 ## Spanish → English mapping
 
@@ -77,7 +78,7 @@ these English names.
 | régimen limpio / LECHO / TURBIDEZ | `regime` CLEAN / EXPOSED_BED / TURBIDITY |
 | lirio denso / interfase | `dense_*` / `interface_*` |
 | cota (water-surface stage) | `level_m` |
-| vaso (reservoir basin polygon) | `reservoir_area_ha` |
+| vaso (reservoir basin polygon) | `reservoir_outline` (its area: `reservoir_area_ha`) |
 
 The run's generic `light` column is published as `quality_light`; its
 empty/`clean` regime value is published as `CLEAN`.
@@ -125,8 +126,8 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `2.x.y` | — | no | Contract version; smolf writes exactly `2.0.0`, the schema accepts any `2.x.y` (no trailing newline). |
-| `smolf_version` | string | — | no | smolf version that wrote the file (`0.3.0` for this release). |
+| `schema_version` | string `2.x.y` | — | no | Contract version; smolf writes exactly `2.1.0`, the schema accepts any `2.x.y` (no trailing newline). |
+| `smolf_version` | string | — | no | smolf version that wrote the file (`0.4.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
 | `newest_acquisition.item_id` | string | — | no | Its STAC item id. |
@@ -139,6 +140,9 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `run_id` | string | — | no | Series run the contract was derived from. |
 | `series_sha256` | string, 64 hex | — | no | sha256 of the run's `series.csv`; identifies the series. |
 | `reservoir_area_ha` | number > 0 | ha | no | Denominator of every percentage, computed from the reservoir polygon (1261.75 ha). |
+| `reservoir_outline` | object | — | no | The reservoir polygon itself (JRC Global Surface Water v1.4, occurrence ≥ 25 %, 1984–2021; Pekel et al., 2016), as an RFC 7946 GeoJSON geometry, for drawing the outline on a web map. Since 2.1.0; the schema does not require it, so 2.0.0 documents still validate, but smolf always writes it. |
+| `reservoir_outline.type` | string `MultiPolygon` | — | no | Always a MultiPolygon, even for a single part. |
+| `reservoir_outline.coordinates` | array of polygons | degrees, EPSG:4326 | no | Each polygon is a list of closed linear rings (exterior first, then holes); each position is `[longitude, latitude]` to 6 decimals (~0.1 m). Exterior rings run counter-clockwise and holes clockwise (RFC 7946 right-hand rule). Reprojected to UTM it encloses `reservoir_area_ha` to within 0.01 ha. |
 | `constants` | object | — | no | Thresholds a consumer needs for its own gates. |
 | `constants.frac_publishable` | number 0–1 | fraction | no | Minimum `valid_frac` for a percentage to be fully trustworthy (0.95). smolf still publishes the percentage below it; the consumer decides (e.g. show hectares only, as a lower bound). |
 | `constants.green_max_pct` | number 0–100 | % | no | Upper bound (exclusive) of GREEN (30.0). |
@@ -156,13 +160,13 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `2.x.y` | no | Contract version; smolf writes exactly `2.0.0`, the schema accepts any `2.x.y` (no trailing newline). |
+| `schema_version` | string `2.x.y` | no | Contract version; smolf writes exactly `2.1.0`, the schema accepts any `2.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
 | `scenes` | array of per-scene objects | no | Every `ok` and every POOR (skipped) scene of the run, sorted by date then item id, with the per-scene fields above. Error scenes are excluded (see `run_counts.errors` in `latest.json`). |
 
-Quality flags (degrading/informational) are not part of 2.0.0.
+Quality flags (degrading/informational) are not part of 2.1.0.
 
 ## `publish.json`
 
@@ -171,7 +175,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `2.x.y` | no | Contract version; smolf writes exactly `2.0.0`, the schema accepts any `2.x.y` (no trailing newline). |
+| `schema_version` | string `2.x.y` | no | Contract version; smolf writes exactly `2.1.0`, the schema accepts any `2.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -295,6 +299,11 @@ not applied, no pixel is class 5.
     true); the `schema_version` pattern rejects a trailing newline. A
     consumer that read `removed_ha` as a number without checking
     `bed_applied` must handle `null`.
+  - `schema_version` 2.1.0 — smolf `v0.4.0` (additive; issue #42):
+    `latest.json` gains `reservoir_outline`, the reservoir polygon as an
+    RFC 7946 MultiPolygon in EPSG:4326. It is a field of `latest.json`
+    rather than a file of its own because `publish.json`'s closed
+    `files[].path` pattern would make a new file a breaking change.
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a

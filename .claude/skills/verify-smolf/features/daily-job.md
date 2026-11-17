@@ -11,7 +11,7 @@ The scheduled daily job is three commands in order: `smolf levels update`, then 
 ## How to get to it (user POV)
 
 - A scheduler runs, with `SMOLF_DATA_DIR=<absolute dir outside the checkout>`:
-  `smolf levels update && smolf series build --extend && smolf publish --latest`. Exit 2 from the build means retry later.
+  `smolf levels update && smolf series build --extend && smolf publish --latest`. Exit 2 from the build means retry later (stale level record or Earth Search unreachable; nothing written). `levels update` exits 1 when the SIH download fails, even for a passing outage. `publish` exits 2 when it refuses a run.
 
 ## Driving it with smolf-verify
 
@@ -29,5 +29,6 @@ Preconditions:
 ## Gotchas
 
 - `--ref` checks out committed code. Uncommitted changes are not under test, so commit them first or say they are excluded.
-- If the SIH has not published the level for a new scene's date yet, the build exits 2. That is the designed "retry later" path, not a failure.
+- If the SIH has not published the level for a new scene's date yet, or Earth Search is unreachable, the build exits 2. That is the designed "retry later" path, not a failure. Bad build arguments also exit 2, so read the `error:` line.
+- An SIH outage stops the chain at `levels update` with exit 1 (`error: SIH download failed after 4 attempts: …`), not 2. A scheduler that retries only on 2 will not retry it.
 - On a target host, the read-only mount, the UID that owns the checkout (`git safe.directory`) and the container's network all differ from this local stand-in. `chmod -R a-w` on a worktree does not prove any of them.

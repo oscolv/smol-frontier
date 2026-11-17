@@ -439,3 +439,16 @@ def test_gitignore_covers_levels_temp_files() -> None:
             ["git", "check-ignore", "-q", name], cwd=PROJECT_ROOT, check=False
         )
         assert result.returncode == 0, name
+
+
+def test_agents_md_quotes_the_committed_level_record_sha256() -> None:
+    """AGENTS.md pins the committed ENDHD.csv by a sha256 prefix; keep it true."""
+    import re
+
+    agents = (paths.COMMITTED_LEVELS_PATH.parents[2] / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"`data/hydro/ENDHD\.csv` sha256 `([0-9a-f]{8})…`", agents)
+    assert match, "AGENTS.md no longer quotes the ENDHD.csv sha256"
+    actual = hashlib.sha256(paths.COMMITTED_LEVELS_PATH.read_bytes()).hexdigest()
+    assert actual.startswith(match.group(1))

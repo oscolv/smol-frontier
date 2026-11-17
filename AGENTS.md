@@ -102,7 +102,8 @@ Any change that moves these must be flagged, not silently accepted
   corrected 13.74 ha (margin 2005.54 m, expected bed 696.80 ha, removed
   418.51 ha); light GOOD; regime EXPOSED_BED. (Author's pipeline, Earth
   Search backend: 432.38 → 13.73; the ~0.1 ha gap is the STAC backend.)
-- `data/hydro/ENDHD.csv` sha256 `3728099d…`; `stage_area_curve.csv` and
+- `data/hydro/ENDHD.csv` sha256 `1a327c93…` (committed refresh through
+  2026-11-05; `tests/test_levels.py` checks this prefix); `stage_area_curve.csv` and
   `flood_stage.tif` are guarded by golden tests.
 
 ## Glossary

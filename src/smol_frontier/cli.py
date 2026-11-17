@@ -49,7 +49,7 @@ from smol_frontier.series import (
     new_run_id,
 )
 from smol_frontier.sources.radiometry import AnomalousProduct
-from smol_frontier.sources.stac import search_scenes
+from smol_frontier.sources.stac import AllBackendsFailed, SceneMeta, search_scenes
 
 app = typer.Typer(help="smol-frontier CLI.", no_args_is_help=True)
 levels_app = typer.Typer(help="Reservoir water levels from the SIH record.")
@@ -78,6 +78,15 @@ def version() -> None:
     typer.echo(__version__)
 
 
+def _search_day(day: datetime, max_cloud: float) -> list[SceneMeta]:
+    """Search one day; a catalog outage is one error line and exit 2 (retry later)."""
+    try:
+        return search_scenes(day.date(), day.date(), max_cloud)
+    except AllBackendsFailed as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+
+
 @app.command()
 def fetch(
     day: Annotated[
@@ -88,7 +97,7 @@ def fetch(
     ] = 100.0,
 ) -> None:
     """Download one day's scene into the local cache and print its stats."""
-    scenes = search_scenes(day.date(), day.date(), max_cloud)
+    scenes = _search_day(day, max_cloud)
     if not scenes:
         typer.echo(f"no scenes found for {day.date()}", err=True)
         raise typer.Exit(1)
@@ -124,7 +133,7 @@ def classify(
     ],
 ) -> None:
     """Classify one day's scene, print the summary, write a GeoTIFF."""
-    scenes = search_scenes(day.date(), day.date(), 100.0)
+    scenes = _search_day(day, 100.0)
     if not scenes:
         typer.echo(f"no scenes found for {day.date()}", err=True)
         raise typer.Exit(1)

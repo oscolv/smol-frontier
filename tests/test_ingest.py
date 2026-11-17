@@ -24,7 +24,7 @@ from smol_frontier.ingest import (
     ingest_scene,
 )
 from smol_frontier.sources.radiometry import AnomalousProduct, dn_to_reflectance
-from smol_frontier.sources.stac import SceneMeta
+from smol_frontier.sources.stac import AllBackendsFailed, SceneMeta
 
 SCENE_ANOMALOUS_2026_10_27 = "S2C_MSIL2A_20261027T170411_R069_T14QMH_20261027T213804"
 
@@ -246,6 +246,28 @@ def test_cli_fetch_no_scenes(monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(app, ["fetch", "2026-10-12"])
     assert result.exit_code == 1
     assert "no scenes found" in result.output
+
+
+@pytest.mark.parametrize("command", ["fetch", "classify"])
+def test_cli_catalog_outage_is_one_error_line(
+    monkeypatch: pytest.MonkeyPatch, command: str
+) -> None:
+    def outage(*args, **kwargs):
+        raise AllBackendsFailed(
+            "all STAC backends failed: planetary-computer, earth-search"
+        )
+
+    monkeypatch.setattr("smol_frontier.cli.search_scenes", outage)
+    result = CliRunner().invoke(app, [command, "2026-10-12"])
+    assert result.exit_code == 2
+    assert isinstance(result.exception, SystemExit)
+    assert result.stdout == ""
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("error: ")
+    assert "all STAC backends failed" in lines[0]
+    assert "Traceback" not in result.output
+    assert "Traceback" not in result.stderr
 
 
 def test_cli_fetch_bad_date() -> None:

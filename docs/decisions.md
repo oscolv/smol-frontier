@@ -117,8 +117,9 @@ enforced in this repo. Anything not implemented yet says **planned**.
   (`ENDHD.csv`, the stage–area curve, the flood-stage map, and their
   sidecars) do not set the `dirty` flag; any other change does. The refusal
   is a precondition refusal: `series build` exits 0 when complete, 2 when it
-  refuses a precondition (stale level record, unreachable new-scene catalog,
-  resume fingerprint mismatch; nothing is written), and 1 for anything else.
+  refuses a precondition that a later run can meet (stale level record,
+  unreachable new-scene catalog; nothing is written), and 1 for anything
+  else, including a resume fingerprint mismatch, which no retry can fix.
   The full list is in `docs/method.md` §9.
 - **Why:** a scene without its day's level gets no exposed-bed correction and
   would enter `series.csv` with empty corrected columns (2026-11-01 did, with

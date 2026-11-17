@@ -225,7 +225,7 @@ not applied, no pixel is class 5.
 | Exit | Meaning |
 | --- | --- |
 | 0 | Published. |
-| 2 | Precondition refusal, one line `refused: <reason>`; nothing is written. |
+| 2 | Precondition refusal, one line `refused: <reason>` on stderr; nothing is written. Also: neither or both of `--run` and `--latest` (`error: …`). |
 | 1 | Unexpected error, or smolf's own output failing its schema or the raster guard (a bug); nothing is published. |
 
 `publish` refuses (exit 2) when:
@@ -233,8 +233,8 @@ not applied, no pixel is class 5.
 - the output directory exists, is not empty, and is not a previous
   publish (no `publish.json`, or any file outside the allowlist): smolf
   only ever replaces its own contract, never unrelated data;
-- the run is unknown, or there is no complete run (default selection is
-  the newest run, by run id, whose manifest is readable and whose status is
+- the run is unknown, or there is no complete run (`--latest` selects the
+  newest run, by run id, whose manifest is readable and whose status is
   complete; a run with a corrupt manifest is skipped);
 - the run given with `--run` has an unreadable manifest;
 - the run is not complete, or its code fingerprint is dirty;

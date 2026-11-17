@@ -583,6 +583,7 @@ def build_run(
     today: date | None = None,
     on_done: Callable[[dict[str, object], int, int], None] | None = None,
     levels_end: Callable[[], date | None] | None = None,
+    on_start: Callable[[str], None] | None = None,
 ) -> dict[str, object]:
     """Build (or resume) a series run; return the final manifest.
 
@@ -594,8 +595,11 @@ def build_run(
     (``levels_end`` returns its last day; tests inject it).
     Raises FingerprintMismatch (resume with changed code/config),
     StaleLevelsError (fresh build with a target newer than the level record),
+    CatalogUnavailable (Earth Search unreachable on extend),
     FileNotFoundError (resume of an unknown run), FileExistsError (fresh
     build over an existing run id), ValueError (workers < 1).
+    ``on_start`` is called with "new" or "resume" once the run directory
+    exists and every refusal check has passed.
     """
     if workers < 1:
         msg = "--workers must be >= 1"
@@ -620,6 +624,8 @@ def build_run(
         ]
         started_utc = str(manifest["started_utc"])
         have = {path.stem for path in scenes_dir.glob("*.json")}
+        if on_start is not None:
+            on_start("resume")
     else:
         if manifest_path.exists():
             msg = f"run exists: {run_id} (use --resume)"
@@ -643,6 +649,8 @@ def build_run(
                 run_id, mode, targets, command or sys.argv, started_utc, fingerprint
             ),
         )
+        if on_start is not None:
+            on_start("new")
     pending = [target for target in targets if _scene_stem(target.item_id) not in have]
     total = len(targets)
     done = total - len(pending)

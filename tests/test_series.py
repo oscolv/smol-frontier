@@ -184,11 +184,13 @@ def test_resume_with_other_config_hash_is_refused(
     monkeypatch.setattr(series, "config_hash", lambda: "0" * 64)
     with pytest.raises(FingerprintMismatch, match="config_hash differs"):
         build_run(run_id="run_fp", resume=True, output_dir=tmp_path)
-    # The CLI maps the refusal to exit code 2.
+    # Not retryable (the code changed), so the CLI exits 1, not the
+    # retry-later 2, and names no run on stdout.
     monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     result = CliRunner().invoke(app, ["series", "build", "--resume", "run_fp"])
-    assert result.exit_code == 2
-    assert "config_hash differs" in result.output
+    assert result.exit_code == 1
+    assert "config_hash differs" in result.stderr
+    assert result.stdout == ""
 
 
 def test_check_fingerprint_names_every_diff() -> None:
@@ -500,6 +502,44 @@ def test_stale_levels_refuse_fresh_build_before_writing(tmp_path: Path) -> None:
             levels_end=lambda: targets[0].day,
         )
     assert not (tmp_path / "run_stale").exists()
+
+
+def test_cli_announces_the_run_only_once_it_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    targets = _targets(2)
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    monkeypatch.setattr(series, "last_day_with_level", lambda: targets[0].day)
+    refused = CliRunner().invoke(app, ["series", "build"])
+    assert refused.exit_code == 2
+    assert "run:" not in refused.output
+    assert refused.stdout == ""
+    assert refused.stderr.startswith("error: SIH level record ends")
+
+    monkeypatch.setattr(series, "last_day_with_level", lambda: targets[-1].day)
+    monkeypatch.setattr(series, "process_scene", _make_fake())
+    built = CliRunner().invoke(app, ["series", "build"])
+    assert built.exit_code == 0, built.output
+    first = built.stdout.splitlines()[0]
+    assert first.startswith("run: ") and first.endswith(" (new)")
+    run_id = first.split()[1]
+    assert (tmp_path / run_id / "manifest.json").is_file()
+
+
+def test_cli_interrupt_before_the_run_starts_offers_no_resume(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted() -> list[SeriesTarget]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(series, "list_reference_targets", interrupted)
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 130
+    assert "interrupted before the run started; nothing written" in result.stderr
+    assert "--resume" not in result.output
+    assert not any(tmp_path.iterdir())
 
 
 def test_cli_maps_stale_levels_to_exit_2(

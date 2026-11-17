@@ -233,13 +233,15 @@ def search_scenes(
     if bbox is None:
         bbox = wgs84_bbox()
     last_error: Exception | None = None
-    for backend in backends:
+    for index, backend in enumerate(backends):
         try:
             scenes = _search_backend(
                 backend, start_date, end_date, bbox, max_cloud_cover
             )
         except _FALLBACK_ERRORS as exc:
-            logger.warning("STAC backend %s failed (%r); trying next", backend, exc)
+            following = backends[index + 1 :]
+            then = f"trying {following[0]}" if following else "no other backend"
+            logger.warning("STAC backend %s failed (%r); %s", backend, exc, then)
             last_error = exc
             continue
         logger.info("STAC search served by %s: %d scene(s)", backend, len(scenes))

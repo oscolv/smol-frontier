@@ -200,19 +200,25 @@ fingerprint (git commit, dirty flag, config hash), package and Python
 versions, `uv.lock` hash, input-file hashes, per-scene entries, counts, and
 the `series.csv` sha256 — a series is identified by that hash, not by
 date. `--resume` reuses finished scenes only when the fingerprint matches,
-else it refuses with exit 2.
+else it refuses with exit 1 (not retryable: start a new run).
 
 `series build` exit codes:
 
 - 0: the run completed.
-- 2: precondition refusal, nothing written, retry later. One `error: …` line.
-  Today: stale SIH level record (a target day is newer than the last level
-  day), new-scene catalog unavailable (`--extend` and Earth Search is
-  unreachable) and resume fingerprint mismatch. Its own argument checks
-  (`--workers < 1`, `--extend` with `--resume`) and Click/Typer usage errors
-  also exit 2.
-- 1: anything else.
-- 130: interrupted (resume with `--resume`).
+- 2: precondition refusal, nothing written, retry later. One `error: …` line
+  on stderr. Today: stale SIH level record (a target day is newer than the
+  last level day) and new-scene catalog unavailable (`--extend` and Earth
+  Search is unreachable). Its own argument checks (`--workers < 1`,
+  `--extend` with `--resume`) and Click/Typer usage errors also exit 2.
+- 1: anything else, including a resume fingerprint mismatch (the code,
+  config or dirty flag changed since the run started, so a retry cannot
+  succeed) and an unknown or existing run id.
+- 130: interrupted. Once the run directory exists, stderr names the
+  `--resume` command; before that, nothing was written.
+
+Errors and refusals go to stderr; stdout carries only results. The run id
+(`run: <id> (new|resume)`) is printed once its directory exists, so a
+refusal never names a run.
 
 Measured: run `20261028T221314` — 465 requested, 465 ok, 0 skipped,
 0 errors, wall 1:35, `series.csv` sha256
@@ -236,8 +242,9 @@ and regime 465/465 against that gate CSV).
 
 ## 11. Publish contract (`publish.py`, `smolf publish`)
 
-Derives a versioned data contract from one series run (`--run`, default
-the newest run whose manifest status is complete) into `outputs/publish/`
+Derives a versioned data contract from one series run, named with `--run
+<id>` or chosen with `--latest` (the newest run, by run id, whose manifest
+status is complete; neither or both exits 2) into `outputs/publish/`
 (or `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the last `ok` scene plus run context,
 constants and the current SIH level), `series.json` (every `ok` and POOR
 scene; errors excluded), `map/<date>_<item_id>.tif` and `.png` for the
@@ -267,7 +274,7 @@ the curve's or the flood-stage map's sha256 differs from the run
 manifest's inputs, when the recomputed margin does not round to the row's
 `margin_m`, or when class-5 pixels × `PIXEL_HA = 0.01` differ from
 `removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
-run, unreadable manifest of an explicit `--run` (default selection skips
+run, unreadable manifest of an explicit `--run` (`--latest` selection skips
 it), no `ok` scene, cache hash mismatch, hectare mismatch, and an `--out`
 directory that is non-empty but not a previous publish. A schema or
 raster-guard failure of smolf's own output is a bug (exit 1). Rasters go

@@ -254,8 +254,8 @@ def _read_manifest(run_dir: Path) -> dict[str, object]:
 def _is_complete(run_dir: Path) -> bool:
     """True for a run whose manifest is readable and says complete.
 
-    WHY: default selection skips unreadable manifests, so one truncated run
-    (e.g. an interrupted build) cannot block every default publish.
+    WHY: `--latest` selection skips unreadable manifests, so one truncated run
+    (e.g. an interrupted build) cannot block every `--latest` publish.
     """
     try:
         return _read_manifest(run_dir).get("status") == "complete"
@@ -266,7 +266,7 @@ def _is_complete(run_dir: Path) -> bool:
 def select_run(series_root: Path, run_id: str | None) -> Path:
     """Run directory to publish: ``run_id``, or the newest complete run.
 
-    Default selection skips runs whose manifest is unreadable. Raises
+    `--latest` selection (run_id None) skips unreadable manifests. Raises
     PublishRefused for an unknown run, no complete run, a run that is not
     complete or whose manifest is unreadable, or a run built from a dirty
     tree.

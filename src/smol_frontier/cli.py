@@ -503,7 +503,8 @@ def publish(
     try:
         out_dir = publish_run(run_id=run, out_dir=out)
     except PublishRefused as exc:
-        typer.echo(f"refused: {exc}", err=True)
+        # WHY collapsed: a refusal may embed a multi-line exception; stderr gets one line.
+        typer.echo(f"refused: {' '.join(str(exc).split())}", err=True)
         raise typer.Exit(2)
     except ContractInvalid as exc:
         typer.echo(f"error: {exc}", err=True)

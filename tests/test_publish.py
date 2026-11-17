@@ -1985,3 +1985,13 @@ def test_publish_out_wins_over_data_dir(data_root: Path, tmp_path: Path) -> None
     assert result.exit_code == 0, result.output
     assert (out / "latest.json").is_file()
     assert not (data_root / "outputs/publish").exists()
+
+
+def test_publish_refusal_prints_one_line(monkeypatch: pytest.MonkeyPatch) -> None:
+    def refuse(**_kwargs: object) -> Path:
+        raise publish.PublishRefused("line one\n  line two\n")
+
+    monkeypatch.setattr("smol_frontier.cli.publish_run", refuse)
+    result = CliRunner().invoke(app, ["publish", "--latest"])
+    assert result.exit_code == 2
+    assert result.stderr == "refused: line one line two\n"

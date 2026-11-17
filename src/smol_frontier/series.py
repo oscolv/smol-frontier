@@ -46,13 +46,18 @@ from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
 from smol_frontier.hydro.levels import last_day_with_level
 from smol_frontier.ingest import _cache_path
 from smol_frontier.quality import assess_quality
-from smol_frontier.sources.stac import EARTH_SEARCH, search_scenes
+from smol_frontier.sources.stac import (
+    EARTH_SEARCH,
+    AllBackendsFailed,
+    search_scenes,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "SERIES_CSV_NAME",
     "SERIES_FIELDS",
+    "CatalogUnavailable",
     "FingerprintMismatch",
     "SeriesTarget",
     "StaleLevelsError",
@@ -108,6 +113,13 @@ SERIES_FIELDS = (
 )
 
 _FLOAT_4DP = frozenset({"valid_frac", "cloud_frac"})
+
+
+class CatalogUnavailable(Exception):
+    """Build refused: the new-scene catalog search failed; retry later.
+
+    Deliberately not a RuntimeError/ValueError so the CLI maps it to exit 2.
+    """
 
 
 class FingerprintMismatch(Exception):
@@ -298,12 +310,22 @@ def list_extend_targets(last_ref_day: date, today: date) -> list[SeriesTarget]:
     """
     if today <= last_ref_day:
         return []
-    scenes = search_scenes(
-        last_ref_day + timedelta(days=1),
-        today,
-        settings.MAX_CLOUD_COVER_CATALOG,
-        backends=(EARTH_SEARCH,),
-    )
+    try:
+        scenes = search_scenes(
+            last_ref_day + timedelta(days=1),
+            today,
+            settings.MAX_CLOUD_COVER_CATALOG,
+            backends=(EARTH_SEARCH,),
+        )
+    except AllBackendsFailed as exc:
+        # WHY: an outage is retryable, so refuse (exit 2) instead of failing.
+        # There is no Planetary Computer fallback: PC item ids differ from
+        # Earth Search ids, so the series identity would churn with outages.
+        msg = (
+            "Earth Search is unreachable, so new scenes cannot be listed; "
+            "nothing was written. Retry later."
+        )
+        raise CatalogUnavailable(msg) from exc
     return [SeriesTarget(day=item.datetime.date(), item_id=item.id) for item in scenes]
 
 

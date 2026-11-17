@@ -42,6 +42,7 @@ from smol_frontier.hydro.levels import (
 from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
+    CatalogUnavailable,
     FingerprintMismatch,
     StaleLevelsError,
     build_run,
@@ -409,7 +410,7 @@ def series_build(
             command=sys.argv,
             on_done=on_done,
         )
-    except (FingerprintMismatch, StaleLevelsError) as exc:
+    except (CatalogUnavailable, FingerprintMismatch, StaleLevelsError) as exc:
         # Precondition refusal: nothing written, retry later (exit 2).
         typer.echo(f"error: {exc}")
         raise typer.Exit(2)

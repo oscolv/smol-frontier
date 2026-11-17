@@ -205,7 +205,8 @@ else it refuses with exit 2.
 - 0: the run completed.
 - 2: precondition refusal, nothing written, retry later. One `error: …` line.
   Today: stale SIH level record (a target day is newer than the last level
-  day) and resume fingerprint mismatch. Click/Typer usage errors also exit 2.
+  day), new-scene catalog unavailable (`--extend` and Earth Search is
+  unreachable) and resume fingerprint mismatch. Click/Typer usage errors also exit 2.
 - 1: anything else.
 
 Measured: run `20261028T221314` — 465 requested, 465 ok, 0 skipped,

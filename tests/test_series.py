@@ -29,6 +29,7 @@ from smol_frontier.series import (
     build_run,
     check_fingerprint,
 )
+from smol_frontier.sources.stac import AllBackendsFailed
 
 
 def _targets(n: int = 5) -> list[SeriesTarget]:
@@ -514,6 +515,42 @@ def test_cli_maps_stale_levels_to_exit_2(
     assert targets[2].day.isoformat() in result.output
     assert "smolf levels update" in result.output
     assert not any(tmp_path.iterdir())
+
+
+def test_cli_maps_catalog_outage_on_extend_to_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(*args: object, **kwargs: object) -> list:
+        raise AllBackendsFailed("all STAC backends failed: earth-search")
+
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: _targets(3))
+    monkeypatch.setattr(series, "search_scenes", down)
+    result = CliRunner().invoke(app, ["series", "build", "--extend"])
+    assert result.exit_code == 2
+    assert result.output.count("error:") == 1
+    assert "Earth Search is unreachable" in result.output
+    assert "Retry later" in result.output
+    assert not any(tmp_path.iterdir())
+
+
+def test_build_without_extend_never_searches_new_scenes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> list:
+        raise AssertionError("new-scene search must not run")
+
+    targets = _targets(3)
+    monkeypatch.setattr(series, "search_scenes", forbidden)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    # Stale levels refuse right after target listing: the search was skipped.
+    with pytest.raises(series.StaleLevelsError):
+        series.build_run(
+            run_id="run_noext",
+            extend=False,
+            output_dir=tmp_path,
+            levels_end=lambda: targets[0].day,
+        )
 
 
 def test_cli_unexpected_runtime_error_still_exits_1(

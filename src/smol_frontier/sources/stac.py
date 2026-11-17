@@ -25,6 +25,7 @@ __all__ = [
     "EARTH_SEARCH",
     "PLANETARY_COMPUTER",
     "REQUIRED_BANDS",
+    "AllBackendsFailed",
     "SceneMeta",
     "deduplicate",
     "get_scene",
@@ -71,6 +72,10 @@ _REQUEST_TIMEOUT_S = 60.0
 # pystac-client surfaces timeouts and HTTP errors as APIError; the Planetary
 # Computer signing calls use requests directly, hence RequestException.
 _FALLBACK_ERRORS = (APIError, RequestException)
+
+
+class AllBackendsFailed(RuntimeError):
+    """Every requested STAC backend failed (timeout or HTTP error)."""
 
 
 @dataclass(frozen=True)
@@ -240,4 +245,4 @@ def search_scenes(
         logger.info("STAC search served by %s: %d scene(s)", backend, len(scenes))
         return scenes
     msg = f"all STAC backends failed: {', '.join(backends)}"
-    raise RuntimeError(msg) from last_error
+    raise AllBackendsFailed(msg) from last_error

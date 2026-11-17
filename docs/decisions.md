@@ -150,3 +150,20 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
   `docs/contract.md`, `tests/test_publish.py`,
   `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.
+
+## 14. A catalog outage on the new-scene search is a retryable refusal
+
+- **Rule:** `series build --extend` lists new scenes from Earth Search only.
+  When that search fails because the catalog is unreachable, the build
+  refuses with exit 2 (`CatalogUnavailable`) before writing anything. There
+  is no Planetary Computer fallback for the new-scene search. Per-scene
+  fallbacks (resolve, ingest on an anomalous product) are unchanged.
+- **Why:** Planetary Computer item ids differ from Earth Search ids, so a
+  series listed from Planetary Computer during an outage would get a
+  different `series.csv` sha256 and the series identity would churn with
+  outages. Each build rebuilds the whole series, so a refused day loses
+  nothing: the next successful run covers it.
+- **Where in this repo:** `sources/stac.py` (`AllBackendsFailed`),
+  `series.py` (`CatalogUnavailable`, `list_extend_targets()`), `cli.py`
+  (exit 2), `docs/method.md` (exit-code list), `tests/test_series.py`,
+  `tests/test_stac.py`.

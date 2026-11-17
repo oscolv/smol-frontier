@@ -1815,6 +1815,7 @@ def test_publish_out_symlink_to_foreign_dir_refused(
     result = _publish(link, "--run", RUN_ID)
     assert result.exit_code == 2, result.output
     assert "not a previous publish" in result.output
+    assert f"--out {link} (-> {foreign})" in " ".join(result.output.split())
     assert link.is_symlink()
     assert _siblings(foreign) == ["data.txt"]
     assert _siblings(tmp_path) == ["precious", "pub", "series"]

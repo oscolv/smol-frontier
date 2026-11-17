@@ -298,9 +298,10 @@ smolf's own output is a bug (exit 1). Rasters go only through the guarded
 writers (uint8, values 0–5), files only through the allowlist, and the
 directory is swapped in by rename after validation. `--out` is resolved
 to its real path first; at the start of a publish stale
-`.<name>.staging-*` directories are removed, a lone `.<name>.previous-*`
-is restored when `--out` is missing, and old previous directories are
-removed once `--out` is a valid contract.
+`.<name>.staging-*` directories holding only allowlisted files are
+removed, a lone `.<name>.previous-*` is restored when `--out` is
+missing, and old previous directories are removed once `--out` is a
+valid contract, each only if it is itself a valid contract.
 
 Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`
 2026-10-12, `hyacinth_corrected_ha` 818.34, `pct_reservoir_corrected`

@@ -101,8 +101,11 @@ def _link_target(link: Path) -> Path | None:
     return parent / target.name
 
 
-def check_out_dir(out_dir: Path) -> None:
+def check_out_dir(out_dir: Path, given: Path | None = None) -> None:
     """Refuse an ``out_dir`` that publish could not safely replace.
+
+    ``given`` is the ``--out`` as typed, named in refusals when it differs
+    from the resolved ``out_dir`` (a symlinked ``--out``).
 
     WHY: the swap renames ``out_dir`` away and deletes it, so it must only
     ever hold a previous contract. A missing or empty directory is fine; a
@@ -116,11 +119,13 @@ def check_out_dir(out_dir: Path) -> None:
     """
     if not out_dir.exists() and not out_dir.is_symlink():
         return
+    linked = given is not None and given.absolute() != out_dir
+    shown = f"{given} (-> {out_dir})" if linked else out_dir
     if not out_dir.is_dir():
-        msg = f"--out {out_dir} exists and is not a directory"
+        msg = f"--out {shown} exists and is not a directory"
         raise PublishRefused(msg)
     refusal = (
-        f"--out {out_dir} is not a previous publish (no {INDEX_FILE} or "
+        f"--out {shown} is not a previous publish (no {INDEX_FILE} or "
         "files outside the allowlist)"
     )
     if not (out_dir / INDEX_FILE).is_file():
@@ -343,7 +348,7 @@ def publish_run(
     target = paths.publish_dir() if out_dir is None else Path(out_dir)
     real = _resolve_out_dir(target)  # every step below acts on the real dir
     _recover_out_dir(real)  # a crash mid-swap may have left debris
-    check_out_dir(real)  # fail fast; checked again right before staging
+    check_out_dir(real, target)  # fail fast; checked again right before staging
     _drop_stale_previous(real)
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")

@@ -495,7 +495,9 @@ def publish(
     run (cache, flood-stage map, hectares), and an --out directory that is
     not a previous publish; an output failing its own schema or the raster
     guard is a bug (exit 1). The output directory is replaced atomically; on
-    any failure it is untouched.
+    any failure the previous contract is never lost, though publish's own
+    leftovers (stale staging, restorable or superseded previous dirs) may be
+    cleaned up first.
     """
     # WHY explicit: the newest complete run is not always the one meant (a
     #   later test or reference-only run wins by id), so the caller names it.

@@ -226,7 +226,8 @@ not applied, no pixel is class 5.
 - `--out` is resolved to its real path first, so publishing through a
   symlinked `--out` replaces the target and keeps the link in place.
 - At the start of each publish smolf cleans up its own debris next to
-  `--out`: stale `.<name>.staging-*` directories are removed; a lone
+  `--out`: stale `.<name>.staging-*` directories are removed when they
+  hold only allowlisted files (anything else is left alone); a lone
   `.<name>.previous-*` (a crash between the swap's two renames) is
   renamed back when `--out` is missing, while several are refused; once
   `--out` holds a valid contract, old `.<name>.previous-*` directories are

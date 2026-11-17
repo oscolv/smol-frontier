@@ -97,10 +97,75 @@ def check_out_dir(out_dir: Path) -> None:
         if next(out_dir.iterdir(), None) is None:
             return
         raise PublishRefused(refusal)
-    for path in out_dir.rglob("*"):
-        rel = path.relative_to(out_dir).as_posix()
+    foreign = _first_foreign(out_dir)
+    if foreign is not None:
+        raise PublishRefused(f"{refusal} (foreign: {foreign})")
+
+
+def _first_foreign(directory: Path) -> str | None:
+    """The first entry under ``directory`` outside the allowlist, if any."""
+    for path in directory.rglob("*"):
+        rel = path.relative_to(directory).as_posix()
         if not is_allowed(rel) and rel != _MAP_DIR:
-            raise PublishRefused(f"{refusal} (foreign: {rel})")
+            return rel
+    return None
+
+
+def _debris(out_dir: Path, kind: str) -> list[Path]:
+    """Real directories next to ``out_dir`` named ``.<name>.<kind>-*``.
+
+    WHY only these: they are the exact names `_write_contract` (staging)
+    and `_swap_in` (previous) create, so nothing else is ever touched.
+    WHY no symlinks: a link with such a name was not made by publish, and
+    following it could reach (and delete) data anywhere.
+    """
+    if not out_dir.parent.is_dir():
+        return []
+    prefix = f".{out_dir.name}.{kind}-"
+    return sorted(
+        path
+        for path in out_dir.parent.iterdir()
+        if path.name.startswith(prefix) and not path.is_symlink() and path.is_dir()
+    )
+
+
+def recover_out_dir(out_dir: Path) -> None:
+    """Undo what a crash mid-publish left next to ``out_dir`` (before checks).
+
+    WHY: a process killed between the swap's two renames leaves ``out_dir``
+    missing, the last good contract in ``.previous-*`` and a ``.staging-*``.
+    A lone ``.previous-*`` is renamed back so the contract is never lost
+    (the caller then checks it like any ``--out``); with several there is no
+    safe choice, so publish refuses and touches nothing. Stale staging dirs
+    are removed only if everything in them is allowlisted.
+    """
+    previous = _debris(out_dir, "previous")
+    if not out_dir.exists() and not out_dir.is_symlink() and previous:
+        if len(previous) > 1:
+            names = ", ".join(path.name for path in previous)
+            msg = (
+                f"--out {out_dir} is missing and several previous publishes "
+                f"remain ({names}); restore one by hand"
+            )
+            raise PublishRefused(msg)
+        previous[0].rename(out_dir)
+    for staging in _debris(out_dir, "staging"):
+        if _first_foreign(staging) is None:
+            shutil.rmtree(staging, ignore_errors=True)
+
+
+def drop_previous(out_dir: Path) -> None:
+    """Remove ``.previous-*`` leftovers once ``out_dir`` holds a contract.
+
+    WHY after check_out_dir: until ``out_dir`` is a valid contract, a
+    leftover may be the only good copy. Each one must itself pass the
+    ``--out`` rule with ``publish.json`` present; anything else is kept.
+    """
+    if not (out_dir / INDEX_FILE).is_file():
+        return
+    for previous in _debris(out_dir, "previous"):
+        if (previous / INDEX_FILE).is_file() and _first_foreign(previous) is None:
+            shutil.rmtree(previous, ignore_errors=True)
 
 
 def _swap_in(staging: Path, out_dir: Path) -> None:
@@ -207,7 +272,9 @@ def publish_run(
     root = paths.series_dir() if series_root is None else Path(series_root)
     target = paths.publish_dir() if out_dir is None else Path(out_dir)
     real = resolve_out_dir(target)  # every step below acts on the real dir
+    recover_out_dir(real)  # a crash mid-swap may have left debris
     check_out_dir(real)  # fail fast; checked again right before staging
+    drop_previous(real)
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     manifest = _read_manifest(run_dir)

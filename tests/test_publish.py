@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import warnings
 from datetime import date, datetime
 from pathlib import Path
@@ -1850,6 +1851,133 @@ def test_publish_out_missing_parents_created(series_root: Path, tmp_path: Path) 
     assert result.exit_code == 0, result.output
     assert (out / "publish.json").is_file()
     assert _siblings(out.parent) == ["pub"]
+
+
+# --- crash recovery -----------------------------------------------------------
+
+
+def _crash_mid_swap(out: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Publish once more into an existing ``out`` and die between the renames.
+
+    WHY: a killed process runs neither the swap's restore nor the staging
+    cleanup, so both are disabled: every rename onto ``out`` (the second
+    rename and the restore) raises, and ``rmtree`` does nothing.
+    """
+    real_rename = Path.rename
+
+    def crashing_rename(self: Path, target: object) -> Path:
+        if Path(str(target)) == out:
+            raise OSError("killed between the two renames")
+        return real_rename(self, target)
+
+    with monkeypatch.context() as m:
+        m.setattr(Path, "rename", crashing_rename)
+        m.setattr(shutil, "rmtree", lambda *args, **kwargs: None)
+        with pytest.raises(OSError, match="killed"):
+            publish.publish_run(RUN_ID, out)
+
+
+def _debris(directory: Path, name: str) -> list[str]:
+    return sorted(
+        p.name
+        for p in directory.iterdir()
+        if p.name.startswith((f".{name}.staging-", f".{name}.previous-"))
+    )
+
+
+def test_publish_recovers_from_crash_mid_swap(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    _crash_mid_swap(out, monkeypatch)
+    debris = _debris(tmp_path, "pub")
+    assert not out.exists()
+    assert [d.split("-")[0] for d in debris] == [".pub.previous", ".pub.staging"]
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert _index(out)["run_id"] == RUN_ID
+    assert _debris(tmp_path, "pub") == []
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
+def test_publish_restores_lone_previous_before_proceeding(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    before = (out / "latest.json").read_bytes()
+    out.rename(tmp_path / ".pub.previous-.pub.staging-abc123")
+    # a refused publish still keeps the restored contract at --out
+    refused = _publish(out, "--run", "19990101T000000")
+    assert refused.exit_code == 2, refused.output
+    assert (out / "latest.json").read_bytes() == before
+    assert _siblings(tmp_path) == ["pub", "series"]
+    out.rename(tmp_path / ".pub.previous-.pub.staging-def456")
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert (out / "latest.json").read_bytes() == before
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
+def test_publish_cleanup_leaves_unrelated_siblings_untouched(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    contract = tmp_path / ".pub.previous-.pub.staging-ok"
+    shutil.copytree(out, contract)
+    unrelated = [
+        ".pub.previousX",  # no dash: not the pattern
+        ".pub.stagingX",
+        ".other.staging-1",  # another --out's debris
+        ".other.previous-1",
+        "pub.staging-1",  # no leading dot
+        ".pub.previous-foreign",  # pattern, but not a contract
+        ".pub.staging-foreign",  # pattern, but holds a foreign file
+    ]
+    for name in unrelated:
+        shutil.copytree(contract, tmp_path / name)
+        (tmp_path / name / "data.txt").write_text("keep me")
+    target = tmp_path / "elsewhere"
+    shutil.copytree(contract, target)
+    (tmp_path / ".pub.previous-link").symlink_to(target, target_is_directory=True)
+    (tmp_path / ".pub.staging-link").symlink_to(target, target_is_directory=True)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert not contract.exists()  # the one real previous contract is removed
+    for name in unrelated:
+        assert (tmp_path / name / "data.txt").read_text() == "keep me", name
+    assert (tmp_path / ".pub.previous-link").is_symlink()
+    assert (tmp_path / ".pub.staging-link").is_symlink()
+    assert (target / publish.INDEX_FILE).is_file()
+    assert _siblings(tmp_path) == sorted(
+        ["pub", "series", "elsewhere", ".pub.previous-link", ".pub.staging-link"]
+        + unrelated
+    )
+
+
+def test_publish_several_previous_without_out_refused_untouched(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    shutil.copytree(out, tmp_path / ".pub.previous-a")
+    out.rename(tmp_path / ".pub.previous-b")
+    (tmp_path / ".pub.staging-c").mkdir()
+    before = _siblings(tmp_path)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "several" in lines[0]
+    assert _siblings(tmp_path) == before
+    assert (tmp_path / ".pub.previous-a" / publish.INDEX_FILE).is_file()
+    assert (tmp_path / ".pub.previous-b" / publish.INDEX_FILE).is_file()
 
 
 # --- schema versioning --------------------------------------------------------

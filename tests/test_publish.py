@@ -341,7 +341,9 @@ def series_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _publish(out: Path, *args: str):
-    return CliRunner().invoke(app, ["publish", *args, "--out", str(out)])
+    """`smolf publish`; without --run it asks for the newest run (--latest)."""
+    select = [] if "--run" in args else ["--latest"]
+    return CliRunner().invoke(app, ["publish", *select, *args, "--out", str(out)])
 
 
 def _latest(out: Path) -> dict:
@@ -548,6 +550,33 @@ def test_publish_latest_refusal_creates_no_output(
     assert not out.exists()
 
 
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        ([], "pass --run <run_id> or --latest"),
+        (["--run", RUN_ID, "--latest"], "not both"),
+    ],
+    ids=["neither", "both"],
+)
+def test_publish_requires_an_explicit_run_choice(
+    series_root: Path, tmp_path: Path, args: list[str], message: str
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    result = CliRunner().invoke(app, ["publish", *args, "--out", str(out)])
+    assert result.exit_code == 2
+    assert message in result.stderr
+    assert result.stdout == ""
+    assert not out.exists()
+
+
+def test_publish_refusal_goes_to_stderr(series_root: Path, tmp_path: Path) -> None:
+    result = _publish(tmp_path / "pub", "--run", "nope")
+    assert result.exit_code == 2
+    assert result.stderr.startswith("refused: unknown run: nope")
+    assert result.stdout == ""
+
+
 def test_publish_latest_unknown_run_exit_2(series_root: Path, tmp_path: Path) -> None:
     result = _publish(tmp_path / "pub", "--run", "nope")
     assert result.exit_code == 2
@@ -690,7 +719,7 @@ def test_publish_latest_level_missing_file_is_null(
 ) -> None:
     _write_run(series_root)
     out = tmp_path / "pub"
-    result = CliRunner().invoke(app, ["publish", "--out", str(out)])
+    result = CliRunner().invoke(app, ["publish", "--latest", "--out", str(out)])
     assert result.exit_code == 0
     assert publish.current_level(tmp_path / "absent.csv") is None
 
@@ -1885,7 +1914,7 @@ def test_data_dir_holds_cache_series_and_publish(
     repo_cache = _tree(PROJECT_ROOT / "data/cache")
     build = CliRunner().invoke(app, ["series", "build"])
     assert build.exit_code == 0, build.output
-    result = CliRunner().invoke(app, ["publish"])
+    result = CliRunner().invoke(app, ["publish", "--latest"])
     assert result.exit_code == 0, result.output
     assert len(list((data_root / "outputs/series").glob("*/series.csv"))) == 1
     assert (data_root / "cache" / f"{LATEST_ITEM}.tif").is_file()
@@ -1937,7 +1966,7 @@ def test_data_dir_levels_update_series_build_and_publish(
     assert (data_root / "hydro/ENDHD.csv.json").is_file()
     build = CliRunner().invoke(app, ["series", "build"])
     assert build.exit_code == 0, build.output
-    result = CliRunner().invoke(app, ["publish"])
+    result = CliRunner().invoke(app, ["publish", "--latest"])
     assert result.exit_code == 0, result.output
 
     (manifest_path,) = (data_root / "outputs/series").glob("*/manifest.json")

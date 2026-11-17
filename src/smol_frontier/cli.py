@@ -90,12 +90,12 @@ def fetch(
     """Download one day's scene into the local cache and print its stats."""
     scenes = search_scenes(day.date(), day.date(), max_cloud)
     if not scenes:
-        typer.echo(f"no scenes found for {day.date()}")
+        typer.echo(f"no scenes found for {day.date()}", err=True)
         raise typer.Exit(1)
     try:
         ing, note = ingest_with_fallback(scenes[0])
     except AnomalousProduct as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     scl = ing.bands["SCL"]
     bands = {
@@ -126,12 +126,12 @@ def classify(
     """Classify one day's scene, print the summary, write a GeoTIFF."""
     scenes = search_scenes(day.date(), day.date(), 100.0)
     if not scenes:
-        typer.echo(f"no scenes found for {day.date()}")
+        typer.echo(f"no scenes found for {day.date()}", err=True)
         raise typer.Exit(1)
     try:
         ing, note = ingest_with_fallback(scenes[0])
     except AnomalousProduct as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     result = pipeline.classify(ing)
     ha = result.ha_per_class
@@ -203,7 +203,7 @@ def levels_update(
     try:
         report = update_levels(check=check, force=force)
     except LevelsError as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(f"days: {report.n_days}")
     typer.echo(f"first_day: {report.first_day}")
@@ -227,11 +227,11 @@ def levels_show(
 ) -> None:
     """Print the SIH level for one exact day (no interpolation)."""
     if not paths.levels_read_path().exists():
-        typer.echo("no local levels file; run `smolf levels update` first")
+        typer.echo("no local levels file; run `smolf levels update` first", err=True)
         raise typer.Exit(1)
     match = next((row for row in load_levels() if row.date == day.date()), None)
     if match is None or math.isnan(match.level_m):
-        typer.echo(f"no level for {day.date()}")
+        typer.echo(f"no level for {day.date()}", err=True)
         raise typer.Exit(1)
     volume = "n/a" if math.isnan(match.volume_hm3) else f"{match.volume_hm3}"
     typer.echo(f"date: {match.date}")
@@ -243,7 +243,7 @@ def levels_show(
 def hydro_curve() -> None:
     """Build the stage–area curve from the SIH record and write it."""
     if not paths.levels_read_path().exists():
-        typer.echo("no local levels file; run `smolf levels update` first")
+        typer.echo("no local levels file; run `smolf levels update` first", err=True)
         raise typer.Exit(1)
     report = build_curve()
     typer.echo(f"pairs: {report.n_pairs}")
@@ -264,7 +264,7 @@ def hydro_flood_map() -> None:
     try:
         report = build_flood_map()
     except FloodMapError as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(f"pixels: {report.n_pixels}")
     typer.echo(f"stage_min: {report.stage_min:.3f}")
@@ -296,7 +296,7 @@ def gate_identity(
     gate passes (median |Δ total| ≤ 10 ha AND p95 ≤ 25 ha, no failures).
     """
     if workers < 1:
-        typer.echo("error: --workers must be >= 1")
+        typer.echo("error: --workers must be >= 1", err=True)
         raise typer.Exit(2)
     reference = load_reference()
     targets: list[GateTarget]
@@ -378,13 +378,20 @@ def series_build(
     by the sha256 of its series.csv (in the manifest), not by date.
     """
     if workers < 1:
-        typer.echo("error: --workers must be >= 1")
+        typer.echo("error: --workers must be >= 1", err=True)
         raise typer.Exit(2)
     if extend and resume:
-        typer.echo("error: --extend cannot be combined with --resume")
+        typer.echo("error: --extend cannot be combined with --resume", err=True)
         raise typer.Exit(2)
     run_id = resume if resume else new_run_id()
-    typer.echo(f"run: {run_id} ({'resume' if resume else 'new'})")
+    started = False
+
+    def on_start(kind: str) -> None:
+        # WHY here: the run id is announced only once its directory exists,
+        #   so a refusal never names a run that was not created.
+        nonlocal started
+        started = True
+        typer.echo(f"run: {run_id} ({kind})")
 
     def on_done(record: dict, done: int, total: int) -> None:
         status = record["status"]
@@ -413,17 +420,29 @@ def series_build(
             resume=bool(resume),
             workers=workers,
             command=sys.argv,
+            on_start=on_start,
             on_done=on_done,
         )
-    except (CatalogUnavailable, FingerprintMismatch, StaleLevelsError) as exc:
+    except (CatalogUnavailable, StaleLevelsError) as exc:
         # Precondition refusal: nothing written, retry later (exit 2).
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2)
+    except FingerprintMismatch as exc:
+        # WHY exit 1: code, config or the dirty flag changed since the run
+        #   started, so retrying later cannot succeed; start a new run.
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1)
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     except KeyboardInterrupt:
-        typer.echo(f"interrupted: resume with `smolf series build --resume {run_id}`")
+        if started:
+            typer.echo(
+                f"interrupted: resume with `smolf series build --resume {run_id}`",
+                err=True,
+            )
+        else:
+            typer.echo("interrupted before the run started; nothing written", err=True)
         raise typer.Exit(130)
     wall = time.perf_counter() - start
     counts = manifest["counts"]
@@ -442,8 +461,12 @@ def series_build(
 def publish(
     run: Annotated[
         str | None,
-        typer.Option("--run", help="Run id (default: the newest complete run)."),
+        typer.Option("--run", help="Run id to publish."),
     ] = None,
+    latest: Annotated[
+        bool,
+        typer.Option("--latest", help="Publish the newest complete run instead."),
+    ] = False,
     out: Annotated[
         Path | None,
         typer.Option("--out", help="Output directory (default: outputs/publish)."),
@@ -451,6 +474,8 @@ def publish(
 ) -> None:
     """Publish the versioned data contract (JSON + latest map) from one run.
 
+    Name the run with --run <run_id>, or pass --latest for the newest complete
+    run; with neither (or both) it exits 2 before reading anything.
     Refuses (exit 2) incomplete or dirty runs, runs with no scene that has
     figures, and a latest scene whose re-classified map disagrees with the
     run (cache, flood-stage map, hectares), and an --out directory that is
@@ -458,13 +483,21 @@ def publish(
     guard is a bug (exit 1). The output directory is replaced atomically; on
     any failure it is untouched.
     """
+    # WHY explicit: the newest complete run is not always the one meant (a
+    #   later test or reference-only run wins by id), so the caller names it.
+    if run is not None and latest:
+        typer.echo("error: pass either --run or --latest, not both", err=True)
+        raise typer.Exit(2)
+    if run is None and not latest:
+        typer.echo("error: pass --run <run_id> or --latest", err=True)
+        raise typer.Exit(2)
     try:
         out_dir = publish_run(run_id=run, out_dir=out)
     except PublishRefused as exc:
-        typer.echo(f"refused: {exc}")
+        typer.echo(f"refused: {exc}", err=True)
         raise typer.Exit(2)
     except ContractInvalid as exc:
-        typer.echo(f"error: {exc}")
+        typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(f"published: {out_dir / 'latest.json'}")
 

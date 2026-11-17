@@ -28,7 +28,7 @@ uv run smolf levels show 2026-10-12  # level for one exact day (no interpolation
 uv run smolf hydro curve             # build the stage–area curve
 uv run smolf hydro flood-map         # build the per-pixel flood-stage map
 uv run smolf series build            # build or resume the hyacinth time series
-uv run smolf publish                 # publish the versioned data contract
+uv run smolf publish --latest        # publish the newest complete run (or --run <id>)
 uv run pytest                        # tests (no network; live tests need SMOLF_LIVE=1)
 ```
 
@@ -40,7 +40,7 @@ uv run pytest                        # tests (no network; live tests need SMOLF_
 export SMOLF_DATA_DIR=/path/to/writable/data
 uv run --frozen --no-sync smolf levels update
 uv run --frozen --no-sync smolf series build --extend
-uv run --frozen --no-sync smolf publish
+uv run --frozen --no-sync smolf publish --latest
 ```
 
 With `SMOLF_DATA_DIR` set (read at run time; unset or empty keeps the repo
@@ -63,11 +63,12 @@ download against it. The other inputs (AOI, stage–area curve, flood-stage
 map, GSW raster, reference series) stay read-only in the checkout.
 
 `series build` exits 0 when the run completed, 2 on a precondition refusal
-(nothing written, retry later: stale level record, new-scene catalog
-unreachable, resume fingerprint mismatch; also its own argument checks,
-`--workers < 1` and `--extend` with `--resume`), 130 on interrupt (resume
-with `--resume`) and 1 on anything else; see
-`docs/method.md` §9.
+(nothing written, retry later: stale level record or new-scene catalog
+unreachable; also its own argument checks, `--workers < 1` and `--extend`
+with `--resume`), 130 on interrupt, and 1 on anything else, including a
+resume whose code fingerprint changed; see `docs/method.md` §9. Errors and
+refusals go to stderr. `publish --latest` takes the newest complete run;
+use `--run <id>` to name one.
 
 Read-only checkout notes:
 

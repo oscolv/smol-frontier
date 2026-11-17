@@ -5,7 +5,7 @@ description: Drive the real `smolf` CLI (smol-frontier, water-hyacinth series fo
 
 # Verify smolf
 
-`smolf` is a short-lived CLI (Typer). There is no server: each verification step is one command with an exit code, `key: value` stdout lines, and files written under `SMOLF_DATA_DIR`. Every network call is real (STAC catalogs, the SIH level record). Use `scripts/smolf-verify` for all of it; it isolates the run, records evidence, and cleans up what it created.
+`smolf` is a short-lived CLI (Typer). There is no server: each verification step is one command with an exit code, `key: value` stdout lines (errors and refusals go to stderr), and files written under `SMOLF_DATA_DIR`. Every network call is real (STAC catalogs, the SIH level record). Use `scripts/smolf-verify` for all of it; it isolates the run, records evidence, and cleans up what it created.
 
 ```bash
 V=.claude/skills/verify-smolf/scripts/smolf-verify   # from the repo root

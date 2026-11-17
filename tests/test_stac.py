@@ -211,6 +211,25 @@ def test_all_backends_fail() -> None:
     assert isinstance(info.value, RuntimeError)
 
 
+@responses.activate
+def test_failed_backend_log_names_the_next_backend_or_none(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    for url in (PC_URL, ES_URL):
+        responses.add(responses.GET, url, json=_landing(url))
+        responses.add(responses.POST, f"{url}/search", status=500)
+    with (
+        caplog.at_level(logging.WARNING, logger="smol_frontier.sources.stac"),
+        pytest.raises(AllBackendsFailed),
+    ):
+        search_scenes(date(2026, 10, 12), date(2026, 10, 12), 20.0)
+    failures = [r.getMessage() for r in caplog.records if "failed" in r.getMessage()]
+    assert len(failures) == 2
+    assert failures[0].endswith("; trying earth-search")
+    assert failures[1].endswith("; no other backend")
+    assert not any("trying next" in message for message in failures)
+
+
 def _stub_client(monkeypatch: pytest.MonkeyPatch, item) -> None:
     """Stub Client.open so get_scene never touches the network."""
 

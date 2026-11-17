@@ -1856,7 +1856,9 @@ def test_publish_out_missing_parents_created(series_root: Path, tmp_path: Path) 
 # --- crash recovery -----------------------------------------------------------
 
 
-def _crash_mid_swap(out: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _crash_mid_swap(
+    out: Path, monkeypatch: pytest.MonkeyPatch, real: Path | None = None
+) -> None:
     """Publish once more into an existing ``out`` and die between the renames.
 
     WHY: a killed process runs neither the swap's restore nor the staging
@@ -1866,7 +1868,7 @@ def _crash_mid_swap(out: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     real_rename = Path.rename
 
     def crashing_rename(self: Path, target: object) -> Path:
-        if Path(str(target)) == out:
+        if Path(str(target)) == (out if real is None else real):
             raise OSError("killed between the two renames")
         return real_rename(self, target)
 
@@ -1936,7 +1938,8 @@ def test_publish_cleanup_leaves_unrelated_siblings_untouched(
         ".other.staging-1",  # another --out's debris
         ".other.previous-1",
         "pub.staging-1",  # no leading dot
-        ".pub.previous-foreign",  # pattern, but not a contract
+        ".pub.previous-foreign",  # old prefix, not the writer's shape
+        ".pub.previous-.pub.staging-foreign",  # pattern, but not a contract
         ".pub.staging-foreign",  # pattern, but holds a foreign file
     ]
     for name in unrelated:
@@ -1944,18 +1947,26 @@ def test_publish_cleanup_leaves_unrelated_siblings_untouched(
         (tmp_path / name / "data.txt").write_text("keep me")
     target = tmp_path / "elsewhere"
     shutil.copytree(contract, target)
-    (tmp_path / ".pub.previous-link").symlink_to(target, target_is_directory=True)
+    (tmp_path / ".pub.previous-.pub.staging-link").symlink_to(
+        target, target_is_directory=True
+    )
     (tmp_path / ".pub.staging-link").symlink_to(target, target_is_directory=True)
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 0, result.output
     assert not contract.exists()  # the one real previous contract is removed
     for name in unrelated:
         assert (tmp_path / name / "data.txt").read_text() == "keep me", name
-    assert (tmp_path / ".pub.previous-link").is_symlink()
+    assert (tmp_path / ".pub.previous-.pub.staging-link").is_symlink()
     assert (tmp_path / ".pub.staging-link").is_symlink()
     assert (target / publish.INDEX_FILE).is_file()
     assert _siblings(tmp_path) == sorted(
-        ["pub", "series", "elsewhere", ".pub.previous-link", ".pub.staging-link"]
+        [
+            "pub",
+            "series",
+            "elsewhere",
+            ".pub.previous-.pub.staging-link",
+            ".pub.staging-link",
+        ]
         + unrelated
     )
 
@@ -1966,8 +1977,8 @@ def test_publish_several_previous_without_out_refused_untouched(
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
-    shutil.copytree(out, tmp_path / ".pub.previous-a")
-    out.rename(tmp_path / ".pub.previous-b")
+    shutil.copytree(out, tmp_path / ".pub.previous-.pub.staging-a")
+    out.rename(tmp_path / ".pub.previous-.pub.staging-b")
     (tmp_path / ".pub.staging-c").mkdir()
     before = _siblings(tmp_path)
     result = _publish(out, "--run", RUN_ID)
@@ -1976,8 +1987,71 @@ def test_publish_several_previous_without_out_refused_untouched(
     assert len(lines) == 1
     assert "several" in lines[0]
     assert _siblings(tmp_path) == before
-    assert (tmp_path / ".pub.previous-a" / publish.INDEX_FILE).is_file()
-    assert (tmp_path / ".pub.previous-b" / publish.INDEX_FILE).is_file()
+    for name in (".pub.previous-.pub.staging-a", ".pub.previous-.pub.staging-b"):
+        assert (tmp_path / name / publish.INDEX_FILE).is_file()
+
+
+def test_publish_cleanup_ignores_debris_of_a_similarly_named_out(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    other = tmp_path / "a.staging-b"  # another --out whose name extends "a"
+    assert _publish(other, "--run", RUN_ID).exit_code == 0
+    # its previous contract and a stale staging dir of its own
+    names = [
+        ".a.staging-b.previous-.a.staging-b.staging-xyz",
+        ".a.staging-b.staging-xyz",
+    ]
+    for name in names:
+        shutil.copytree(other, tmp_path / name)
+    out = tmp_path / "a"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    for name in names:
+        assert (tmp_path / name / publish.INDEX_FILE).is_file(), name
+    assert _siblings(tmp_path) == sorted(["a", "a.staging-b", "series", *names])
+
+
+def test_publish_symlinked_out_recovers_from_crash_mid_swap(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    real = real_parent / "pub"
+    assert _publish(real, "--run", RUN_ID).exit_code == 0
+    link_parent = tmp_path / "links"
+    link_parent.mkdir()
+    link = link_parent / "pub"
+    link.symlink_to(Path("..") / "real" / "pub", target_is_directory=True)
+    _crash_mid_swap(link, monkeypatch, real=real.resolve())
+    assert link.is_symlink() and not link.exists()  # the link now dangles
+    assert len(_debris(real_parent, "pub")) == 2
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert link.is_symlink()
+    assert _index(link)["run_id"] == RUN_ID
+    assert _siblings(real_parent) == ["pub"]
+    assert _siblings(link_parent) == ["pub"]
+
+
+def test_publish_dangling_out_link_with_several_previous_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    real = tmp_path / "real" / "pub"
+    real.parent.mkdir()
+    assert _publish(real, "--run", RUN_ID).exit_code == 0
+    shutil.copytree(real, real.parent / ".pub.previous-.pub.staging-a")
+    real.rename(real.parent / ".pub.previous-.pub.staging-b")
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    before = _siblings(real.parent)
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "several" in result.output
+    assert link.is_symlink()
+    assert _siblings(real.parent) == before
 
 
 # --- schema versioning --------------------------------------------------------

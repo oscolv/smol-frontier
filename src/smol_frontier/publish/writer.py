@@ -1,6 +1,7 @@
 """Writer: allowlist, ``--out`` check, staging, atomic swap, the
 ``publish.json`` index and the ``publish_run`` orchestration."""
 
+import os
 import re
 import shutil
 import tempfile
@@ -59,16 +60,45 @@ def resolve_out_dir(out_dir: Path) -> Path:
     directory wherever the dangling link points (e.g. ``outputs/`` linked to
     an unmounted drive would publish onto the underlying filesystem). A
     missing parent with no symlink in the way is still created later.
+
+    WHY one exception: a crash mid-swap through a symlinked ``--out``
+    leaves the link dangling (its target was renamed to ``.previous-*``).
+    When only the final component dangles and its target's parent exists,
+    the target gets the same restore as a plain ``--out``; if that restores
+    nothing, the link stays refused. A dangling ancestor is always refused.
     """
-    for part in (out_dir, *out_dir.absolute().parents):
+    for part in out_dir.absolute().parents:
         if part.is_symlink() and not part.exists():
             msg = f"--out {out_dir} goes through a broken symlink: {part}"
+            raise PublishRefused(msg)
+    if out_dir.is_symlink() and not out_dir.exists():
+        target = _link_target(out_dir)
+        if target is None or not _restore_previous(target):
+            msg = f"--out {out_dir} goes through a broken symlink: {out_dir}"
             raise PublishRefused(msg)
     try:
         return out_dir.resolve()
     except (OSError, RuntimeError) as exc:  # a loop in a parent component
         msg = f"--out {out_dir} cannot be resolved: {exc}"
         raise PublishRefused(msg) from exc
+
+
+def _link_target(link: Path) -> Path | None:
+    """The real path a dangling ``link`` names, if its parent exists.
+
+    WHY one level only: a target that is itself a link, or whose parent is
+    missing (an unmounted drive), is not a crash publish could have caused.
+    """
+    target = Path(link.absolute().parent, os.readlink(link))
+    if target.name in ("", ".", ".."):
+        return None
+    try:
+        parent = target.parent.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+    if not parent.is_dir():
+        return None
+    return parent / target.name
 
 
 def check_out_dir(out_dir: Path) -> None:
@@ -112,20 +142,21 @@ def _first_foreign(directory: Path) -> str | None:
 
 
 def _debris(out_dir: Path, kind: str) -> list[Path]:
-    """Real directories next to ``out_dir`` named ``.<name>.<kind>-*``.
+    """Real directories next to ``out_dir`` named like publish's own debris.
 
-    WHY only these: they are the exact names `_write_contract` (staging)
-    and `_swap_in` (previous) create, so nothing else is ever touched.
+    WHY only these: `_debris_pattern` gives the exact names
+    `_write_contract` (staging) and `_swap_in` (previous) create, so
+    nothing else is ever touched.
     WHY no symlinks: a link with such a name was not made by publish, and
     following it could reach (and delete) data anywhere.
     """
     if not out_dir.parent.is_dir():
         return []
-    prefix = f".{out_dir.name}.{kind}-"
+    pattern = _debris_pattern(out_dir.name, kind)
     return sorted(
         path
         for path in out_dir.parent.iterdir()
-        if path.name.startswith(prefix) and not path.is_symlink() and path.is_dir()
+        if pattern.fullmatch(path.name) and not path.is_symlink() and path.is_dir()
     )
 
 
@@ -139,19 +170,32 @@ def recover_out_dir(out_dir: Path) -> None:
     safe choice, so publish refuses and touches nothing. Stale staging dirs
     are removed only if everything in them is allowlisted.
     """
-    previous = _debris(out_dir, "previous")
-    if not out_dir.exists() and not out_dir.is_symlink() and previous:
-        if len(previous) > 1:
-            names = ", ".join(path.name for path in previous)
-            msg = (
-                f"--out {out_dir} is missing and several previous publishes "
-                f"remain ({names}); restore one by hand"
-            )
-            raise PublishRefused(msg)
-        previous[0].rename(out_dir)
+    _restore_previous(out_dir)
     for staging in _debris(out_dir, "staging"):
         if _first_foreign(staging) is None:
             shutil.rmtree(staging, ignore_errors=True)
+
+
+def _restore_previous(out_dir: Path) -> bool:
+    """Rename a lone ``.previous-*`` back to a missing ``out_dir``.
+
+    Returns True when it restored one. With several it refuses and touches
+    nothing: there is no safe way to tell which one was the last good one.
+    """
+    if out_dir.exists() or out_dir.is_symlink():
+        return False
+    previous = _debris(out_dir, "previous")
+    if not previous:
+        return False
+    if len(previous) > 1:
+        names = ", ".join(path.name for path in previous)
+        msg = (
+            f"--out {out_dir} is missing and several previous publishes "
+            f"remain ({names}); restore one by hand"
+        )
+        raise PublishRefused(msg)
+    previous[0].rename(out_dir)
+    return True
 
 
 def drop_previous(out_dir: Path) -> None:
@@ -168,12 +212,36 @@ def drop_previous(out_dir: Path) -> None:
             shutil.rmtree(previous, ignore_errors=True)
 
 
+def _staging_prefix(name: str) -> str:
+    """Prefix of the staging dir ``mkdtemp`` creates next to ``--out``."""
+    return f".{name}.staging-"
+
+
+def _previous_name(name: str, staging_name: str) -> str:
+    """Name the swap gives the old ``--out`` while staging moves in."""
+    return f".{name}.previous-{staging_name}"
+
+
+def _debris_pattern(name: str, kind: str) -> re.Pattern[str]:
+    """The exact names publish gives its own debris next to ``--out``.
+
+    WHY exact: a prefix match on ``.a.staging-`` would also catch
+    ``.a.staging-b.previous-…``, the previous contract of an ``--out``
+    named ``a.staging-b``. The ``mkdtemp`` suffix never holds a dot or a
+    separator, so ``[^./]+`` ends the staging name unambiguously.
+    """
+    staging = re.escape(_staging_prefix(name)) + r"[^./]+"
+    if kind == "staging":
+        return re.compile(staging)
+    return re.compile(re.escape(_previous_name(name, "")) + staging)
+
+
 def _swap_in(staging: Path, out_dir: Path) -> None:
     """Replace ``out_dir`` with ``staging`` by rename; restore it on failure."""
     if not out_dir.exists():
         staging.rename(out_dir)
         return
-    previous = out_dir.with_name(f".{out_dir.name}.previous-{staging.name}")
+    previous = out_dir.with_name(_previous_name(out_dir.name, staging.name))
     out_dir.rename(previous)
     try:
         staging.rename(out_dir)
@@ -229,7 +297,7 @@ def _write_contract(
     check_out_dir(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
-        tempfile.mkdtemp(prefix=f".{out_dir.name}.staging-", dir=out_dir.parent)
+        tempfile.mkdtemp(prefix=_staging_prefix(out_dir.name), dir=out_dir.parent)
     )
     # WHY: mkdtemp creates a private (0700) dir; the contract is meant to be
     #   read by others, so it gets ordinary directory permissions.

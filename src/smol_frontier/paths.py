@@ -15,7 +15,9 @@ from smol_frontier.config import PROJECT_ROOT
 __all__ = [
     "COMMITTED_LEVELS_PATH",
     "DATA_DIR_ENV",
+    "DataDirError",
     "cache_dir",
+    "check_data_dir",
     "classify_dir",
     "gate_dir",
     "levels_path",
@@ -39,10 +41,37 @@ COMMITTED_LEVELS_PATH = PROJECT_ROOT / "data/hydro/ENDHD.csv"
 DATA_DIR_ENV = "SMOLF_DATA_DIR"
 
 
+class DataDirError(Exception):
+    """`SMOLF_DATA_DIR` is set to an unusable value (configuration error)."""
+
+
 def _data_root() -> Path | None:
-    """The writable data root from `SMOLF_DATA_DIR`, or None (unset or empty)."""
+    """The writable data root from `SMOLF_DATA_DIR`, or None (unset or empty).
+
+    Raises `DataDirError` for a relative value (it would depend on the working
+    directory) or one at or inside the checkout (its files would show up in
+    `git status`, marking every run dirty so `publish` refuses forever).
+    """
     value = os.environ.get(DATA_DIR_ENV, "")
-    return Path(value) if value else None
+    if not value:
+        return None
+    root = Path(value)
+    if not root.is_absolute():
+        raise DataDirError(
+            f"{DATA_DIR_ENV}={value!r} must be an absolute path outside the checkout"
+        )
+    resolved = root.resolve()
+    project = PROJECT_ROOT.resolve()
+    if resolved == project or project in resolved.parents:
+        raise DataDirError(
+            f"{DATA_DIR_ENV}={value!r} must be outside the checkout ({project})"
+        )
+    return root
+
+
+def check_data_dir() -> None:
+    """Fail fast on an unusable `SMOLF_DATA_DIR`; no-op when unset or valid."""
+    _data_root()
 
 
 def cache_dir() -> Path:

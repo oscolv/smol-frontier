@@ -65,6 +65,11 @@ app.add_typer(series_app, name="series")
 @app.callback()
 def main() -> None:
     """smol-frontier CLI."""
+    try:
+        paths.check_data_dir()
+    except paths.DataDirError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command()

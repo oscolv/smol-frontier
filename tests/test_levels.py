@@ -3,6 +3,8 @@
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import time
 from datetime import date
 from pathlib import Path
@@ -401,3 +403,14 @@ def test_explicit_path_skips_the_committed_baseline(
     report = update_levels(path=target)
     assert report.written is True
     assert not data_dir.copy.exists()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_gitignore_covers_levels_temp_files() -> None:
+    from smol_frontier.config import PROJECT_ROOT
+
+    for name in ("data/hydro/ENDHD.csv.x.tmp", "data/hydro/tmpabc.tif.tmp"):
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", name], cwd=PROJECT_ROOT, check=False
+        )
+        assert result.returncode == 0, name

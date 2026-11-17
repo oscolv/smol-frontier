@@ -3,7 +3,7 @@
 Downloads the SIH CSV (Mexico's National Hydrometric Information System;
 third-party data, credited in PRIOR_WORK.md),
 parses Fecha / Nivel(m) / VolumenAlm(Mm3), and stores the bytes verbatim under
-data/hydro/. Refreshes are validated against the local copy before replacing
+data/hydro/ (or hydro/ under SMOLF_DATA_DIR). Refreshes are validated against the local copy before replacing
 it: wrong content, fewer days, an earlier end, missing days, or level
 revisions over LEVEL_REVISION_TOL_M are rejected (kept local copy, non-zero
 exit). First of three hydrology inputs for the exposed-bed correction.

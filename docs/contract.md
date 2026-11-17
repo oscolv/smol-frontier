@@ -31,8 +31,9 @@ First release containing this contract: smolf 0.2.0 (tag `v0.2.0`).
 
 ## Directory layout
 
-The output directory (default `outputs/publish/`, overridable with
-`--out`) contains exactly:
+The output directory (default `outputs/publish/`, or
+`$SMOLF_DATA_DIR/outputs/publish/` when `SMOLF_DATA_DIR` is set; `--out`
+always wins) contains exactly:
 
 ```text
 latest.json
@@ -140,7 +141,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `constants.frac_publishable` | number 0–1 | fraction | no | Minimum `valid_frac` for a percentage to be fully trustworthy (0.95). smolf still publishes the percentage below it; the consumer decides (e.g. show hectares only, as a lower bound). |
 | `constants.green_max_pct` | number 0–100 | % | no | Upper bound (exclusive) of GREEN (30.0). |
 | `constants.red_min_pct` | number 0–100 | % | no | Lower bound (inclusive) of RED (50.0). |
-| `current_level` | object or `null` | — | yes | Last day with a level in the committed SIH level record at publish time, independent of the scene and of the wall clock; `null` when the record has no level. |
+| `current_level` | object or `null` | — | yes | Last day with a level in the local SIH level record at publish time (the refreshed copy under `SMOLF_DATA_DIR` when it exists, else the committed one), independent of the scene and of the wall clock; `null` when the record has no level. |
 | `current_level.date` | string `YYYY-MM-DD` | — | no | That day. |
 | `current_level.level_m` | number | m a.s.l. | no | Its water level. |
 | `current_level.levels_sha256` | string, 64 hex | — | no | sha256 of the level record file, to judge freshness and provenance. |

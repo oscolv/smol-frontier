@@ -237,7 +237,7 @@ def ingest_scene(
     """Ingest a scene to the 10 m grid, using the cache when available.
 
     ``bbox``/``aoi_geom`` default to the AOI from aoi.py; ``cache_dir``
-    defaults to ``data/cache``. A cache hit re-derives the offset and mask
+    defaults to ``data/cache`` (or ``cache/`` under ``SMOLF_DATA_DIR``). A cache hit re-derives the offset and mask
     instead of trusting stored derivatives.
     """
     cache_dir = paths.cache_dir() if cache_dir is None else Path(cache_dir)

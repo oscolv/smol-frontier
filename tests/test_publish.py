@@ -1830,8 +1830,15 @@ _REAL_CACHE_DIR = paths.cache_dir  # scene_env replaces it with a tmp cache
 _REAL_LEVELS_PATH = paths.levels_path  # levels_file replaces it with a tmp record
 
 
-def _tree(root: Path) -> set[str]:
-    return {p.relative_to(root).as_posix() for p in root.rglob("*")}
+def _tree(root: Path, *, hashed: bool = False) -> set[tuple[str, str]]:
+    """(relative name, sha256 when `hashed` and a file, else "") per entry."""
+    return {
+        (
+            p.relative_to(root).as_posix(),
+            _sha(p.read_bytes()) if hashed and p.is_file() else "",
+        )
+        for p in root.rglob("*")
+    }
 
 
 @pytest.fixture
@@ -1913,10 +1920,15 @@ def test_data_dir_levels_update_series_build_and_publish(
     monkeypatch.setattr(paths, "levels_path", _REAL_LEVELS_PATH)
     monkeypatch.setattr(levels, "download_levels", lambda: refreshed)
     monkeypatch.setattr(series, "last_day_with_level", levels.last_day_with_level)
-    repo = {
-        rel: _tree(PROJECT_ROOT / rel)
-        for rel in ("outputs", "data/cache", "data/hydro")
-    }
+
+    def repo_state() -> dict[str, set[tuple[str, str]]]:
+        # data/hydro is small and committed: compare bytes, not just names.
+        return {
+            rel: _tree(PROJECT_ROOT / rel, hashed=rel == "data/hydro")
+            for rel in ("outputs", "data/cache", "data/hydro")
+        }
+
+    repo = repo_state()
 
     update = CliRunner().invoke(app, ["levels", "update"])
     assert update.exit_code == 0, update.output
@@ -1934,7 +1946,7 @@ def test_data_dir_levels_update_series_build_and_publish(
     latest = json.loads((data_root / "outputs/publish/latest.json").read_text())
     assert latest["current_level"]["date"] == "2024-01-05"
     assert latest["current_level"]["levels_sha256"] == _sha(refreshed)
-    assert {rel: _tree(PROJECT_ROOT / rel) for rel in repo} == repo
+    assert repo_state() == repo
 
 
 def test_publish_out_wins_over_data_dir(data_root: Path, tmp_path: Path) -> None:

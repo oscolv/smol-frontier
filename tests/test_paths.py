@@ -97,3 +97,40 @@ def test_data_dir_never_changes_the_config_hash(
     without = series.config_hash()
     monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
     assert series.config_hash() == without
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["relative/data", "data", str(PROJECT_ROOT), str(PROJECT_ROOT / "data/daily")],
+)
+def test_data_dir_relative_or_inside_checkout_raises(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv(paths.DATA_DIR_ENV, value)
+    with pytest.raises(paths.DataDirError, match=paths.DATA_DIR_ENV):
+        paths.cache_dir()
+    with pytest.raises(paths.DataDirError):
+        paths.check_data_dir()
+
+
+def test_data_dir_absolute_outside_checkout_is_accepted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
+    paths.check_data_dir()
+    assert paths.cache_dir() == tmp_path / "cache"
+
+
+def test_cli_refuses_relative_data_dir_with_exit_1(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typer.testing import CliRunner
+
+    from smol_frontier.cli import app
+
+    monkeypatch.setenv(paths.DATA_DIR_ENV, "relative/data")
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 1
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith(f"error: {paths.DATA_DIR_ENV}=")

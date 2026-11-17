@@ -38,13 +38,14 @@ uv run pytest                        # tests (no network; live tests need SMOLF_
 
 ```sh
 export SMOLF_DATA_DIR=/path/to/writable/data
-uv run smolf levels update
-uv run smolf series build --extend
-uv run smolf publish
+uv run --frozen --no-sync smolf levels update
+uv run --frozen --no-sync smolf series build --extend
+uv run --frozen --no-sync smolf publish
 ```
 
 With `SMOLF_DATA_DIR` set (read at run time; unset or empty keeps the repo
-layout), every write goes under that folder:
+layout; it must be an absolute path outside the checkout, otherwise every
+command fails with `error: …` and exit 1), every write goes under that folder:
 
 ```text
 $SMOLF_DATA_DIR/
@@ -63,11 +64,17 @@ map, GSW raster, reference series) stay read-only in the checkout.
 
 `series build` exits 0 when the run completed, 2 on a precondition refusal
 (nothing written, retry later: stale level record, new-scene catalog
-unreachable, resume fingerprint mismatch) and 1 on anything else; see
+unreachable, resume fingerprint mismatch; also its own argument checks,
+`--workers < 1` and `--extend` with `--resume`), 130 on interrupt (resume
+with `--resume`) and 1 on anything else; see
 `docs/method.md` §9.
 
 Read-only checkout notes:
 
+- Build the environment once, then run the job as
+  `uv run --frozen --no-sync smolf …` (or `.venv/bin/smolf …`) so `uv` does
+  not try to sync or lock `.venv` inside the checkout;
+  `UV_PROJECT_ENVIRONMENT` can put the venv elsewhere.
 - The run's code fingerprint calls `git`, so `git` must be installed and
   the checkout's `.git` directory must be present.
 - When the job runs under a different user than the checkout's owner, git

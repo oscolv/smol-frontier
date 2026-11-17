@@ -466,6 +466,11 @@ def series_build(
     typer.echo(f"wall: {time.strftime('%H:%M:%S', time.gmtime(wall))}")
 
 
+def _one_line(exc: Exception) -> str:
+    """Collapse whitespace so an exception message prints as one stderr line."""
+    return " ".join(str(exc).split())
+
+
 @app.command("publish")
 def publish(
     run: Annotated[
@@ -504,10 +509,10 @@ def publish(
         out_dir = publish_run(run_id=run, out_dir=out)
     except PublishRefused as exc:
         # WHY collapsed: a refusal may embed a multi-line exception; stderr gets one line.
-        typer.echo(f"refused: {' '.join(str(exc).split())}", err=True)
+        typer.echo(f"refused: {_one_line(exc)}", err=True)
         raise typer.Exit(2)
     except ContractInvalid as exc:
-        typer.echo(f"error: {exc}", err=True)
+        typer.echo(f"error: {_one_line(exc)}", err=True)
         raise typer.Exit(1)
     typer.echo(f"published: {out_dir / 'latest.json'}")
 

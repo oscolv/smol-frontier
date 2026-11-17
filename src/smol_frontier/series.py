@@ -73,6 +73,7 @@ __all__ = [
     "load_records",
     "new_run_id",
     "process_scene",
+    "record_sort_key",
     "utc_now",
     "write_series_csv",
 ]

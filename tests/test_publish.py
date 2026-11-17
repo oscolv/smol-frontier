@@ -2411,3 +2411,15 @@ def test_publish_refusal_prints_one_line(monkeypatch: pytest.MonkeyPatch) -> Non
     result = CliRunner().invoke(app, ["publish", "--latest"])
     assert result.exit_code == 2
     assert result.stderr == "refused: line one line two\n"
+
+
+def test_publish_contract_invalid_prints_one_line(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def invalid(**_kwargs: object) -> Path:
+        raise publish.ContractInvalid("line one\n  line two\n")
+
+    monkeypatch.setattr("smol_frontier.cli.publish_run", invalid)
+    result = CliRunner().invoke(app, ["publish", "--latest"])
+    assert result.exit_code == 1
+    assert result.stderr == "error: line one line two\n"

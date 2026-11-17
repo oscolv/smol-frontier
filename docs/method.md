@@ -256,8 +256,9 @@ Derives a versioned data contract from one series run, named with `--run
 is readable and whose status is complete; unreadable manifests are skipped;
 neither or both exits 2) into `outputs/publish/` (or
 `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the
-last `ok` scene plus run context, constants and the current SIH level), `series.json` (every `ok` and POOR
-scene; errors excluded), `map/<date>_<item_id>.tif` and `.png` for the
+last `ok` scene plus run context, constants and the current SIH level),
+`series.json` (every `ok` and POOR scene; errors excluded),
+`map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
 (`SCHEMA_VERSION = "1.0.0"`, written exactly; each schema accepts any
@@ -290,7 +291,8 @@ published figures), when the recomputed margin does not round to the row's
 run, unreadable manifest of an explicit `--run` (`--latest` selection skips
 it), no `ok` scene, cache hash mismatch, hectare mismatch, and an `--out`
 directory that is non-empty but not a previous publish (refused without
-walking its tree), a broken symlink in the `--out` path, or several
+walking its tree), a broken symlink in the `--out` path (unless it is the
+final component and a lone `.<target>.previous-*` can be restored), or several
 leftover `.previous-*` directories. A schema or raster-guard failure of
 smolf's own output is a bug (exit 1). Rasters go only through the guarded
 writers (uint8, values 0–5), files only through the allowlist, and the

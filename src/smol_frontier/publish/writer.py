@@ -47,7 +47,7 @@ def is_allowed(name: str) -> bool:
     return name in ALLOWED_FILES or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
 
 
-def resolve_out_dir(out_dir: Path) -> Path:
+def _resolve_out_dir(out_dir: Path) -> Path:
     """The real directory behind ``--out``, resolved once before any check.
 
     WHY: staging and the swap rename directories next to ``out_dir``; done
@@ -160,7 +160,7 @@ def _debris(out_dir: Path, kind: str) -> list[Path]:
     )
 
 
-def recover_out_dir(out_dir: Path) -> None:
+def _recover_out_dir(out_dir: Path) -> None:
     """Undo what a crash mid-publish left next to ``out_dir`` (before checks).
 
     WHY: a process killed between the swap's two renames leaves ``out_dir``
@@ -198,7 +198,7 @@ def _restore_previous(out_dir: Path) -> bool:
     return True
 
 
-def drop_previous(out_dir: Path) -> None:
+def _drop_stale_previous(out_dir: Path) -> None:
     """Remove ``.previous-*`` leftovers once ``out_dir`` holds a contract.
 
     WHY after check_out_dir: until ``out_dir`` is a valid contract, a
@@ -334,15 +334,17 @@ def publish_run(
 
     Every document is validated before anything is written. Raises
     PublishRefused (exit 2) or ContractInvalid (exit 1); on either, the
-    previous output directory is left untouched.
+    previous contract is never lost. Only publish's own leftovers (stale
+    staging, restorable or superseded previous dirs) may be cleaned up
+    first.
     """
     # WHY late binding: defaults resolve at call time through `paths`.
     root = paths.series_dir() if series_root is None else Path(series_root)
     target = paths.publish_dir() if out_dir is None else Path(out_dir)
-    real = resolve_out_dir(target)  # every step below acts on the real dir
-    recover_out_dir(real)  # a crash mid-swap may have left debris
+    real = _resolve_out_dir(target)  # every step below acts on the real dir
+    _recover_out_dir(real)  # a crash mid-swap may have left debris
     check_out_dir(real)  # fail fast; checked again right before staging
-    drop_previous(real)
+    _drop_stale_previous(real)
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     manifest = _read_manifest(run_dir)

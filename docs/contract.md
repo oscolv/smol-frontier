@@ -220,7 +220,9 @@ not applied, no pixel is class 5.
   temporary directory (`.<name>.staging-*`) and swapped in by rename, the
   old directory moving to `.<name>.previous-*` for the instant of the
   swap. A reader never sees a half-written contract, and on any failure
-  the previous directory is left untouched.
+  the previous contract is never lost; only publish's own leftovers (stale
+  staging, restorable or superseded previous directories) may be cleaned
+  up first.
 - `--out` is resolved to its real path first, so publishing through a
   symlinked `--out` replaces the target and keeps the link in place.
 - At the start of each publish smolf cleans up its own debris next to
@@ -228,7 +230,7 @@ not applied, no pixel is class 5.
   `.<name>.previous-*` (a crash between the swap's two renames) is
   renamed back when `--out` is missing, while several are refused; once
   `--out` holds a valid contract, old `.<name>.previous-*` directories are
-  removed.
+  removed when each is itself a valid contract.
 
 ## Refusals and exit codes
 
@@ -247,7 +249,9 @@ not applied, no pixel is class 5.
   foreign directory is refused without walking its tree; `--out` that is
   a file is refused too;
 - a symlink anywhere in the `--out` path is broken (its target is
-  missing), or several `.<name>.previous-*` directories remain with
+  missing), unless it is the final component and a lone
+  `.<target>.previous-*` can be restored, or several `.<name>.previous-*`
+  directories remain with
   `--out` missing (restore one by hand);
 - the run is unknown, or there is no complete run (`--latest` selects the
   newest run, by run id, whose manifest is readable and whose status is

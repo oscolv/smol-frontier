@@ -1,6 +1,6 @@
 # Series build
 
-`smolf series build` rebuilds the hyacinth time series: every reference scene, plus newer scenes with `--extend`, classified and bed-corrected. It writes one run directory with per-scene JSONs, `series.csv` and `manifest.json`. Its exit code tells a scheduler what happened: 0 complete, 2 precondition refusal (retry later, nothing written), 1 anything else.
+`smolf series build` rebuilds the hyacinth time series: every reference scene, plus newer scenes with `--extend`, classified and bed-corrected. It writes one run directory with per-scene JSONs, `series.csv` and `manifest.json`. Its exit code tells a scheduler what happened: 0 complete, 2 precondition refusal (retry later, nothing written), 130 interrupted (resumable), 1 anything else.
 
 ## Sub-features
 
@@ -34,4 +34,4 @@ Preconditions:
 - Exit 2 also covers `--workers 0` and `--extend` with `--resume` (argument checks) and an unreachable Earth Search on `--extend` (`error: Earth Search is unreachable … Retry later.`). Read the message, not just the code.
 - A dirty checkout doesn't fail the build. It records `code.dirty: true`, which `publish` later refuses.
 - `errors=` counts per-scene failures (network blips). The run still completes, so check that `errors=0` before calling it proof.
-- The 2 skipped scenes are POOR-light scenes (valid fraction too low). They are expected and stay out of `series.csv`.
+- `skipped=` counts POOR-light scenes (valid fraction too low); they stay out of `series.csv`. A reference-only run (the Resume step) gives `skipped=0`. The `--extend` run adds 2 skipped newer scenes as of 2026-11-17 (`requested=471 ok=469 skipped=2`).

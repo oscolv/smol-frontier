@@ -6,7 +6,10 @@
 
 - `publish-default` publishes the newest complete run (`--latest`) to `$SMOLF_DATA_DIR/outputs/publish/`.
 - `publish-no-choice` refuses when neither `--run` nor `--latest` is given.
+- `publish-both` refuses when both `--run` and `--latest` are given.
 - `publish-out` publishes to an explicit `--out` directory.
+- `publish-link` publishes through a symlinked `--out` into its target and keeps the link.
+- `publish-out-file` refuses an `--out` that is a regular file.
 - `publish-refuse-foreign` refuses an `--out` that holds unrelated files.
 - `publish-unknown-run` refuses a `--run` id that does not exist.
 
@@ -20,10 +23,13 @@ Preconditions:
 
 - A complete, clean series run in this run's data dir (see series-build.md). The latest scene's cache file must still match the run's recorded hash.
 
-- **Default.** Run `$V run "$RUN" publish-default -- publish --latest`. `.rc` `0` and `published: $RUN/data/outputs/publish/latest.json`. Copy `latest.json` and `publish.json` into the evidence. `latest.json` has `current_level.date` equal to the refreshed record's last day with a level, and `current_level.levels_sha256` equal to `sha256sum $RUN/data/hydro/ENDHD.csv`. Every hash in `publish.json` matches `sha256sum` of the file it names.
+- **Default.** Run `$V run "$RUN" publish-default -- publish --latest`. `.rc` `0` and `published: $RUN/data/outputs/publish/latest.json`. Copy `latest.json` and `publish.json` into the evidence. `latest.json` has `current_level.date` equal to the refreshed record's last day with a level, and `current_level.levels_sha256` equal to `sha256sum $RUN/data/hydro/ENDHD.csv`. Every hash in `publish.json` matches `sha256sum` of the file it names. All three JSON files carry `schema_version` `2.0.0` and `smolf_version` `0.3.0` (contract 2.0.0, tag `v0.3.0`); in `series.json`, any scene with `bed_applied: false` has `removed_ha` and every `*_corrected` field `null`.
 - **No choice.** Run `$V run "$RUN" publish-no-choice -- publish`. `.rc` `2`, `.err` is `error: pass --run <run_id> or --latest`, `.out` is empty, and the publish dir is unchanged.
+- **Both flags.** Run `$V run "$RUN" publish-both -- publish --run x --latest`. `.rc` `2`, `.err` is `error: pass either --run or --latest, not both`, `.out` is empty.
 - **Explicit out.** Run `$V run "$RUN" publish-out -- publish --latest --out "$RUN/data/alt-publish"`. `.rc` `0`, and the files land there, not in the default directory.
-- **Foreign out.** `mkdir -p "$RUN/data/foreign" && echo x > "$RUN/data/foreign/notes.txt"`, then run `$V run "$RUN" publish-refuse-foreign -- publish --latest --out "$RUN/data/foreign"`. `.rc` `2`, with one `refused: --out … is not a previous publish …` line in `.err`. `notes.txt` is still there.
+- **Symlinked out.** After Explicit out, run `ln -s alt-publish "$RUN/data/link"`, then `$V run "$RUN" publish-link -- publish --latest --out "$RUN/data/link"`. `.rc` `0` (`published: $RUN/data/link/latest.json`), `link` is still a symlink, and the files are refreshed in `alt-publish`.
+- **File as out.** `touch "$RUN/data/afile"`, then run `$V run "$RUN" publish-out-file -- publish --latest --out "$RUN/data/afile"`. `.rc` `2`, `.err` `refused: --out $RUN/data/afile exists and is not a directory`.
+- **Foreign out.** `mkdir -p "$RUN/data/foreign" && echo x > "$RUN/data/foreign/notes.txt"`, then run `$V run "$RUN" publish-refuse-foreign -- publish --latest --out "$RUN/data/foreign"`. `.rc` `2`, `.err` `refused: --out $RUN/data/foreign is not a previous publish (no publish.json or files outside the allowlist)`. `notes.txt` is still there.
 - **Unknown run.** Run `$V run "$RUN" publish-unknown-run -- publish --run nope`. `.rc` `2`, `.err` `refused: unknown run: nope`.
 - **Determinism.** Copy `latest.json` and `series.json` aside, run `$V run "$RUN" publish-again -- publish --latest`, and `cmp` them: both identical. `publish.json` differs (it holds `generated_utc`).
 

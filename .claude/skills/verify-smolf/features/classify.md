@@ -7,6 +7,7 @@
 - `classify-control` reproduces the 2026-10-12 control values (clean regime, nothing removed).
 - `classify-dry-season` reproduces the 2024-06-09 exposed-bed correction.
 - `classify-no-scene` reports a day with no scene and exits 1.
+- `classify-catalog-down` exits 2 (retry later) when every STAC catalog is unreachable.
 
 ## How to get to it (user POV)
 
@@ -23,6 +24,7 @@ Preconditions:
 - **Map matches the figures.** Run `$V hectares "$RUN" <output path>`. You get `water_ha: 415.86`, `dense_hyacinth_ha: 350.24`, `interface_ha: 468.10`, `bare_soil_ha: 0.11`. Save the output next to the evidence (`... | tee "$RUN/evidence/<n>-classify-control.hectares"`).
 - **Dry season.** Run `$V run "$RUN" classify-dry-season -- classify 2024-06-09`. `.rc` is `0`, with `hyacinth_total_ha: 13.74 (raw 432.25)`, `bed_level_m: 2004.60`, `bed_margin_m: 2005.54`, `bed_expected_ha: 696.80`, `bed_removed_ha: 418.51`, `light: GOOD`, `regime: EXPOSED_BED`.
 - **No scene.** Run `$V run "$RUN" classify-no-scene -- classify 2026-10-13`. `.rc` is `1`, `.err` reads `no scenes found for 2026-10-13` and `.out` is empty. Nothing new appears in `$RUN/data/outputs/`.
+- **Catalogs down.** Run `$V run "$RUN" classify-catalog-down --block-host earth-search.aws.element84.com --block-host planetarycomputer.microsoft.com -- classify 2026-10-12`. `.rc` is `2`, `.out` is empty, and the last `.err` line is `error: all STAC backends failed: planetary-computer, earth-search`, after one `blocked by smolf-verify` warning per backend.
 
 ## Gotchas
 

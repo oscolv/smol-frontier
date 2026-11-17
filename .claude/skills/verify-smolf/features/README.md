@@ -30,7 +30,7 @@ Each feature file has an H1, one paragraph, then exactly four H2s: `Sub-features
 
 - [Classify one day](./classify.md): classified map and hectares for one Sentinel-2 date, with the control values.
 - [SIH level record](./levels.md): refresh, dry run, show one day, first refresh into an empty data dir.
-- [Series build](./series-build.md): the resumable series run, `--extend`, and the 0/2/1 exit codes.
+- [Series build](./series-build.md): the resumable series run, `--extend`, and the 0/2/1/130 exit codes.
 - [Publish the contract](./publish.md): `latest.json`, `series.json`, `publish.json` and the latest map, with its refusals.
 - [Daily job](./daily-job.md): `levels update` then `series build --extend` then `publish`, from a read-only checkout.
 

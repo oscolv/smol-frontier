@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from smol_frontier import series
+from smol_frontier import paths, series
 from smol_frontier.classify.pipeline import SceneResult
 from smol_frontier.cli import app
 from smol_frontier.config import settings
@@ -183,7 +183,7 @@ def test_resume_with_other_config_hash_is_refused(
     with pytest.raises(FingerprintMismatch, match="config_hash differs"):
         build_run(run_id="run_fp", resume=True, output_dir=tmp_path)
     # The CLI maps the refusal to exit code 2.
-    monkeypatch.setattr(series, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     result = CliRunner().invoke(app, ["series", "build", "--resume", "run_fp"])
     assert result.exit_code == 2
     assert "config_hash differs" in result.output
@@ -504,7 +504,7 @@ def test_cli_maps_stale_levels_to_exit_1(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     targets = _targets(2)
-    monkeypatch.setattr(series, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
     monkeypatch.setattr(series, "last_day_with_level", lambda: targets[0].day)
     result = CliRunner().invoke(app, ["series", "build"])

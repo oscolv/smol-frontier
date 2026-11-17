@@ -30,7 +30,7 @@ import rasterio
 from jsonschema import Draft202012Validator
 from rasterio.crs import CRS
 
-from smol_frontier import __version__, aoi, ingest, series
+from smol_frontier import __version__, aoi, ingest, paths, series
 from smol_frontier.classify.geotiff import (
     DisplayImage,
     render_display_image,
@@ -38,7 +38,7 @@ from smol_frontier.classify.geotiff import (
     write_published_geotiff,
 )
 from smol_frontier.classify.pipeline import classify as classify_scene
-from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.config import settings
 from smol_frontier.hydro import curve, flood_map, levels
 from smol_frontier.hydro.bed import bed_margin, exposed_bed_mask
 from smol_frontier.ingest import ingest_scene
@@ -48,7 +48,6 @@ __all__ = [
     "ALLOWED_FILES",
     "ALLOWED_MAP_PATTERN",
     "INDEX_FILE",
-    "OUTPUT_DIR",
     "SCHEMA_VERSION",
     "ContractInvalid",
     "PublishRefused",
@@ -68,10 +67,6 @@ __all__ = [
     "series_document",
     "validate",
 ]
-
-# WHY: default contract location, beside the series runs it derives from;
-#   `--out` overrides it.
-OUTPUT_DIR = PROJECT_ROOT / "outputs/publish"
 
 # WHY: contract version written into every document. Each schema accepts any
 #   version with this major (pattern ^1\.[0-9]+\.[0-9]+$), so a consumer
@@ -337,7 +332,7 @@ def current_level(levels_path: Path | None = None) -> dict[str, object] | None:
     Independent of the wall clock and of the run. A missing file counts as
     no record. ``levels_path`` defaults to the committed level record.
     """
-    path = Path(levels.DEFAULT_LEVELS_PATH if levels_path is None else levels_path)
+    path = Path(paths.levels_path() if levels_path is None else levels_path)
     if not path.is_file():
         return None
     rows = [row for row in levels.load_levels(path) if not math.isnan(row.level_m)]
@@ -439,7 +434,7 @@ def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
     """
     item_id = str(record["item_id_used"])
     backend = str(record["backend_used"])
-    cache_dir = ingest.DEFAULT_CACHE_DIR
+    cache_dir = paths.cache_dir()
     path = ingest._cache_path(cache_dir, item_id)
     if not path.is_file():
         try:
@@ -717,9 +712,9 @@ def publish_run(
     PublishRefused (exit 2) or ContractInvalid (exit 1); on either, the
     previous output directory is left untouched.
     """
-    # WHY late binding: tests point series.OUTPUT_DIR / OUTPUT_DIR at tmp dirs.
-    root = series.OUTPUT_DIR if series_root is None else Path(series_root)
-    target = OUTPUT_DIR if out_dir is None else Path(out_dir)
+    # WHY late binding: defaults resolve at call time through `paths`.
+    root = paths.series_dir() if series_root is None else Path(series_root)
+    target = paths.publish_dir() if out_dir is None else Path(out_dir)
     check_out_dir(target)  # fail fast; checked again right before staging
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")

@@ -22,7 +22,7 @@ import rasterio
 from rasterio.warp import transform_bounds
 from typer.testing import CliRunner
 
-from smol_frontier import __version__, aoi, ingest, publish, series
+from smol_frontier import __version__, aoi, paths, publish, series
 from smol_frontier.classify.geotiff import (
     PUBLISHED_COLORMAP,
     DisplayImage,
@@ -32,7 +32,7 @@ from smol_frontier.classify.geotiff import (
 )
 from smol_frontier.cli import app
 from smol_frontier.config import settings
-from smol_frontier.hydro import curve, flood_map, levels
+from smol_frontier.hydro import curve, flood_map
 from smol_frontier.hydro.bed import bed_margin
 from smol_frontier.sources.stac import SceneMeta
 
@@ -139,7 +139,7 @@ def scene_env(
         nodata=flood_map.FLOOD_NODATA,
     ) as dst:
         dst.write(flood, 1)
-    monkeypatch.setattr(ingest, "DEFAULT_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(paths, "cache_dir", lambda: cache_dir)
     monkeypatch.setattr(flood_map, "DEFAULT_FLOOD_PATH", flood_path)
     curve_path = _write_curve(base / "stage_area_curve.csv")
     monkeypatch.setattr(curve, "DEFAULT_CURVE_CSV_PATH", curve_path)
@@ -165,7 +165,7 @@ def scene_env(
         )
 
     def fake_ingest_scene(scene: SceneMeta, *args: object, **kwargs: object):
-        cache = Path(kwargs.get("cache_dir") or ingest.DEFAULT_CACHE_DIR)
+        cache = Path(kwargs.get("cache_dir") or paths.cache_dir())
         path = cache / f"{scene.id}.tif"
         env.ingest_calls.append((scene.id, path.exists()))
         if not path.exists():  # a cache miss "downloads" the scene
@@ -275,9 +275,7 @@ def _write_run(
     for record in records:  # cache the scene; the record pins its sha256
         if record["status"] == "ok":
             data = _cache_bytes(record["item_id_used"])
-            (ingest.DEFAULT_CACHE_DIR / f"{record['item_id_used']}.tif").write_bytes(
-                data
-            )
+            (paths.cache_dir() / f"{record['item_id_used']}.tif").write_bytes(data)
             record["cache_sha256"] = _sha(data)
     run_dir = root / run_id
     scenes_dir = run_dir / "scenes"
@@ -330,7 +328,7 @@ def levels_file(
         tmp_path_factory.mktemp("hydro") / "ENDHD.csv",
         [("2024-01-08", "2009.5"), ("2024-01-09", "2010.126"), ("2024-01-10", "")],
     )
-    monkeypatch.setattr(levels, "DEFAULT_LEVELS_PATH", path)
+    monkeypatch.setattr(paths, "levels_path", lambda: path)
     return path
 
 
@@ -338,7 +336,7 @@ def levels_file(
 def series_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "series"
     root.mkdir()
-    monkeypatch.setattr(series, "OUTPUT_DIR", root)
+    monkeypatch.setattr(paths, "series_dir", lambda: root)
     return root
 
 

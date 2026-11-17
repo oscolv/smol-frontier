@@ -10,11 +10,12 @@ from datetime import date, datetime
 import numpy as np
 import pytest
 
+from smol_frontier import paths
 from smol_frontier.classify import pipeline
 from smol_frontier.classify.masks import scl_invalid, spectral_cloud
 from smol_frontier.config import settings
 from smol_frontier.hydro.bed import correct_bed
-from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path, ingest_scene
+from smol_frontier.ingest import _cache_path, ingest_scene
 from smol_frontier.quality import QualityReport, assess_quality
 from smol_frontier.sources.stac import SceneMeta
 
@@ -27,7 +28,7 @@ SCENE_ES_2025_07_24 = "S2C_14QMH_20250724_0_L2A"
 
 def _classify_cached(scene_id: str, day: date):
     """Classify a cached scene (skip when absent); return ing, result, quality, bed."""
-    if not _cache_path(DEFAULT_CACHE_DIR, scene_id).exists():
+    if not _cache_path(paths.cache_dir(), scene_id).exists():
         pytest.skip(f"scene {scene_id} not in data/cache (CI): run `smolf fetch {day}`")
     meta = SceneMeta(
         id=scene_id,
@@ -62,7 +63,7 @@ def _assert_quality(quality: QualityReport, light: str, regime: str) -> None:
 
 def _ingest_cached(scene_id: str, day: date):
     """Ingest a cached scene (skip when absent); return the ingested scene."""
-    if not _cache_path(DEFAULT_CACHE_DIR, scene_id).exists():
+    if not _cache_path(paths.cache_dir(), scene_id).exists():
         pytest.skip(f"scene {scene_id} not in data/cache (CI): run `smolf fetch {day}`")
     meta = SceneMeta(
         id=scene_id,

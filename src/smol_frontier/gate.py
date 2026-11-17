@@ -39,7 +39,6 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CSV_FIELDS",
     "GATE_SAMPLE_CSV",
-    "OUTPUT_DIR",
     "PASS_MEDIAN_HA",
     "PASS_P95_HA",
     "ComparedScene",
@@ -73,7 +72,6 @@ REFERENCE_CSV = (
     PROJECT_ROOT / "tests/reference/serie_2017-01-01_2026-12-31_v2026-10-22.csv"
 )
 GATE_SAMPLE_CSV = PROJECT_ROOT / "tests/reference/gate_scenes.csv"
-OUTPUT_DIR = PROJECT_ROOT / "outputs/identity_gate"
 
 # WHY: pass criteria for the identity gate — the re-implementation must
 #   reproduce the author's total hyacinth hectares within 10 ha (median)

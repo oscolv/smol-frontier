@@ -23,12 +23,12 @@ from pathlib import Path
 
 import requests
 
-from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier import paths
+from smol_frontier.config import settings
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DEFAULT_LEVELS_PATH",
     "SIH_STATION",
     "SIH_URL",
     "LevelRow",
@@ -75,12 +75,6 @@ COL_STATION = "Estacion"
 COL_DATE = "Fecha"
 COL_LEVEL = "Nivel(m)"
 COL_VOLUME = "VolumenAlm(Mm3)"
-
-# WHY: committed local copy of the SIH record — the pipeline reads levels
-#   from here, never from the network, so runs are reproducible offline.
-# HOW: repo layout anchored at PROJECT_ROOT; stored byte-for-byte (CRLF
-#   included, see .gitattributes) with a .json sidecar of download provenance.
-DEFAULT_LEVELS_PATH = PROJECT_ROOT / "data/hydro/ENDHD.csv"
 
 
 class LevelsError(Exception):
@@ -330,7 +324,7 @@ def _sidecar_path(path: Path) -> Path:
 
 def load_levels(path: Path | str | None = None) -> list[LevelRow]:
     """Load parsed rows from the local SIH copy (default: data/hydro)."""
-    target = DEFAULT_LEVELS_PATH if path is None else Path(path)
+    target = paths.levels_path() if path is None else Path(path)
     return parse_levels_bytes(target.read_bytes())
 
 
@@ -357,7 +351,7 @@ def update_levels(
 
     On any rejection the local copy is kept and LevelsError is raised.
     """
-    target = DEFAULT_LEVELS_PATH if path is None else Path(path)
+    target = paths.levels_path() if path is None else Path(path)
     data = download_levels()
     new_rows = parse_levels_bytes(data)
     old_rows = parse_levels_bytes(target.read_bytes()) if target.exists() else None

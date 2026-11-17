@@ -24,10 +24,10 @@ import numpy as np
 import pytest
 import rasterio
 
-from smol_frontier import publish
+from smol_frontier import paths, publish
 from smol_frontier.config import settings
 from smol_frontier.hydro import flood_map
-from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path
+from smol_frontier.ingest import _cache_path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "publish_regression"
 SCENE_2026_10_12 = "S2B_14QMH_20261012_0_L2A"
@@ -50,7 +50,7 @@ def _publish_fixture(tmp_path: Path, item_id: str) -> tuple[dict, Path]:
     """Publish a one-scene run built from the committed record; skip if uncached."""
     source = FIXTURES / f"{item_id}.json"
     record = json.loads(source.read_text(encoding="utf-8"))
-    cached = _cache_path(DEFAULT_CACHE_DIR, item_id)
+    cached = _cache_path(paths.cache_dir(), item_id)
     if not cached.exists():
         pytest.skip(f"scene {item_id} not in data/cache (CI): run `smolf fetch`")
     digest = hashlib.sha256(cached.read_bytes()).hexdigest()

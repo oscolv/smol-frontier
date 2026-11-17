@@ -1712,6 +1712,124 @@ def test_publish_out_contract_plus_foreign_empty_dir_refused(
     assert (out / "backup").is_dir()
 
 
+def test_publish_out_foreign_dir_refused_without_walking_it(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "home"
+    (out / "deep" / "tree").mkdir(parents=True)
+    (out / "deep" / "tree" / "data.txt").write_text("keep me")
+
+    def no_walk(self: Path, pattern: str, *args: object, **kwargs: object):
+        raise AssertionError(f"walked {self} for {pattern}")
+
+    monkeypatch.setattr(Path, "rglob", no_walk)
+    monkeypatch.setattr(Path, "walk", no_walk, raising=False)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "not a previous publish" in result.output
+    assert (out / "deep" / "tree" / "data.txt").read_text() == "keep me"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["home", "series"]
+
+
+def test_publish_out_walk_stops_at_first_foreign_entry(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    (out / "backup").mkdir()
+    for i in range(200):
+        (out / "backup" / f"f{i}.txt").write_text("keep me")
+    seen: list[Path] = []
+    real_rglob = Path.rglob
+
+    def counting_rglob(self: Path, pattern: str, *args: object, **kwargs: object):
+        for path in real_rglob(self, pattern, *args, **kwargs):
+            seen.append(path)
+            yield path
+
+    monkeypatch.setattr(Path, "rglob", counting_rglob)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "(foreign: backup)" in result.output
+    # top level holds 5 entries; the walk must not descend into backup/
+    assert len(seen) <= 10, len(seen)
+    assert len(list((out / "backup").iterdir())) == 200
+
+
+def _siblings(directory: Path) -> list[str]:
+    return sorted(p.name for p in directory.iterdir())
+
+
+def test_publish_out_symlink_to_contract_publishes_through(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    real_parent = tmp_path / "real"
+    real_parent.mkdir()
+    real = real_parent / "pub"
+    assert _publish(real, "--run", RUN_ID).exit_code == 0
+    (real / "latest.json").write_text("{}")  # proves the swap replaced it
+    link_parent = tmp_path / "links"
+    link_parent.mkdir()
+    link = link_parent / "pub"
+    link.symlink_to(real, target_is_directory=True)
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert link.is_symlink()
+    assert link.resolve() == real.resolve()
+    assert _latest(link)["run_id"] == RUN_ID
+    assert (real / "publish.json").is_file()
+    assert _siblings(link_parent) == ["pub"]
+    assert _siblings(real_parent) == ["pub"]
+
+
+def test_publish_out_relative_symlink_to_contract_publishes_through(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    real = tmp_path / "real" / "pub"
+    real.parent.mkdir()
+    assert _publish(real, "--run", RUN_ID).exit_code == 0
+    link = tmp_path / "pub-link"
+    link.symlink_to(Path("real") / "pub", target_is_directory=True)
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert link.is_symlink()
+    assert os.readlink(link) == str(Path("real") / "pub")
+    assert _siblings(tmp_path) == ["pub-link", "real", "series"]
+    assert _siblings(real.parent) == ["pub"]
+
+
+def test_publish_out_symlink_to_foreign_dir_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    foreign = tmp_path / "precious"
+    foreign.mkdir()
+    (foreign / "data.txt").write_text("keep me")
+    link = tmp_path / "pub"
+    link.symlink_to(foreign, target_is_directory=True)
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "not a previous publish" in result.output
+    assert link.is_symlink()
+    assert _siblings(foreign) == ["data.txt"]
+    assert _siblings(tmp_path) == ["precious", "pub", "series"]
+
+
+def test_publish_out_broken_symlink_refused(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    link = tmp_path / "pub"
+    link.symlink_to(tmp_path / "missing", target_is_directory=True)
+    result = _publish(link, "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "broken symlink" in result.output
+    assert link.is_symlink()
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
 # --- schema versioning --------------------------------------------------------
 
 

@@ -46,6 +46,27 @@ def is_allowed(name: str) -> bool:
     return name in ALLOWED_FILES or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
 
 
+def resolve_out_dir(out_dir: Path) -> Path:
+    """The real directory behind ``--out``, resolved once before any check.
+
+    WHY: staging and the swap rename directories next to ``out_dir``; done
+    on a symlink they would replace the link with a real directory and leave
+    the old contract behind a stray ``.previous-*`` link. Resolving first
+    makes the foreign check, staging and the swap all act on the target, so
+    the link itself is never touched and keeps pointing at the new contract.
+    A broken symlink (or a loop) is refused: resolving it would silently
+    create a directory wherever the dangling link happens to point.
+    """
+    if out_dir.is_symlink() and not out_dir.exists():
+        msg = f"--out {out_dir} is a broken symlink"
+        raise PublishRefused(msg)
+    try:
+        return out_dir.resolve()
+    except (OSError, RuntimeError) as exc:  # a loop in a parent component
+        msg = f"--out {out_dir} cannot be resolved: {exc}"
+        raise PublishRefused(msg) from exc
+
+
 def check_out_dir(out_dir: Path) -> None:
     """Refuse an ``out_dir`` that publish could not safely replace.
 
@@ -54,27 +75,28 @@ def check_out_dir(out_dir: Path) -> None:
     non-empty one must contain ``publish.json`` and nothing outside the
     allowlist. Anything else (a file, a foreign directory) is refused before
     staging, so ``--out`` can never destroy unrelated data.
+
+    WHY cheap first: ``--out $HOME`` must be refused at once, so
+    ``publish.json`` is required at the top level before any walk, and the
+    walk is lazy, stopping at the first entry outside the allowlist.
     """
     if not out_dir.exists() and not out_dir.is_symlink():
         return
     if not out_dir.is_dir():
         msg = f"--out {out_dir} exists and is not a directory"
         raise PublishRefused(msg)
-    entries = sorted(out_dir.rglob("*"))
-    if not entries:
-        return
-    foreign = [
-        rel
-        for rel in (path.relative_to(out_dir).as_posix() for path in entries)
-        if not is_allowed(rel) and rel != _MAP_DIR
-    ]
-    if not (out_dir / INDEX_FILE).is_file() or foreign:
-        detail = f" (foreign: {', '.join(foreign[:3])})" if foreign else ""
-        msg = (
-            f"--out {out_dir} is not a previous publish (no {INDEX_FILE} or "
-            f"files outside the allowlist){detail}"
-        )
-        raise PublishRefused(msg)
+    refusal = (
+        f"--out {out_dir} is not a previous publish (no {INDEX_FILE} or "
+        "files outside the allowlist)"
+    )
+    if not (out_dir / INDEX_FILE).is_file():
+        if next(out_dir.iterdir(), None) is None:
+            return
+        raise PublishRefused(refusal)
+    for path in out_dir.rglob("*"):
+        rel = path.relative_to(out_dir).as_posix()
+        if not is_allowed(rel) and rel != _MAP_DIR:
+            raise PublishRefused(f"{refusal} (foreign: {rel})")
 
 
 def _swap_in(staging: Path, out_dir: Path) -> None:
@@ -168,7 +190,10 @@ def publish_run(
     series_root: Path | None = None,
     levels_path: Path | None = None,
 ) -> Path:
-    """Publish the contract for one run; return the output directory.
+    """Publish the contract for one run; return ``out_dir`` as given.
+
+    A symlinked ``out_dir`` is published through to its target; the link
+    itself is never renamed.
 
     Every document is validated before anything is written. Raises
     PublishRefused (exit 2) or ContractInvalid (exit 1); on either, the
@@ -177,7 +202,8 @@ def publish_run(
     # WHY late binding: defaults resolve at call time through `paths`.
     root = paths.series_dir() if series_root is None else Path(series_root)
     target = paths.publish_dir() if out_dir is None else Path(out_dir)
-    check_out_dir(target)  # fail fast; checked again right before staging
+    real = resolve_out_dir(target)  # every step below acts on the real dir
+    check_out_dir(real)  # fail fast; checked again right before staging
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     manifest = _read_manifest(run_dir)
@@ -190,7 +216,7 @@ def publish_run(
     validate("latest", latest)
     validate("series", series_doc)
     _write_contract(
-        target,
+        real,
         {
             "latest.json": canonical_json(latest),
             "series.json": canonical_json(series_doc),

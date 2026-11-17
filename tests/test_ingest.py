@@ -15,11 +15,10 @@ from rasterio.warp import transform_bounds
 from shapely.geometry import box
 from typer.testing import CliRunner
 
-import smol_frontier.ingest as ingest_mod
+from smol_frontier import paths
 from smol_frontier.cli import app
 from smol_frontier.ingest import (
     BAND_ORDER,
-    DEFAULT_CACHE_DIR,
     IngestedScene,
     _cache_path,
     ingest_scene,
@@ -211,7 +210,7 @@ def _fake_ingested() -> IngestedScene:
 
 def test_ingest_anomalous_cached_product_raises() -> None:
     """Cache hit on the 8-bit 2026-10-27 MPC product raises (fixture kept)."""
-    if not _cache_path(DEFAULT_CACHE_DIR, SCENE_ANOMALOUS_2026_10_27).exists():
+    if not _cache_path(paths.cache_dir(), SCENE_ANOMALOUS_2026_10_27).exists():
         pytest.skip("anomalous scene not in data/cache (CI)")
     meta = SceneMeta(
         id=SCENE_ANOMALOUS_2026_10_27,
@@ -258,7 +257,7 @@ def test_cli_fetch_uses_real_cache_dir(synthetic, monkeypatch) -> None:
     """End-to-end wiring: search -> ingest -> cache file on disk."""
     scene, bbox, aoi_geom, cache_dir = synthetic
     monkeypatch.setattr("smol_frontier.cli.search_scenes", lambda *a, **k: [scene])
-    monkeypatch.setattr(ingest_mod, "DEFAULT_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(paths, "cache_dir", lambda: cache_dir)
     monkeypatch.setattr("smol_frontier.ingest.wgs84_bbox", lambda: bbox)
     monkeypatch.setattr("smol_frontier.ingest.utm_geometry", lambda: aoi_geom)
     result = CliRunner().invoke(app, ["fetch", "2026-10-12"])

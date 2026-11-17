@@ -115,7 +115,11 @@ enforced in this repo. Anything not implemented yet says **planned**.
   the local SIH level record and asks for `smolf levels update` first. Edits
   to the hydrology inputs already pinned by sha256 in the manifest
   (`ENDHD.csv`, the stage–area curve, the flood-stage map, and their
-  sidecars) do not set the `dirty` flag; any other change does.
+  sidecars) do not set the `dirty` flag; any other change does. The refusal
+  is a precondition refusal: `series build` exits 0 when complete, 2 when it
+  refuses a precondition (stale level record, unreachable new-scene catalog,
+  resume fingerprint mismatch; nothing is written), and 1 for anything else.
+  The full list is in `docs/method.md` §9.
 - **Why:** a scene without its day's level gets no exposed-bed correction and
   would enter `series.csv` with empty corrected columns (2026-11-01 did, with
   the SIH copy ending 2026-10-27). The level record is refreshed
@@ -124,7 +128,7 @@ enforced in this repo. Anything not implemented yet says **planned**.
   adding provenance.
 - **Where in this repo:** `series.py` (`check_levels_cover()`,
   `HASHED_INPUT_PATHS`, `is_dirty()`), `hydro/levels.py`
-  (`last_day_with_level()`), `cli.py` (exit 1 on `StaleLevelsError`),
+  (`last_day_with_level()`), `cli.py` (exit 2 on `StaleLevelsError`),
   `tests/test_series.py`.
 
 ## 13. Neutral, versioned publish contract
@@ -150,3 +154,20 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
   `docs/contract.md`, `tests/test_publish.py`,
   `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.
+
+## 14. A catalog outage on the new-scene search is a retryable refusal
+
+- **Rule:** `series build --extend` lists new scenes from Earth Search only.
+  When that search fails because the catalog is unreachable, the build
+  refuses with exit 2 (`CatalogUnavailable`) before writing anything. There
+  is no Planetary Computer fallback for the new-scene search. Per-scene
+  fallbacks (resolve, ingest on an anomalous product) are unchanged.
+- **Why:** Planetary Computer item ids differ from Earth Search ids, so a
+  series listed from Planetary Computer during an outage would get a
+  different `series.csv` sha256 and the series identity would churn with
+  outages. Each build rebuilds the whole series, so a refused day loses
+  nothing: the next successful run covers it.
+- **Where in this repo:** `sources/stac.py` (`AllBackendsFailed`),
+  `series.py` (`CatalogUnavailable`, `list_extend_targets()`), `cli.py`
+  (exit 2), `docs/method.md` (exit-code list), `tests/test_series.py`,
+  `tests/test_stac.py`.

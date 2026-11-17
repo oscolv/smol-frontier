@@ -3,13 +3,14 @@
 Downloads the SIH CSV (Mexico's National Hydrometric Information System;
 third-party data, credited in PRIOR_WORK.md),
 parses Fecha / Nivel(m) / VolumenAlm(Mm3), and stores the bytes verbatim under
-data/hydro/. Refreshes are validated against the local copy before replacing
+data/hydro/ (or hydro/ under SMOLF_DATA_DIR). Refreshes are validated against the local copy before replacing
 it: wrong content, fewer days, an earlier end, missing days, or level
 revisions over LEVEL_REVISION_TOL_M are rejected (kept local copy, non-zero
 exit). First of three hydrology inputs for the exposed-bed correction.
 """
 
 import csv
+import glob
 import hashlib
 import json
 import logging
@@ -23,12 +24,12 @@ from pathlib import Path
 
 import requests
 
-from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier import paths
+from smol_frontier.config import settings
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "DEFAULT_LEVELS_PATH",
     "SIH_STATION",
     "SIH_URL",
     "LevelRow",
@@ -75,12 +76,6 @@ COL_STATION = "Estacion"
 COL_DATE = "Fecha"
 COL_LEVEL = "Nivel(m)"
 COL_VOLUME = "VolumenAlm(Mm3)"
-
-# WHY: committed local copy of the SIH record — the pipeline reads levels
-#   from here, never from the network, so runs are reproducible offline.
-# HOW: repo layout anchored at PROJECT_ROOT; stored byte-for-byte (CRLF
-#   included, see .gitattributes) with a .json sidecar of download provenance.
-DEFAULT_LEVELS_PATH = PROJECT_ROOT / "data/hydro/ENDHD.csv"
 
 
 class LevelsError(Exception):
@@ -305,11 +300,43 @@ def check_regression(
     return RevisionCounts(level_revisions, volume_revisions)
 
 
+# WHY: the atomic writer names its temp files "<target name>.<random>.tmp".
+#   The cleanup derives its patterns from these same constants so the two
+#   cannot drift: a kill between mkstemp and os.replace leaves such a file
+#   behind, and it must not accumulate or dirty the tree.
+# HOW: plain naming convention shared by writer and cleaner; not calibrated.
+_TMP_PREFIX_SEP = "."
+_TMP_SUFFIX = ".tmp"
+
+
+def _remove_stale_temp_files(path: Path) -> list[Path]:
+    """Delete leftover temp files of the writer for `path` and its sidecar.
+
+    Matches only "<name>.*.tmp" for the CSV and the sidecar in path.parent;
+    everything else is left alone. Returns the removed paths.
+    """
+    removed: list[Path] = []
+    for owner in (path, _sidecar_path(path)):
+        pattern = f"{glob.escape(owner.name)}{_TMP_PREFIX_SEP}*{_TMP_SUFFIX}"
+        for stale in sorted(path.parent.glob(pattern)):
+            if not stale.is_file():
+                continue
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                continue
+            logger.info("removed stale temp file %s", stale)
+            removed.append(stale)
+    return removed
+
+
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write bytes atomically (temp file + os.replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.name}.", suffix=".tmp"
+        dir=path.parent,
+        prefix=f"{path.name}{_TMP_PREFIX_SEP}",
+        suffix=_TMP_SUFFIX,
     )
     try:
         with os.fdopen(fd, "wb") as tmp:
@@ -329,8 +356,8 @@ def _sidecar_path(path: Path) -> Path:
 
 
 def load_levels(path: Path | str | None = None) -> list[LevelRow]:
-    """Load parsed rows from the local SIH copy (default: data/hydro)."""
-    target = DEFAULT_LEVELS_PATH if path is None else Path(path)
+    """Load parsed rows from the local SIH copy (default: `levels_read_path()`)."""
+    target = paths.levels_read_path() if path is None else Path(path)
     return parse_levels_bytes(target.read_bytes())
 
 
@@ -355,12 +382,21 @@ def update_levels(
 ) -> LevelsUpdate:
     """Download, validate, and (unless check) store the SIH record.
 
+    The download is validated against the target when it exists. With the
+    default target (no `path`) and no copy there yet, it is validated against
+    the record readers would otherwise use (`levels_read_path()`), so the
+    first refresh into a fresh data folder cannot regress the committed copy.
     On any rejection the local copy is kept and LevelsError is raised.
     """
-    target = DEFAULT_LEVELS_PATH if path is None else Path(path)
+    target = paths.levels_path() if path is None else Path(path)
+    baseline = target
+    if path is None and not target.exists():
+        # First refresh into an empty data folder: validate the download
+        # against the committed copy the readers fall back to.
+        baseline = paths.levels_read_path()
     data = download_levels()
     new_rows = parse_levels_bytes(data)
-    old_rows = parse_levels_bytes(target.read_bytes()) if target.exists() else None
+    old_rows = parse_levels_bytes(baseline.read_bytes()) if baseline.exists() else None
     revisions = (
         check_regression(new_rows, old_rows, force=force)
         if old_rows is not None
@@ -369,6 +405,10 @@ def update_levels(
     downloaded_utc = datetime.now(UTC).isoformat()
     last_with_level = _last_day_with_level(new_rows)
     if not check:
+        # Cleaned after the download and validation succeeded, so a failed
+        # run changes nothing in the folder; before the new write, so the
+        # new temp files are never swept.
+        _remove_stale_temp_files(target)
         _atomic_write_bytes(target, data)
         sidecar = {
             "url": SIH_URL,

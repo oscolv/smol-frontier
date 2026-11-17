@@ -13,6 +13,7 @@ from requests.exceptions import ConnectTimeout
 from smol_frontier.sources import stac as stac_mod
 from smol_frontier.sources.stac import (
     REQUIRED_BANDS,
+    AllBackendsFailed,
     deduplicate,
     get_scene,
     item_to_scene,
@@ -205,8 +206,9 @@ def test_all_backends_fail() -> None:
     for url in (PC_URL, ES_URL):
         responses.add(responses.GET, url, json=_landing(url))
         responses.add(responses.POST, f"{url}/search", status=500)
-    with pytest.raises(RuntimeError, match="all STAC backends failed"):
+    with pytest.raises(AllBackendsFailed, match="all STAC backends failed") as info:
         search_scenes(date(2026, 10, 12), date(2026, 10, 12), 20.0)
+    assert isinstance(info.value, RuntimeError)
 
 
 def _stub_client(monkeypatch: pytest.MonkeyPatch, item) -> None:

@@ -161,9 +161,11 @@ the day's SIH level: hyacinth above the level plus an uncertainty margin is
 removed; hyacinth in the mirror or the margin band keeps counting. The
 class map itself is never changed — only the reported figures.
 
-- Levels: the committed SIH copy (`data/hydro/ENDHD.csv`), exact-day
-  lookup, never interpolated. Refreshes rejecting level revisions above
-  `LEVEL_REVISION_TOL_M = 0.05` m unless forced.
+- Levels: the committed SIH copy (`data/hydro/ENDHD.csv`), or the refreshed
+  copy under `SMOLF_DATA_DIR` once it exists, exact-day lookup, never
+  interpolated. Refreshes rejecting level revisions above
+  `LEVEL_REVISION_TOL_M = 0.05` m unless forced; the first refresh into a
+  data folder is validated against the committed copy.
 - Stage–area curve (`data/hydro/stage_area_curve.csv`): SIH pairs up to
   `CURVE_DATA_END = 2026-09-20`, `CURVE_BIN_M = 0.10` m bins with at least
   `CURVE_BIN_MIN_N = 5` days, fit up to `CURVE_FIT_H_MAX = 2017.5` m,
@@ -200,6 +202,18 @@ the `series.csv` sha256 — a series is identified by that hash, not by
 date. `--resume` reuses finished scenes only when the fingerprint matches,
 else it refuses with exit 2.
 
+`series build` exit codes:
+
+- 0: the run completed.
+- 2: precondition refusal, nothing written, retry later. One `error: …` line.
+  Today: stale SIH level record (a target day is newer than the last level
+  day), new-scene catalog unavailable (`--extend` and Earth Search is
+  unreachable) and resume fingerprint mismatch. Its own argument checks
+  (`--workers < 1`, `--extend` with `--resume`) and Click/Typer usage errors
+  also exit 2.
+- 1: anything else.
+- 130: interrupted (resume with `--resume`).
+
 Measured: run `20261028T221314` — 465 requested, 465 ok, 0 skipped,
 0 errors, wall 1:35, `series.csv` sha256
 `87514b60…` (full hash in the run manifest).
@@ -224,7 +238,7 @@ and regime 465/465 against that gate CSV).
 
 Derives a versioned data contract from one series run (`--run`, default
 the newest run whose manifest status is complete) into `outputs/publish/`
-(`--out` overrides): `latest.json` (the last `ok` scene plus run context,
+(or `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the last `ok` scene plus run context,
 constants and the current SIH level), `series.json` (every `ok` and POOR
 scene; errors excluded), `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:

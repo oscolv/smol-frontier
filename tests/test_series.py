@@ -7,9 +7,10 @@ the `smolf series build` CLI, never a pytest test.
 
 import csv
 import hashlib
+import importlib
 import json
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -17,7 +18,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from smol_frontier import series
+from smol_frontier import cli, paths, series
 from smol_frontier.classify.pipeline import SceneResult
 from smol_frontier.cli import app
 from smol_frontier.config import settings
@@ -29,6 +30,7 @@ from smol_frontier.series import (
     build_run,
     check_fingerprint,
 )
+from smol_frontier.sources.stac import AllBackendsFailed
 
 
 def _targets(n: int = 5) -> list[SeriesTarget]:
@@ -183,7 +185,7 @@ def test_resume_with_other_config_hash_is_refused(
     with pytest.raises(FingerprintMismatch, match="config_hash differs"):
         build_run(run_id="run_fp", resume=True, output_dir=tmp_path)
     # The CLI maps the refusal to exit code 2.
-    monkeypatch.setattr(series, "OUTPUT_DIR", tmp_path)
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     result = CliRunner().invoke(app, ["series", "build", "--resume", "run_fp"])
     assert result.exit_code == 2
     assert "config_hash differs" in result.output
@@ -500,17 +502,99 @@ def test_stale_levels_refuse_fresh_build_before_writing(tmp_path: Path) -> None:
     assert not (tmp_path / "run_stale").exists()
 
 
-def test_cli_maps_stale_levels_to_exit_1(
+def test_cli_maps_stale_levels_to_exit_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    targets = _targets(2)
-    monkeypatch.setattr(series, "OUTPUT_DIR", tmp_path)
+    targets = _targets(3)
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
     monkeypatch.setattr(series, "last_day_with_level", lambda: targets[0].day)
     result = CliRunner().invoke(app, ["series", "build"])
-    assert result.exit_code == 1
+    assert result.exit_code == 2
+    assert f"error: SIH level record ends {targets[0].day.isoformat()}" in result.output
+    assert targets[1].day.isoformat() in result.output
+    assert targets[2].day.isoformat() in result.output
     assert "smolf levels update" in result.output
     assert not any(tmp_path.iterdir())
+
+
+def test_cli_maps_catalog_outage_on_extend_to_exit_2(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def down(*args: object, **kwargs: object) -> list:
+        raise AllBackendsFailed("all STAC backends failed: earth-search")
+
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: _targets(3))
+    monkeypatch.setattr(series, "search_scenes", down)
+    result = CliRunner().invoke(app, ["series", "build", "--extend"])
+    assert result.exit_code == 2
+    assert result.output.count("error:") == 1
+    assert "Earth Search is unreachable" in result.output
+    assert "Retry later" in result.output
+    assert not any(tmp_path.iterdir())
+
+
+def test_new_scene_search_queries_earth_search_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_search(start: date, end: date, max_cloud: float, **kwargs: object) -> list:
+        calls.append({"start": start, "end": end, **kwargs})
+        return [
+            SimpleNamespace(
+                id="S2C_14QMH_20261111_0_L2A",
+                datetime=datetime(2026, 11, 11, 17, 0),
+            )
+        ]
+
+    monkeypatch.setattr(series, "search_scenes", fake_search)
+    targets = series.list_extend_targets(date(2026, 11, 1), date(2026, 11, 16))
+    # WHY: a Planetary Computer search would hand back PC item ids, which
+    #   differ from Earth Search ids and would churn the series identity.
+    assert calls == [
+        {
+            "start": date(2026, 11, 2),
+            "end": date(2026, 11, 16),
+            "backends": ("earth-search",),
+        }
+    ]
+    assert targets == [
+        series.SeriesTarget(day=date(2026, 11, 11), item_id="S2C_14QMH_20261111_0_L2A")
+    ]
+
+
+def test_build_without_extend_never_searches_new_scenes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> list:
+        raise AssertionError("new-scene search must not run")
+
+    targets = _targets(3)
+    monkeypatch.setattr(series, "search_scenes", forbidden)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    # Stale levels refuse right after target listing: the search was skipped.
+    with pytest.raises(series.StaleLevelsError):
+        series.build_run(
+            run_id="run_noext",
+            extend=False,
+            output_dir=tmp_path,
+            levels_end=lambda: targets[0].day,
+        )
+
+
+def test_cli_unexpected_runtime_error_still_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(**kwargs: object) -> dict:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "build_run", boom)
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 1
+    assert "error: boom" in result.output
 
 
 def test_level_and_curve_inputs_do_not_mark_the_tree_dirty() -> None:
@@ -519,6 +603,27 @@ def test_level_and_curve_inputs_do_not_mark_the_tree_dirty() -> None:
     assert "data/hydro/ENDHD.csv.json" in series.HASHED_INPUT_PATHS
     assert series.is_dirty(porcelain) is False
     assert series.is_dirty("") is False
+
+
+def test_series_import_ignores_a_data_dir_outside_the_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
+    copy = tmp_path / "hydro/ENDHD.csv"
+    copy.parent.mkdir()
+    copy.write_bytes(b"x")
+    assert paths.levels_read_path() == copy  # the record resolves outside the repo
+    before = series.HASHED_INPUT_PATHS
+    snapshot = dict(series.__dict__)
+    try:
+        reloaded = importlib.reload(series)
+        assert reloaded.HASHED_INPUT_PATHS == before
+        assert reloaded.is_dirty(" M src/smol_frontier/series.py\n")
+        assert reloaded.is_dirty(" M data/hydro/ENDHD.csv\n") is False
+    finally:
+        # Put back the original objects so classes imported elsewhere still match.
+        series.__dict__.clear()
+        series.__dict__.update(snapshot)
 
 
 def test_code_and_other_data_changes_still_mark_the_tree_dirty() -> None:

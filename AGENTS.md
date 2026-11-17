@@ -31,6 +31,8 @@ The pipeline in order, one line per stage:
   a series is identified by its `series.csv` sha256, not by date)
 - Publish contract — `publish.py` + `schemas/` (`smolf publish`; neutral,
   versioned JSON + latest map from one complete run; see `docs/contract.md`)
+- Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
+  and the refreshed SIH level record)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene
   outputs under `outputs/`)
 - Frontier verification layer + agent — plugs in after the corrected
@@ -47,6 +49,9 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
   `flood_stage.tif[.json]`, `gsw_occurrence_endho_v1_4_2021.tif`. The
   `*.tif` there are force-added on purpose (`*.tif` is gitignored for
   cache/outputs).
+- `SMOLF_DATA_DIR` (optional) relocates `data/cache/`, `outputs/` and the
+  refreshed level record to a writable folder; it must be an absolute path
+  outside the checkout (otherwise every command exits 1).
 - `data/cache/` — ingested scenes (gitignored, regenerable via
   `smolf fetch`).
 - `outputs/` — classified GeoTIFFs (gitignored, regenerable via
@@ -57,6 +62,10 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `outputs/publish/` — the published data contract (`latest.json`,
   `series.json`, `publish.json`, the latest scene's map; gitignored,
   regenerable via `smolf publish`).
+- `$SMOLF_DATA_DIR/` — when set (read at call time by `paths.py`), holds
+  every write instead: `cache/`, `outputs/…` (same subfolders as above) and
+  `hydro/ENDHD.csv[.json]` (the refreshed SIH record; readers fall back to
+  the committed copy until it exists). Other inputs stay in the checkout.
 
 ## Parameters and provenance
 
@@ -68,6 +77,8 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 
 ## Pipeline invariants
 
+- Every default write path (and the level record's read path) is resolved by
+  `paths.py`; no other module derives a write path from the repo root.
 - Radiometry only in `sources/radiometry.py`; the BOA offset is computed once
   per scene from B02 and applied to every band.
 - Re-implement the documented methodology (see PRIOR_WORK.md); correctness

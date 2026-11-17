@@ -19,3 +19,4 @@ data/cache/
 *.aux.xml
 outputs/
 .env
+data/hydro/*.tmp

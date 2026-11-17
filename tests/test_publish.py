@@ -12,7 +12,7 @@ import json
 import os
 import re
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,7 +22,7 @@ import rasterio
 from rasterio.warp import transform_bounds
 from typer.testing import CliRunner
 
-from smol_frontier import __version__, aoi, ingest, publish, series
+from smol_frontier import __version__, aoi, paths, publish, series
 from smol_frontier.classify.geotiff import (
     PUBLISHED_COLORMAP,
     DisplayImage,
@@ -31,7 +31,7 @@ from smol_frontier.classify.geotiff import (
     write_display_png,
 )
 from smol_frontier.cli import app
-from smol_frontier.config import settings
+from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map, levels
 from smol_frontier.hydro.bed import bed_margin
 from smol_frontier.sources.stac import SceneMeta
@@ -139,7 +139,7 @@ def scene_env(
         nodata=flood_map.FLOOD_NODATA,
     ) as dst:
         dst.write(flood, 1)
-    monkeypatch.setattr(ingest, "DEFAULT_CACHE_DIR", cache_dir)
+    monkeypatch.setattr(paths, "cache_dir", lambda: cache_dir)
     monkeypatch.setattr(flood_map, "DEFAULT_FLOOD_PATH", flood_path)
     curve_path = _write_curve(base / "stage_area_curve.csv")
     monkeypatch.setattr(curve, "DEFAULT_CURVE_CSV_PATH", curve_path)
@@ -165,7 +165,7 @@ def scene_env(
         )
 
     def fake_ingest_scene(scene: SceneMeta, *args: object, **kwargs: object):
-        cache = Path(kwargs.get("cache_dir") or ingest.DEFAULT_CACHE_DIR)
+        cache = Path(kwargs.get("cache_dir") or paths.cache_dir())
         path = cache / f"{scene.id}.tif"
         env.ingest_calls.append((scene.id, path.exists()))
         if not path.exists():  # a cache miss "downloads" the scene
@@ -275,9 +275,7 @@ def _write_run(
     for record in records:  # cache the scene; the record pins its sha256
         if record["status"] == "ok":
             data = _cache_bytes(record["item_id_used"])
-            (ingest.DEFAULT_CACHE_DIR / f"{record['item_id_used']}.tif").write_bytes(
-                data
-            )
+            (paths.cache_dir() / f"{record['item_id_used']}.tif").write_bytes(data)
             record["cache_sha256"] = _sha(data)
     run_dir = root / run_id
     scenes_dir = run_dir / "scenes"
@@ -330,7 +328,7 @@ def levels_file(
         tmp_path_factory.mktemp("hydro") / "ENDHD.csv",
         [("2024-01-08", "2009.5"), ("2024-01-09", "2010.126"), ("2024-01-10", "")],
     )
-    monkeypatch.setattr(levels, "DEFAULT_LEVELS_PATH", path)
+    monkeypatch.setattr(paths, "levels_path", lambda: path)
     return path
 
 
@@ -338,7 +336,7 @@ def levels_file(
 def series_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "series"
     root.mkdir()
-    monkeypatch.setattr(series, "OUTPUT_DIR", root)
+    monkeypatch.setattr(paths, "series_dir", lambda: root)
     return root
 
 
@@ -1825,3 +1823,136 @@ def test_publish_map_and_png_paths_share_one_stem() -> None:
     assert publish.png_path(record) == "map/2024-01-04_S2B_X.png"
     for path in (publish.map_path(record), publish.png_path(record)):
         assert publish.is_allowed(path)
+
+
+# --- SMOLF_DATA_DIR: series build then publish under one data root -----------
+_REAL_CACHE_DIR = paths.cache_dir  # scene_env replaces it with a tmp cache
+_REAL_LEVELS_PATH = paths.levels_path  # levels_file replaces it with a tmp record
+
+
+def _tree(root: Path, *, hashed: bool = False) -> set[tuple[str, str]]:
+    """(relative name, sha256 when `hashed` and a file, else "") per entry."""
+    return {
+        (
+            p.relative_to(root).as_posix(),
+            _sha(p.read_bytes()) if hashed and p.is_file() else "",
+        )
+        for p in root.rglob("*")
+    }
+
+
+@pytest.fixture
+def data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scene_env: SimpleNamespace
+) -> Path:
+    """`series build` runs with fakes; every default path comes from the env."""
+    root = tmp_path / "data_root"
+    root.mkdir()
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(root))
+    monkeypatch.setattr(paths, "cache_dir", _REAL_CACHE_DIR)
+    records = {r["item_id_requested"]: r for r in _default_records()}
+    targets = [
+        series.SeriesTarget(date.fromisoformat(r["date"]), item_id)
+        for item_id, r in records.items()
+    ]
+
+    def fake_process(target: series.SeriesTarget) -> dict:
+        record = copy.deepcopy(records[target.item_id])
+        if record["status"] == "ok":  # cache the scene; the record pins its sha256
+            data = _cache_bytes(target.item_id)
+            paths.cache_dir().mkdir(parents=True, exist_ok=True)
+            (paths.cache_dir() / f"{target.item_id}.tif").write_bytes(data)
+            record["cache_sha256"] = _sha(data)
+        return record
+
+    monkeypatch.setattr(series, "process_scene", fake_process)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    monkeypatch.setattr(series, "last_day_with_level", lambda: targets[-1].day)
+    monkeypatch.setattr(series, "DEFAULT_CURVE_CSV_PATH", scene_env.curve_path)
+    monkeypatch.setattr(series, "DEFAULT_FLOOD_PATH", scene_env.flood_path)
+    monkeypatch.setattr(
+        series,
+        "current_fingerprint",
+        lambda: {"git_commit": "0" * 40, "dirty": False, "config_hash": "1" * 64},
+    )
+    return root
+
+
+def test_data_dir_holds_cache_series_and_publish(
+    data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_outputs = _tree(PROJECT_ROOT / "outputs")
+    repo_cache = _tree(PROJECT_ROOT / "data/cache")
+    build = CliRunner().invoke(app, ["series", "build"])
+    assert build.exit_code == 0, build.output
+    result = CliRunner().invoke(app, ["publish"])
+    assert result.exit_code == 0, result.output
+    assert len(list((data_root / "outputs/series").glob("*/series.csv"))) == 1
+    assert (data_root / "cache" / f"{LATEST_ITEM}.tif").is_file()
+    published = data_root / "outputs/publish"
+    assert {"latest.json", "series.json", "publish.json"} <= {
+        p.name for p in published.iterdir()
+    }
+    assert _tree(PROJECT_ROOT / "outputs") == repo_outputs
+    assert _tree(PROJECT_ROOT / "data/cache") == repo_cache
+
+
+def test_data_dir_levels_update_series_build_and_publish(
+    data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daily job: refresh levels, build, publish; the repo stays untouched."""
+    (tmp_path / "committed").mkdir()
+    committed = _write_levels(
+        tmp_path / "committed/ENDHD.csv",
+        [("2024-01-01", "2009.0"), ("2024-01-02", "2009.1")],
+    )
+    refreshed = _write_levels(
+        tmp_path / "download.csv",
+        [
+            ("2024-01-01", "2009.0"),
+            ("2024-01-02", "2009.1"),
+            ("2024-01-03", "2009.2"),
+            ("2024-01-04", "2009.3"),
+            ("2024-01-05", "2009.4"),
+        ],
+    ).read_bytes()
+    monkeypatch.setattr(paths, "COMMITTED_LEVELS_PATH", committed)
+    monkeypatch.setattr(paths, "levels_path", _REAL_LEVELS_PATH)
+    monkeypatch.setattr(levels, "download_levels", lambda: refreshed)
+    monkeypatch.setattr(series, "last_day_with_level", levels.last_day_with_level)
+
+    def repo_state() -> dict[str, set[tuple[str, str]]]:
+        # data/hydro is small and committed: compare bytes, not just names.
+        return {
+            rel: _tree(PROJECT_ROOT / rel, hashed=rel == "data/hydro")
+            for rel in ("outputs", "data/cache", "data/hydro")
+        }
+
+    repo = repo_state()
+
+    update = CliRunner().invoke(app, ["levels", "update"])
+    assert update.exit_code == 0, update.output
+    copy = data_root / "hydro/ENDHD.csv"
+    assert copy.read_bytes() == refreshed
+    assert (data_root / "hydro/ENDHD.csv.json").is_file()
+    build = CliRunner().invoke(app, ["series", "build"])
+    assert build.exit_code == 0, build.output
+    result = CliRunner().invoke(app, ["publish"])
+    assert result.exit_code == 0, result.output
+
+    (manifest_path,) = (data_root / "outputs/series").glob("*/manifest.json")
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["inputs"]["ENDHD_csv"] == _sha(refreshed)
+    latest = json.loads((data_root / "outputs/publish/latest.json").read_text())
+    assert latest["current_level"]["date"] == "2024-01-05"
+    assert latest["current_level"]["levels_sha256"] == _sha(refreshed)
+    assert repo_state() == repo
+
+
+def test_publish_out_wins_over_data_dir(data_root: Path, tmp_path: Path) -> None:
+    assert CliRunner().invoke(app, ["series", "build"]).exit_code == 0
+    out = tmp_path / "explicit"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    assert (out / "latest.json").is_file()
+    assert not (data_root / "outputs/publish").exists()

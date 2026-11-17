@@ -31,7 +31,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
-from smol_frontier import __version__
+from smol_frontier import __version__, paths
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.gate import (
@@ -43,17 +43,21 @@ from smol_frontier.gate import (
 from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
-from smol_frontier.hydro.levels import DEFAULT_LEVELS_PATH, last_day_with_level
-from smol_frontier.ingest import DEFAULT_CACHE_DIR, _cache_path
+from smol_frontier.hydro.levels import last_day_with_level
+from smol_frontier.ingest import _cache_path
 from smol_frontier.quality import assess_quality
-from smol_frontier.sources.stac import EARTH_SEARCH, search_scenes
+from smol_frontier.sources.stac import (
+    EARTH_SEARCH,
+    AllBackendsFailed,
+    search_scenes,
+)
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "OUTPUT_DIR",
     "SERIES_CSV_NAME",
     "SERIES_FIELDS",
+    "CatalogUnavailable",
     "FingerprintMismatch",
     "SeriesTarget",
     "StaleLevelsError",
@@ -75,7 +79,6 @@ __all__ = [
 
 # WHY: fixed run layout — one directory per run keeps scene JSONs, the series
 #   CSV, and the manifest together so a run is resumable and auditable alone.
-OUTPUT_DIR = PROJECT_ROOT / "outputs/series"
 SERIES_CSV_NAME = "series.csv"
 
 # WHY: fixed column order for series.csv — raw classifier figures first, then
@@ -112,6 +115,13 @@ SERIES_FIELDS = (
 _FLOAT_4DP = frozenset({"valid_frac", "cloud_frac"})
 
 
+class CatalogUnavailable(Exception):
+    """Build refused: the new-scene catalog search failed; retry later.
+
+    Deliberately not a RuntimeError/ValueError so the CLI maps it to exit 2.
+    """
+
+
 class FingerprintMismatch(Exception):
     """Resume refused: the run's code fingerprint differs from the current one."""
 
@@ -127,9 +137,17 @@ class StaleLevelsError(Exception):
 #   the hash identifies the exact bytes used. Their provenance sidecars
 #   (*.json) carry download metadata only. Code and config changes still
 #   count as dirty.
+# HOW: built from the committed repo constants only (never from the paths
+#   resolver), so importing this module never depends on SMOLF_DATA_DIR and
+#   `relative_to` never sees an out-of-repo path. A data-folder copy outside
+#   the repo is invisible to `git status` and needs no exemption.
 HASHED_INPUT_PATHS = tuple(
     path.relative_to(PROJECT_ROOT).as_posix()
-    for base in (DEFAULT_LEVELS_PATH, DEFAULT_CURVE_CSV_PATH, DEFAULT_FLOOD_PATH)
+    for base in (
+        paths.COMMITTED_LEVELS_PATH,
+        DEFAULT_CURVE_CSV_PATH,
+        DEFAULT_FLOOD_PATH,
+    )
     for path in (base, base.with_name(f"{base.name}.json"))
 )
 
@@ -268,7 +286,7 @@ def input_hashes() -> dict[str, str | None]:
     """sha256 of every series input file (None when missing)."""
     return {
         "aoi_polygon": sha256_file(settings.AOI_PATH),
-        "ENDHD_csv": sha256_file(DEFAULT_LEVELS_PATH),
+        "ENDHD_csv": sha256_file(paths.levels_read_path()),
         "stage_area_curve_csv": sha256_file(DEFAULT_CURVE_CSV_PATH),
         "flood_stage_tif": sha256_file(DEFAULT_FLOOD_PATH),
         "reference_csv": sha256_file(REFERENCE_CSV),
@@ -279,7 +297,7 @@ def cache_sha256(item_id: str) -> str | None:
     """sha256 of the cached scene file, or None when not cached."""
     if not item_id:
         return None
-    return sha256_file(_cache_path(DEFAULT_CACHE_DIR, item_id))
+    return sha256_file(_cache_path(paths.cache_dir(), item_id))
 
 
 def list_reference_targets() -> list[SeriesTarget]:
@@ -296,12 +314,22 @@ def list_extend_targets(last_ref_day: date, today: date) -> list[SeriesTarget]:
     """
     if today <= last_ref_day:
         return []
-    scenes = search_scenes(
-        last_ref_day + timedelta(days=1),
-        today,
-        settings.MAX_CLOUD_COVER_CATALOG,
-        backends=(EARTH_SEARCH,),
-    )
+    try:
+        scenes = search_scenes(
+            last_ref_day + timedelta(days=1),
+            today,
+            settings.MAX_CLOUD_COVER_CATALOG,
+            backends=(EARTH_SEARCH,),
+        )
+    except AllBackendsFailed as exc:
+        # WHY: an outage is retryable, so refuse (exit 2) instead of failing.
+        # There is no Planetary Computer fallback: PC item ids differ from
+        # Earth Search ids, so the series identity would churn with outages.
+        msg = (
+            "Earth Search is unreachable, so new scenes cannot be listed; "
+            "nothing was written. Retry later."
+        )
+        raise CatalogUnavailable(msg) from exc
     return [SeriesTarget(day=item.datetime.date(), item_id=item.id) for item in scenes]
 
 
@@ -573,9 +601,8 @@ def build_run(
         msg = "--workers must be >= 1"
         raise ValueError(msg)
     fn = process_scene if process_fn is None else process_fn
-    # WHY late binding: tests point OUTPUT_DIR at a tmp dir, so the default
-    #   resolves at call time, not at import time.
-    out_root = OUTPUT_DIR if output_dir is None else Path(output_dir)
+    # WHY late binding: the default resolves at call time through `paths`.
+    out_root = paths.series_dir() if output_dir is None else Path(output_dir)
     run_dir = out_root / run_id
     scenes_dir = run_dir / "scenes"
     manifest_path = run_dir / "manifest.json"

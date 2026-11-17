@@ -25,8 +25,9 @@ from rasterio.windows import Window
 from shapely.geometry import mapping as shapely_mapping
 from shapely.geometry.base import BaseGeometry
 
+from smol_frontier import paths
 from smol_frontier.aoi import utm_geometry, wgs84_bbox
-from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.config import settings
 from smol_frontier.sources.radiometry import (
     SPECTRAL_BANDS,
     boa_offset,
@@ -38,15 +39,11 @@ from smol_frontier.sources.stac import SceneMeta
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BAND_ORDER", "DEFAULT_CACHE_DIR", "IngestedScene", "ingest_scene"]
+__all__ = ["BAND_ORDER", "IngestedScene", "ingest_scene"]
 
 BAND_ORDER = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11", "SCL")
 BANDS_20M = frozenset({"B05", "B8A", "B11", "SCL"})
 REF_GRID_BAND = "B04"
-# WHY: shared on-disk cache for ingested scenes, so re-runs never re-download.
-# HOW: repo layout (gitignored data/cache/) anchored at PROJECT_ROOT, so the
-#   caller's cwd cannot scatter or orphan cache copies.
-DEFAULT_CACHE_DIR = PROJECT_ROOT / "data/cache"
 
 
 @dataclass(frozen=True, eq=False)
@@ -240,10 +237,10 @@ def ingest_scene(
     """Ingest a scene to the 10 m grid, using the cache when available.
 
     ``bbox``/``aoi_geom`` default to the AOI from aoi.py; ``cache_dir``
-    defaults to ``data/cache``. A cache hit re-derives the offset and mask
+    defaults to ``data/cache`` (or ``cache/`` under ``SMOLF_DATA_DIR``). A cache hit re-derives the offset and mask
     instead of trusting stored derivatives.
     """
-    cache_dir = DEFAULT_CACHE_DIR if cache_dir is None else Path(cache_dir)
+    cache_dir = paths.cache_dir() if cache_dir is None else Path(cache_dir)
     if aoi_geom is None:
         aoi_geom = utm_geometry()
     path = _cache_path(cache_dir, scene.id)

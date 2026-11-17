@@ -10,12 +10,11 @@ from typing import Annotated
 import numpy as np
 import typer
 
-from smol_frontier import __version__
+from smol_frontier import __version__, paths
 from smol_frontier.classify import pipeline
 from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
-from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.gate import OUTPUT_DIR as GATE_OUTPUT_DIR
+from smol_frontier.config import settings
 from smol_frontier.gate import (
     ComparedScene,
     GateTarget,
@@ -36,7 +35,6 @@ from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import build_curve
 from smol_frontier.hydro.flood_map import FloodMapError, build_flood_map
 from smol_frontier.hydro.levels import (
-    DEFAULT_LEVELS_PATH,
     LevelsError,
     load_levels,
     update_levels,
@@ -44,9 +42,7 @@ from smol_frontier.hydro.levels import (
 from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
-    OUTPUT_DIR as SERIES_OUTPUT_DIR,
-)
-from smol_frontier.series import (
+    CatalogUnavailable,
     FingerprintMismatch,
     StaleLevelsError,
     build_run,
@@ -69,6 +65,11 @@ app.add_typer(series_app, name="series")
 @app.callback()
 def main() -> None:
     """smol-frontier CLI."""
+    try:
+        paths.check_data_dir()
+    except paths.DataDirError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 @app.command()
@@ -135,7 +136,7 @@ def classify(
     result = pipeline.classify(ing)
     ha = result.ha_per_class
     bed = correct_bed(result.class_map, ing.transform, ing.crs, day.date())
-    out_dir = PROJECT_ROOT / "outputs"
+    out_dir = paths.outputs_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
     write_classified_geotiff(path, result.class_map, ing.transform, ing.crs)
@@ -225,7 +226,7 @@ def levels_show(
     ],
 ) -> None:
     """Print the SIH level for one exact day (no interpolation)."""
-    if not DEFAULT_LEVELS_PATH.exists():
+    if not paths.levels_read_path().exists():
         typer.echo("no local levels file; run `smolf levels update` first")
         raise typer.Exit(1)
     match = next((row for row in load_levels() if row.date == day.date()), None)
@@ -241,7 +242,7 @@ def levels_show(
 @hydro_app.command("curve")
 def hydro_curve() -> None:
     """Build the stage–area curve from the SIH record and write it."""
-    if not DEFAULT_LEVELS_PATH.exists():
+    if not paths.levels_read_path().exists():
         typer.echo("no local levels file; run `smolf levels update` first")
         raise typer.Exit(1)
     report = build_curve()
@@ -330,8 +331,8 @@ def gate_identity(
     rows = sorted([*rows, *early_errors], key=lambda r: (r.date, r.item_id_requested))
     summary = summarize(rows)
     stamp = gate_timestamp()
-    csv_path = GATE_OUTPUT_DIR / f"gate_{stamp}.csv"
-    md_path = GATE_OUTPUT_DIR / f"gate_{stamp}.md"
+    csv_path = paths.gate_dir() / f"gate_{stamp}.csv"
+    md_path = paths.gate_dir() / f"gate_{stamp}.md"
     write_csv(csv_path, rows)
     meta = RunMeta(
         timestamp=stamp,
@@ -414,12 +415,10 @@ def series_build(
             command=sys.argv,
             on_done=on_done,
         )
-    except FingerprintMismatch as exc:
+    except (CatalogUnavailable, FingerprintMismatch, StaleLevelsError) as exc:
+        # Precondition refusal: nothing written, retry later (exit 2).
         typer.echo(f"error: {exc}")
         raise typer.Exit(2)
-    except StaleLevelsError as exc:
-        typer.echo(f"error: {exc}")
-        raise typer.Exit(1)
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}")
         raise typer.Exit(1)
@@ -429,8 +428,8 @@ def series_build(
     wall = time.perf_counter() - start
     counts = manifest["counts"]
     assert isinstance(counts, dict)
-    typer.echo(f"run_dir: {SERIES_OUTPUT_DIR / run_id}")
-    typer.echo(f"series_csv: {SERIES_OUTPUT_DIR / run_id / 'series.csv'}")
+    typer.echo(f"run_dir: {paths.series_dir() / run_id}")
+    typer.echo(f"series_csv: {paths.series_dir() / run_id / 'series.csv'}")
     typer.echo(f"series_sha256: {manifest['series_sha256']}")
     typer.echo(
         f"counts: requested={counts['requested']} ok={counts['ok']}"

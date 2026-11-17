@@ -18,10 +18,10 @@ __all__ = [
     "DataDirError",
     "cache_dir",
     "check_data_dir",
-    "classify_dir",
     "gate_dir",
     "levels_path",
     "levels_read_path",
+    "outputs_dir",
     "publish_dir",
     "series_dir",
 ]
@@ -106,8 +106,8 @@ def gate_dir() -> Path:
     return PROJECT_ROOT / "outputs/identity_gate"
 
 
-def classify_dir() -> Path:
-    """Default location of the classified GeoTIFFs."""
+def outputs_dir() -> Path:
+    """Default root of the outputs that have no own folder (classify, experiments)."""
     root = _data_root()
     if root is not None:
         return root / "outputs"

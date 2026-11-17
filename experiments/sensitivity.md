@@ -28,7 +28,8 @@ parameter or changes behavior.
 
 Per-scene results (4185 rows: 465 scenes x 9 configurations) go to
 `outputs/sensitivity/sensitivity.csv`, and the cloud on/off rows to
-`outputs/sensitivity/cloud.csv`; both are git-ignored and regenerable with
+`outputs/sensitivity/cloud.csv` (under `$SMOLF_DATA_DIR/outputs/` when that
+variable is set); both are git-ignored and regenerable with
 the command above. Only the script and this note are committed.
 
 ## Controls

@@ -48,7 +48,7 @@ from smol_frontier import paths
 from smol_frontier.classify import gmm as gmm_mod
 from smol_frontier.classify import masks as masks_mod
 from smol_frontier.classify import pipeline as pipeline_mod
-from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.config import settings
 from smol_frontier.gate import load_reference
 from smol_frontier.ingest import _cache_path, ingest_scene
 from smol_frontier.quality import assess_quality
@@ -57,7 +57,10 @@ from smol_frontier.sources.stac import SceneMeta
 TAU_WATER_GRID = (0.50, 0.60, 0.70, 0.80, 0.90, 0.95, 0.99)
 TAU_HYACINTH_GRID = (0.45, 0.55, 0.65)
 BASELINE = (0.80, 0.55)
-REFERENCE_GATE_CSV = PROJECT_ROOT / "outputs/identity_gate/gate_20261028T212616.csv"
+# WHY: the gate run whose totals are the baseline control for the grid.
+# HOW: file name of the full gate run of 2026-10-28; read from the gate
+#   output folder at call time, so SMOLF_DATA_DIR relocates it too.
+REFERENCE_GATE_NAME = "gate_20261028T212616.csv"
 CLOUD_SCENES = (
     ("2025-07-29", "S2B_14QMH_20250729_0_L2A"),
     ("2025-07-24", "S2C_14QMH_20250724_0_L2A"),
@@ -280,12 +283,17 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Step 9z sensitivity experiments.")
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument(
-        "--output-dir", type=Path, default=PROJECT_ROOT / "outputs/sensitivity"
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Output folder (default: <outputs>/sensitivity, see smol_frontier.paths).",
     )
     args = parser.parse_args()
     if args.workers < 1:
         msg = "--workers must be >= 1"
         raise SystemExit(msg)
+    if args.output_dir is None:
+        args.output_dir = paths.outputs_dir() / "sensitivity"
 
     reference = load_reference()
     targets = [(row.date.isoformat(), row.item_id) for row in reference]
@@ -342,7 +350,8 @@ def main() -> None:
     base = {(row["date"], row["item_id"]): row for row in baseline_rows}
 
     # Control 1: baseline reproduces the reference gate run.
-    gate_totals = load_gate_totals(REFERENCE_GATE_CSV)
+    reference_gate_csv = paths.gate_dir() / REFERENCE_GATE_NAME
+    gate_totals = load_gate_totals(reference_gate_csv)
     assert set(gate_totals) == set(base), "gate CSV scenes != reference scenes"
     control_deltas = [
         abs(row["total_ha"] - gate_totals[(row["date"], row["item_id"])])
@@ -350,7 +359,7 @@ def main() -> None:
     ]
     control_max = max(control_deltas)
     print(
-        f"control 1: baseline vs {REFERENCE_GATE_CSV.name}: "
+        f"control 1: baseline vs {REFERENCE_GATE_NAME}: "
         f"max |Δ total| = {control_max:.4f} ha "
         f"(rounds to {control_max:.2f} ha)"
     )

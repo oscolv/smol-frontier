@@ -136,7 +136,7 @@ def classify(
     result = pipeline.classify(ing)
     ha = result.ha_per_class
     bed = correct_bed(result.class_map, ing.transform, ing.crs, day.date())
-    out_dir = paths.classify_dir()
+    out_dir = paths.outputs_dir()
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{ing.scene.id.replace('/', '_')}_classified.tif"
     write_classified_geotiff(path, result.class_map, ing.transform, ing.crs)

@@ -200,6 +200,14 @@ the `series.csv` sha256 — a series is identified by that hash, not by
 date. `--resume` reuses finished scenes only when the fingerprint matches,
 else it refuses with exit 2.
 
+`series build` exit codes:
+
+- 0: the run completed.
+- 2: precondition refusal, nothing written, retry later. One `error: …` line.
+  Today: stale SIH level record (a target day is newer than the last level
+  day) and resume fingerprint mismatch. Click/Typer usage errors also exit 2.
+- 1: anything else.
+
 Measured: run `20261028T221314` — 465 requested, 465 ok, 0 skipped,
 0 errors, wall 1:35, `series.csv` sha256
 `87514b60…` (full hash in the run manifest).

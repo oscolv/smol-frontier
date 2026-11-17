@@ -124,7 +124,7 @@ enforced in this repo. Anything not implemented yet says **planned**.
   adding provenance.
 - **Where in this repo:** `series.py` (`check_levels_cover()`,
   `HASHED_INPUT_PATHS`, `is_dirty()`), `hydro/levels.py`
-  (`last_day_with_level()`), `cli.py` (exit 1 on `StaleLevelsError`),
+  (`last_day_with_level()`), `cli.py` (exit 2 on `StaleLevelsError`, a precondition refusal),
   `tests/test_series.py`.
 
 ## 13. Neutral, versioned publish contract

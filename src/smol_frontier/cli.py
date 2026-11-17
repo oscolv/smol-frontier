@@ -409,12 +409,10 @@ def series_build(
             command=sys.argv,
             on_done=on_done,
         )
-    except FingerprintMismatch as exc:
+    except (FingerprintMismatch, StaleLevelsError) as exc:
+        # Precondition refusal: nothing written, retry later (exit 2).
         typer.echo(f"error: {exc}")
         raise typer.Exit(2)
-    except StaleLevelsError as exc:
-        typer.echo(f"error: {exc}")
-        raise typer.Exit(1)
     except (FileNotFoundError, FileExistsError, RuntimeError, ValueError) as exc:
         typer.echo(f"error: {exc}")
         raise typer.Exit(1)

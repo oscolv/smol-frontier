@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from typer.testing import CliRunner
 
-from smol_frontier import paths, series
+from smol_frontier import cli, paths, series
 from smol_frontier.classify.pipeline import SceneResult
 from smol_frontier.cli import app
 from smol_frontier.config import settings
@@ -500,17 +500,33 @@ def test_stale_levels_refuse_fresh_build_before_writing(tmp_path: Path) -> None:
     assert not (tmp_path / "run_stale").exists()
 
 
-def test_cli_maps_stale_levels_to_exit_1(
+def test_cli_maps_stale_levels_to_exit_2(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    targets = _targets(2)
+    targets = _targets(3)
     monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
     monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
     monkeypatch.setattr(series, "last_day_with_level", lambda: targets[0].day)
     result = CliRunner().invoke(app, ["series", "build"])
-    assert result.exit_code == 1
+    assert result.exit_code == 2
+    assert f"error: SIH level record ends {targets[0].day.isoformat()}" in result.output
+    assert targets[1].day.isoformat() in result.output
+    assert targets[2].day.isoformat() in result.output
     assert "smolf levels update" in result.output
     assert not any(tmp_path.iterdir())
+
+
+def test_cli_unexpected_runtime_error_still_exits_1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def boom(**kwargs: object) -> dict:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(paths, "series_dir", lambda: tmp_path)
+    monkeypatch.setattr(cli, "build_run", boom)
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 1
+    assert "error: boom" in result.output
 
 
 def test_level_and_curve_inputs_do_not_mark_the_tree_dirty() -> None:

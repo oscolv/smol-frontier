@@ -41,7 +41,12 @@ $V run "$RUN" <feature-id> -- <smolf args>    # e.g. -- classify 2026-10-12
 $V hectares "$RUN" <classified.tif>           # per-class hectares of a written map
 ```
 
-`run` executes `$SMOLF <args>` from `/tmp` with the run's `SMOLF_DATA_DIR`, prints stdout, and records `<n>-<feature-id>.cmd/.out/.err/.rc` in `$RUN/evidence/`. It always exits 0 itself. Read the recorded `.rc`. The feature recipes, with exact commands and expected values, are in [`features/`](features/README.md).
+`run` executes `$SMOLF <args>` from `/tmp` with the run's `SMOLF_DATA_DIR`, prints stdout, and records `<n>-<feature-id>.cmd/.out/.err/.rc` in `$RUN/evidence/`. It always exits 0 itself. Read the recorded `.rc`.
+
+Two `run` options inject into smolf's Python for that one command only, through a `sitecustomize.py` written to `$RUN/inject/`:
+
+- `--block-host <host>` (repeatable) makes DNS fail for that host at `socket.getaddrinfo`, which is where a real outage surfaces. Use `earth-search.aws.element84.com` to simulate Earth Search down. It covers Python HTTP (STAC API, Planetary Computer signing, the SIH), not GDAL/curl reads of scene files. Proof that the block caused the failure: `.err` contains `blocked by smolf-verify`.
+- `--log-level INFO` turns on smolf's own log, which the CLI never configures (by default only WARNING and above reach stderr). The feature recipes, with exact commands and expected values, are in [`features/`](features/README.md).
 
 ## Evidence
 

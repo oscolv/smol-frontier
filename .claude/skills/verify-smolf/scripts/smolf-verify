@@ -10,7 +10,11 @@
 # Usage:
 #   smolf-verify new [--ref <commit>] [--shared-cache]   create a run, print its dir
 #   smolf-verify doctor <run> [--net]                   read-only health check
-#   smolf-verify run <run> <feature-id> -- <smolf args> run smolf, record evidence
+#   smolf-verify run <run> <feature-id> [--block-host H]... [--log-level L] -- <smolf args>
+#                                                       run smolf, record evidence;
+#                                                       --block-host fails DNS for H in
+#                                                       Python (STAC API, PC signing, SIH);
+#                                                       --log-level shows smolf's log at L
 #   smolf-verify hectares <run> <geotiff>               per-class hectares of a classified map
 #   smolf-verify cleanup <run>                          remove checkout and data, keep evidence
 set -euo pipefail
@@ -101,16 +105,64 @@ cmd_doctor() {
   return $bad
 }
 
+# Injected into smolf's Python only for one `run` (via PYTHONPATH); never part
+# of smolf. It fails DNS for the listed hosts at socket.getaddrinfo, which is
+# where a real outage surfaces (requests raises ConnectionError), and turns on
+# smolf's own logging. GDAL/curl COG reads bypass Python sockets: blocking a
+# STAC host does not block reads of scene files.
+write_inject() {
+  mkdir -p "$run/inject"
+  cat > "$run/inject/sitecustomize.py" <<'PY'
+"""smolf-verify fault and log injection (see smolf-verify `run`)."""
+
+import os
+
+_HOSTS = {h for h in os.environ.get("SMOLF_VERIFY_BLOCK_HOSTS", "").split(",") if h}
+if _HOSTS:
+    import socket
+
+    _real_getaddrinfo = socket.getaddrinfo
+
+    def _getaddrinfo(host, *args, **kwargs):
+        name = host.decode() if isinstance(host, (bytes, bytearray)) else host
+        if name in _HOSTS:
+            raise socket.gaierror(socket.EAI_NONAME, f"{name} blocked by smolf-verify")
+        return _real_getaddrinfo(host, *args, **kwargs)
+
+    socket.getaddrinfo = _getaddrinfo
+
+_LEVEL = os.environ.get("SMOLF_VERIFY_LOG_LEVEL")
+if _LEVEL:
+    import logging
+
+    logging.basicConfig(
+        level=_LEVEL.upper(), format="%(levelname)s %(name)s: %(message)s"
+    )
+PY
+}
+
 cmd_run() {
   load_run "$1"; shift
   local feature=${1:?feature id required}; shift
+  local hosts="" level=""
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do
+    case $1 in
+      --block-host) hosts="${hosts:+$hosts,}${2:?--block-host needs a host}"; shift 2 ;;
+      --log-level) level=${2:?--log-level needs a level}; shift 2 ;;
+      *) die "run: unknown option $1 (smolf args go after --)" ;;
+    esac
+  done
   [ "${1:-}" = "--" ] && shift
   local n; n=$(printf '%02d' $(( $(find "$run/evidence" -name '*.cmd' | wc -l) + 1 )))
   local base="$run/evidence/$n-$feature"
-  printf 'cd /tmp && SMOLF_DATA_DIR=%q %q' "$SMOLF_DATA_DIR" "$SMOLF" > "$base.cmd"
-  printf ' %q' "$@" >> "$base.cmd"; echo >> "$base.cmd"
+  local -a env_args=("SMOLF_DATA_DIR=$SMOLF_DATA_DIR")
+  if [ -n "$hosts$level" ]; then
+    write_inject
+    env_args+=("PYTHONPATH=$run/inject" "SMOLF_VERIFY_BLOCK_HOSTS=$hosts" "SMOLF_VERIFY_LOG_LEVEL=$level")
+  fi
+  { printf 'cd /tmp && env'; printf ' %q' "${env_args[@]}" "$SMOLF" "$@"; echo; } > "$base.cmd"
   local rc=0
-  (cd /tmp && "$SMOLF" "$@") > "$base.out" 2> "$base.err" || rc=$?
+  (cd /tmp && env "${env_args[@]}" "$SMOLF" "$@") > "$base.out" 2> "$base.err" || rc=$?
   echo "$rc" > "$base.rc"
   cat "$base.out"
   echo "[smolf-verify] exit=$rc evidence=$base.{cmd,out,err,rc}" >&2
@@ -156,5 +208,5 @@ case ${1:-} in
   run) shift; cmd_run "$@" ;;
   hectares) shift; cmd_hectares "$@" ;;
   cleanup) shift; cmd_cleanup "$@" ;;
-  *) sed -n '2,16p' "$0"; exit 2 ;;
+  *) sed -n '2,20p' "$0"; exit 2 ;;
 esac

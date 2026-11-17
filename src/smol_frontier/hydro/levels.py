@@ -10,6 +10,7 @@ exit). First of three hydrology inputs for the exposed-bed correction.
 """
 
 import csv
+import glob
 import hashlib
 import json
 import logging
@@ -299,11 +300,43 @@ def check_regression(
     return RevisionCounts(level_revisions, volume_revisions)
 
 
+# WHY: the atomic writer names its temp files "<target name>.<random>.tmp".
+#   The cleanup derives its patterns from these same constants so the two
+#   cannot drift: a kill between mkstemp and os.replace leaves such a file
+#   behind, and it must not accumulate or dirty the tree.
+# HOW: plain naming convention shared by writer and cleaner; not calibrated.
+_TMP_PREFIX_SEP = "."
+_TMP_SUFFIX = ".tmp"
+
+
+def _remove_stale_temp_files(path: Path) -> list[Path]:
+    """Delete leftover temp files of the writer for `path` and its sidecar.
+
+    Matches only "<name>.*.tmp" for the CSV and the sidecar in path.parent;
+    everything else is left alone. Returns the removed paths.
+    """
+    removed: list[Path] = []
+    for owner in (path, _sidecar_path(path)):
+        pattern = f"{glob.escape(owner.name)}{_TMP_PREFIX_SEP}*{_TMP_SUFFIX}"
+        for stale in sorted(path.parent.glob(pattern)):
+            if not stale.is_file():
+                continue
+            try:
+                stale.unlink()
+            except FileNotFoundError:
+                continue
+            logger.info("removed stale temp file %s", stale)
+            removed.append(stale)
+    return removed
+
+
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write bytes atomically (temp file + os.replace)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(
-        dir=path.parent, prefix=f"{path.name}.", suffix=".tmp"
+        dir=path.parent,
+        prefix=f"{path.name}{_TMP_PREFIX_SEP}",
+        suffix=_TMP_SUFFIX,
     )
     try:
         with os.fdopen(fd, "wb") as tmp:
@@ -363,6 +396,10 @@ def update_levels(
     downloaded_utc = datetime.now(UTC).isoformat()
     last_with_level = _last_day_with_level(new_rows)
     if not check:
+        # Cleaned after the download and validation succeeded, so a failed
+        # run changes nothing in the folder; before the new write, so the
+        # new temp files are never swept.
+        _remove_stale_temp_files(target)
         _atomic_write_bytes(target, data)
         sidecar = {
             "url": SIH_URL,

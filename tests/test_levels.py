@@ -231,6 +231,40 @@ def test_update_check_does_not_write(tmp_path: Path) -> None:
 
 
 @responses.activate
+def test_update_removes_owned_stale_temp_files_only(tmp_path: Path) -> None:
+    responses.add(responses.GET, SIH_URL, body=_csv([_row("2024-01-01")]), status=200)
+    owned = [tmp_path / "ENDHD.csv.abc123.tmp", tmp_path / "ENDHD.csv.json.xyz.tmp"]
+    unrelated = [tmp_path / "other.csv.abc.tmp", tmp_path / "notes.txt"]
+    for f in owned + unrelated:
+        f.write_text("x")
+    update_levels(path=tmp_path / "ENDHD.csv")
+    assert not any(f.exists() for f in owned)
+    assert all(f.exists() for f in unrelated)
+
+
+@responses.activate
+def test_update_check_keeps_stale_temp_files(tmp_path: Path) -> None:
+    responses.add(responses.GET, SIH_URL, body=_csv([_row("2024-01-01")]), status=200)
+    stale = tmp_path / "ENDHD.csv.abc123.tmp"
+    stale.write_text("x")
+    update_levels(check=True, path=tmp_path / "ENDHD.csv")
+    assert stale.exists()
+    assert not (tmp_path / "ENDHD.csv").exists()
+
+
+@responses.activate
+def test_update_rejection_keeps_stale_temp_files(tmp_path: Path) -> None:
+    target = tmp_path / "ENDHD.csv"
+    target.write_bytes(_csv([_row("2024-01-01"), _row("2024-01-02")]))
+    responses.add(responses.GET, SIH_URL, body=_csv([_row("2024-01-01")]), status=200)
+    stale = tmp_path / "ENDHD.csv.abc123.tmp"
+    stale.write_text("x")
+    with pytest.raises(LevelsValidationError):
+        update_levels(path=target)
+    assert stale.exists()
+
+
+@responses.activate
 def test_update_rejection_keeps_local_copy(tmp_path: Path) -> None:
     local = _csv([_row("2024-01-01"), _row("2024-01-02")])
     target = tmp_path / "ENDHD.csv"

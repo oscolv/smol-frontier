@@ -26,6 +26,7 @@ from smol_frontier.publish.documents import (
     current_level,
     latest_document,
     latest_record,
+    reservoir_outline,
     series_document,
     validate,
 )
@@ -64,6 +65,7 @@ __all__ = [
     "png_path",
     "publish_index",
     "publish_run",
+    "reservoir_outline",
     "select_run",
     "series_document",
     "validate",

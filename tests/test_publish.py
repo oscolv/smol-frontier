@@ -17,6 +17,7 @@ from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
@@ -26,6 +27,7 @@ from rasterio.warp import (
     reproject,
     transform_bounds,
 )
+from shapely.geometry import LinearRing, shape
 from typer.testing import CliRunner
 
 from smol_frontier import __version__, aoi, paths, publish, series
@@ -390,7 +392,7 @@ def test_publish_latest_golden_values(
         # 49.996 publishes as 50.00, so the band is RED, not YELLOW.
         "pct_reservoir_corrected": 50.0,
         "cover_band": "RED",
-        "schema_version": "2.0.0",
+        "schema_version": "2.1.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -402,6 +404,7 @@ def test_publish_latest_golden_values(
         "run_id": RUN_ID,
         "series_sha256": "cd" * 32,
         "reservoir_area_ha": round(aoi.reservoir_area_ha(), 2),
+        "reservoir_outline": publish.reservoir_outline(),
         "constants": {
             "frac_publishable": 0.95,
             "green_max_pct": 30.0,
@@ -782,6 +785,34 @@ def test_publish_latest_schema_tolerates_extra_fields(
     publish.validate("latest", doc)
 
 
+def test_publish_latest_schema_accepts_doc_without_outline(
+    series_root: Path, tmp_path: Path
+) -> None:
+    # reservoir_outline is additive (2.1.0): a 2.0.0-shaped document still validates.
+    doc = _valid_latest(series_root, tmp_path)
+    del doc["reservoir_outline"]
+    publish.validate("latest", doc)
+
+
+def test_reservoir_outline_is_rfc7946_multipolygon_of_the_aoi() -> None:
+    outline = publish.reservoir_outline()
+    assert outline["type"] == "MultiPolygon"
+    for polygon in outline["coordinates"]:
+        exterior, *holes = polygon
+        assert LinearRing(exterior).is_ccw
+        assert not any(LinearRing(hole).is_ccw for hole in holes)
+        for ring in polygon:
+            assert ring[0] == ring[-1]
+            for lon, lat in ring:
+                assert (round(lon, 6), round(lat, 6)) == (lon, lat)
+                assert -180 <= lon <= 180 and -90 <= lat <= 90
+    geometry = shape(outline)
+    assert geometry.is_valid
+    utm = gpd.GeoSeries([geometry], crs="EPSG:4326").to_crs(settings.UTM_CRS)
+    # Same basin as reservoir_area_ha: rounding to 6 decimals moves it < 0.01 ha.
+    assert utm.area.iloc[0] / 10_000 == pytest.approx(aoi.reservoir_area_ha(), abs=0.01)
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -805,6 +836,24 @@ def test_publish_latest_schema_tolerates_extra_fields(
         ("series_sha256", "abc"),
         ("reservoir_area_ha", "1261.75"),
         ("reservoir_area_ha", 0),
+        ("reservoir_outline", {"type": "Polygon", "coordinates": [[]]}),
+        ("reservoir_outline", {"type": "MultiPolygon"}),
+        ("reservoir_outline", {"type": "MultiPolygon", "coordinates": []}),
+        (
+            "reservoir_outline",
+            {
+                "type": "MultiPolygon",
+                "coordinates": [[[[-99.3, 20.1], [-99.2, 20.1], [-99.3, 20.1]]]],
+            },
+        ),
+        (
+            "reservoir_outline",
+            {
+                "type": "MultiPolygon",
+                # latitude first: -99.3 is not a latitude
+                "coordinates": [[[[20.1, -99.3], [20.2, -99.3], [20.2, -99.2]] * 2]],
+            },
+        ),
         ("run_counts", {"ok": 1, "skipped": 0}),
         ("run_counts", {"ok": 1, "skipped": 0, "errors": -1}),
         ("newest_acquisition", {"date": "2024-01-05", "item_id": "A"}),
@@ -913,7 +962,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "2.0.0"
+    assert doc["schema_version"] == "2.1.0"
     assert doc["smolf_version"] == __version__
     assert [s["quality_light"] for s in scenes] == [
         "GOOD",
@@ -1544,9 +1593,9 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "2.0.0",
+        "schema_version": "2.1.0",
         "series_sha256": "cd" * 32,
-        "smolf_version": "0.3.0",
+        "smolf_version": "0.4.0",
     }
 
 

@@ -110,8 +110,8 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["bed_applied"] is True
     assert latest["removed_ha"] == 0.0
     assert latest["reservoir_area_ha"] == 1261.75
-    assert latest["smolf_version"] == "0.3.0"
-    assert latest["schema_version"] == "2.0.0"
+    assert latest["smolf_version"] == "0.4.0"
+    assert latest["schema_version"] == "2.1.0"
     assert _class5_ha(out_dir, latest) == 0.0
 
 

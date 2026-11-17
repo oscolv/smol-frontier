@@ -8,6 +8,8 @@ from importlib import resources
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
+from shapely.geometry import MultiPolygon, Polygon
+from shapely.geometry.polygon import orient
 
 from smol_frontier import __version__, aoi, paths, series
 from smol_frontier.config import settings
@@ -25,12 +27,16 @@ from smol_frontier.publish.map import map_path, png_path
 #   enum value), the minor on additive ones (a new optional field).
 #   2.0.0: removed_ha is null whenever bed_applied is false, and the
 #   schema_version pattern rejects a trailing newline (issue #38).
-SCHEMA_VERSION = "2.0.0"
+#   2.1.0: latest.json gains the optional reservoir_outline (issue #42).
+SCHEMA_VERSION = "2.1.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
 _DECIMALS_FRACTION = 4
 _DECIMALS_DEFAULT = 2
+# WHY: 6 decimals of a degree are ~0.1 m at Endhó, two orders below the
+#   10 m pixel the GSW polygon was traced on, and keep latest.json small.
+_DECIMALS_OUTLINE = 6
 
 # WHY: the run stores "clean" for an empty regime (same word as the gate CSV);
 #   the contract publishes an explicit enum.
@@ -232,6 +238,7 @@ def latest_document(
     document["run_id"] = run_id
     document["series_sha256"] = manifest["series_sha256"]
     document["reservoir_area_ha"] = round(aoi.reservoir_area_ha(), _DECIMALS_DEFAULT)
+    document["reservoir_outline"] = reservoir_outline()
     document["constants"] = {
         "frac_publishable": settings.FRAC_PUBLISHABLE,
         "green_max_pct": settings.GREEN_MAX_PCT,
@@ -241,6 +248,35 @@ def latest_document(
     # bounds come from the warped PNG, so publish_run fills them in
     document["map"] = {"geotiff": map_path(record), "png": png_path(record)}
     return document
+
+
+def reservoir_outline() -> dict[str, object]:
+    """The reservoir polygon as an RFC 7946 MultiPolygon geometry.
+
+    EPSG:4326, [longitude, latitude], 6 decimals; exterior rings
+    counter-clockwise and holes clockwise (the RFC's right-hand rule), so a
+    web map draws it as published without reprojecting or reorienting.
+    """
+    geometry = aoi.wgs84_geometry()
+    if isinstance(geometry, Polygon):
+        geometry = MultiPolygon([geometry])
+    return {
+        "type": "MultiPolygon",
+        "coordinates": [
+            _polygon_rings(orient(polygon, sign=1.0)) for polygon in geometry.geoms
+        ],
+    }
+
+
+def _polygon_rings(polygon: Polygon) -> list[list[list[float]]]:
+    """Exterior then interior rings of ``polygon``, coordinates rounded."""
+    return [
+        [
+            [round(x, _DECIMALS_OUTLINE), round(y, _DECIMALS_OUTLINE)]
+            for x, y in ring.coords
+        ]
+        for ring in (polygon.exterior, *polygon.interiors)
+    ]
 
 
 def latest_record(records: list[dict[str, object]]) -> dict[str, object]:

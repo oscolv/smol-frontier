@@ -1,28 +1,18 @@
-"""Write the classified map as a styled GeoTIFF, and the published display PNG.
+"""Write the classified and published maps as styled GeoTIFFs.
 
 The GeoTIFF opens colored in QGIS: a palette color table on band 1, nodata 0
 (transparent), a band description, and per-class legend tags. Writers:
 ``write_classified_geotiff`` for the classifier's map (classes 0-4), and the
-guarded ``write_published_geotiff`` and ``write_display_png`` for the
-published map (classes 0-5), which refuse anything that is not a uint8 class
-map and colour it themselves — so reflectance or source imagery can never be
-written through them.
+guarded ``write_published_geotiff`` for the published map (classes 0-5).
+``guard_published`` is the one source-imagery guard every published raster
+passes (this writer and ``classify.display``): it refuses anything that is
+not a uint8 class map, so reflectance or source imagery can never be written.
 """
 
-import warnings
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import rasterio
-import rasterio.shutil
-from rasterio.io import MemoryFile
-from rasterio.warp import (
-    Resampling,
-    calculate_default_transform,
-    reproject,
-    transform_bounds,
-)
 
 from smol_frontier.config import settings
 
@@ -32,18 +22,11 @@ __all__ = [
     "CLASS_NAMES",
     "PUBLISHED_CLASS_NAMES",
     "PUBLISHED_COLORMAP",
-    "DisplayImage",
+    "guard_published",
     "hex_to_rgba",
-    "render_display_image",
     "write_classified_geotiff",
-    "write_display_png",
     "write_published_geotiff",
 ]
-
-# WHY: web-map display CRS (EPSG:3857) for the PNG overlay; bounds are
-#   published in EPSG:4326 rounded to 6 decimals (~0.1 m), far below a pixel.
-DISPLAY_CRS = "EPSG:3857"
-BOUNDS_DECIMALS = 6
 
 # WHY: one-line band description shown by GIS clients in layer properties.
 BAND_DESCRIPTION = "hyacinth classification"
@@ -118,13 +101,13 @@ def write_published_geotiff(
     an array that is not 2-D uint8 or holds a value outside the published
     classes.
     """
-    array = _guard_published(class_map)
+    array = guard_published(class_map)
     return _write_styled(
         path, array, transform, crs, PUBLISHED_COLORMAP, PUBLISHED_CLASS_NAMES
     )
 
 
-def _guard_published(class_map: np.ndarray) -> np.ndarray:
+def guard_published(class_map: np.ndarray) -> np.ndarray:
     """The source-imagery guard shared by every published raster (C21)."""
     array = np.asarray(class_map)
     if array.dtype != np.uint8 or array.ndim != 2:
@@ -135,107 +118,6 @@ def _guard_published(class_map: np.ndarray) -> np.ndarray:
         msg = f"published map holds values outside classes 0-5: {unknown}"
         raise ValueError(msg)
     return array
-
-
-@dataclass(frozen=True, eq=False)
-class DisplayImage:
-    """The display raster: classes 0-5 warped to EPSG:3857 plus EPSG:4326 bounds.
-
-    It carries classes, not colours: ``write_display_png`` guards and colours
-    them itself, so no pre-made RGBA (e.g. imagery) can reach a PNG.
-    """
-
-    classes: np.ndarray  # (height, width) uint8, values 0-5
-    transform: rasterio.Affine
-    bounds: list[list[float]]  # [[south, west], [north, east]], 6 decimals
-
-
-def render_display_image(
-    class_map: np.ndarray, transform: rasterio.Affine, crs: str
-) -> DisplayImage:
-    """Warp the class map to EPSG:3857 (nearest) for the display PNG.
-
-    Runs the C21 guard first. Pixels outside the warped footprint are nodata;
-    colouring happens in ``write_display_png``.
-    """
-    array = _guard_published(class_map)
-    height, width = array.shape
-    left, top = transform @ (0, 0)
-    right, bottom = transform @ (width, height)
-    # WHY the filter: rasterio's own internals still multiply affines with `*`,
-    #   which the affine package flags as pending deprecation.
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", PendingDeprecationWarning)
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            crs, DISPLAY_CRS, width, height, left, bottom, right, top
-        )
-    warped = np.full((dst_height, dst_width), settings.CLASS_NODATA, dtype=np.uint8)
-    reproject(
-        array,
-        warped,
-        src_transform=transform,
-        src_crs=crs,
-        dst_transform=dst_transform,
-        dst_crs=DISPLAY_CRS,
-        resampling=Resampling.nearest,
-        src_nodata=settings.CLASS_NODATA,
-        dst_nodata=settings.CLASS_NODATA,
-    )
-    west, south, east, north = transform_bounds(
-        DISPLAY_CRS,
-        "EPSG:4326",
-        *_extent(dst_transform, dst_height, dst_width),
-    )
-    bounds = [
-        [round(south, BOUNDS_DECIMALS), round(west, BOUNDS_DECIMALS)],
-        [round(north, BOUNDS_DECIMALS), round(east, BOUNDS_DECIMALS)],
-    ]
-    return DisplayImage(warped, dst_transform, bounds)
-
-
-def _extent(
-    transform: rasterio.Affine, height: int, width: int
-) -> tuple[float, float, float, float]:
-    """(left, bottom, right, top) of a north-up grid."""
-    left, top = transform @ (0, 0)
-    right, bottom = transform @ (width, height)
-    return left, bottom, right, top
-
-
-def write_display_png(path: str | Path, image: DisplayImage) -> Path:
-    """Write the display image as an RGBA PNG with no sidecar files.
-
-    Runs the C21 guard on the image's classes before anything is written, then
-    colours them: nodata fully transparent, classes 1-5 their configured colour.
-    """
-    path = Path(path)
-    classes = _guard_published(image.classes)
-    lookup = np.zeros((256, 4), dtype=np.uint8)
-    for code, color in PUBLISHED_COLORMAP.items():
-        lookup[code] = color
-    lookup[settings.CLASS_NODATA] = (0, 0, 0, 0)
-    rgba = np.moveaxis(lookup[classes], -1, 0).copy()
-    _, height, width = rgba.shape
-    # WHY: the PNG driver only supports CreateCopy, so stage in memory; PAM is
-    #   disabled so GDAL never writes a .aux.xml beside the PNG.
-    with (
-        rasterio.Env(GDAL_PAM_ENABLED="NO"),
-        MemoryFile() as mem,
-        mem.open(
-            driver="GTiff",
-            height=height,
-            width=width,
-            count=4,
-            dtype="uint8",
-            crs=DISPLAY_CRS,
-            transform=image.transform,
-            photometric="RGB",
-            alpha="YES",
-        ) as src,
-    ):
-        src.write(rgba)
-        rasterio.shutil.copy(src, path, driver="PNG")
-    return path
 
 
 def _write_styled(

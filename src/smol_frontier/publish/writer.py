@@ -7,7 +7,8 @@ import tempfile
 from pathlib import Path
 
 from smol_frontier import __version__, paths, series
-from smol_frontier.classify.geotiff import write_display_png, write_published_geotiff
+from smol_frontier.classify.display import write_display_png
+from smol_frontier.classify.geotiff import write_published_geotiff
 from smol_frontier.publish.documents import (
     SCHEMA_VERSION,
     canonical_json,

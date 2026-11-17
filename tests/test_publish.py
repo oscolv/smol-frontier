@@ -19,17 +19,22 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import rasterio
-from rasterio.warp import transform_bounds
+from rasterio.warp import (
+    Resampling,
+    calculate_default_transform,
+    reproject,
+    transform_bounds,
+)
 from typer.testing import CliRunner
 
 from smol_frontier import __version__, aoi, paths, publish, series
-from smol_frontier.classify.geotiff import (
-    PUBLISHED_COLORMAP,
+from smol_frontier.classify.display import (
+    DISPLAY_CRS,
     DisplayImage,
-    hex_to_rgba,
     render_display_image,
     write_display_png,
 )
+from smol_frontier.classify.geotiff import PUBLISHED_COLORMAP, hex_to_rgba
 from smol_frontier.cli import app
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map, levels
@@ -1330,23 +1335,73 @@ def test_publish_png_warped_to_web_mercator_with_bounds(
     assert meta["shape"][0] >= 19 and meta["shape"][1] >= 19
 
 
-def test_publish_png_nearest_neighbour_no_new_colours(
+def _png_class_counts(rgba: np.ndarray) -> dict[int, int]:
+    """Pixels per class in the PNG: nodata is alpha 0, 1-5 their colour."""
+    counts = {settings.CLASS_NODATA: int((rgba[3] == 0).sum())}
+    for code in (WATER, DENSE, INTERFACE, SOIL, REMOVED):
+        colour = np.array(PUBLISHED_COLORMAP[code])[:, None, None]
+        counts[code] = int((rgba == colour).all(axis=0).sum())
+    return counts
+
+
+def _reference_warp(classes: np.ndarray, resampling: Resampling) -> dict[int, int]:
+    """Class counts of a class map on the fixture grid warped to the display
+    grid (the renderer's own grid recipe) with the given resampling."""
+    height, width = classes.shape
+    left, top = GRID_TRANSFORM @ (0, 0)
+    right, bottom = GRID_TRANSFORM @ (width, height)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PendingDeprecationWarning)
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            GRID_CRS, DISPLAY_CRS, width, height, left, bottom, right, top
+        )
+    warped = np.full((dst_height, dst_width), settings.CLASS_NODATA, dtype=np.uint8)
+    reproject(
+        classes,
+        warped,
+        src_transform=GRID_TRANSFORM,
+        src_crs=GRID_CRS,
+        dst_transform=dst_transform,
+        dst_crs=DISPLAY_CRS,
+        resampling=resampling,
+        src_nodata=settings.CLASS_NODATA,
+        dst_nodata=settings.CLASS_NODATA,
+    )
+    return {code: int((warped == code).sum()) for code in range(6)}
+
+
+def test_publish_png_nearest_neighbour_matches_reference_warp(
     series_root: Path, tmp_path: Path
 ) -> None:
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
     rgba, _ = _png(out)
-    counts = {
-        code: int(
-            (rgba[:3] == np.array(PUBLISHED_COLORMAP[code][:3])[:, None, None])
-            .all(axis=0)
-            .sum()
-        )
-        for code in (DENSE, REMOVED)
-    }
-    assert counts[REMOVED] >= SAFE_BED_HYACINTH_PX
-    assert counts[DENSE] > 0
+    png_counts = _png_class_counts(rgba)
+    assert sum(png_counts.values()) == rgba.shape[1] * rgba.shape[2]
+    published, _ = _map(out)
+    assert png_counts == _reference_warp(published, Resampling.nearest)
+    assert png_counts[REMOVED] >= SAFE_BED_HYACINTH_PX
+
+
+def test_publish_png_nearest_neighbour_not_bilinear(tmp_path: Path) -> None:
+    # a water/class-5 checkerboard: bilinear blends 1 and 5 into codes 2-4
+    #   at every pixel edge, so its counts cannot match a nearest warp
+    #   (the fixture map's straight row edges survive bilinear unchanged)
+    rows, cols = np.indices((20, 20))
+    classes = np.where((rows + cols) % 2 == 0, WATER, REMOVED).astype(np.uint8)
+    classes[19, 10:] = settings.CLASS_NODATA
+    target = tmp_path / "x.png"
+    write_display_png(target, render_display_image(classes, GRID_TRANSFORM, GRID_CRS))
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(target) as src:
+            png_counts = _png_class_counts(src.read())
+    nearest = _reference_warp(classes, Resampling.nearest)
+    bilinear = _reference_warp(classes, Resampling.bilinear)
+    assert png_counts == nearest
+    assert bilinear != nearest
+    assert png_counts[DENSE] == png_counts[INTERFACE] == png_counts[SOIL] == 0
 
 
 def test_publish_png_has_no_sidecar_files(series_root: Path, tmp_path: Path) -> None:

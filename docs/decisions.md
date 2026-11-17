@@ -151,7 +151,9 @@ enforced in this repo. Anything not implemented yet says **planned**.
   source imagery impossible by construction.
 - **Where in this repo:** `src/smol_frontier/publish/` (`publish_run()`,
   `SCHEMA_VERSION`, `ALLOWED_FILES`), `src/smol_frontier/schemas/`,
-  `classify/geotiff.py` (`write_published_geotiff()` and `write_display_png()`, the uint8 0–5 guard),
+  `classify/geotiff.py` (`write_published_geotiff()` and `guard_published()`,
+  the uint8 0–5 guard), `classify/display.py` (`write_display_png()`, which
+  passes the same guard),
   `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
   `docs/contract.md`, `tests/test_publish.py`,
   `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.

@@ -10,7 +10,7 @@ import rasterio
 from rasterio.crs import CRS
 
 from smol_frontier import ingest, paths, series
-from smol_frontier.classify.geotiff import DisplayImage, render_display_image
+from smol_frontier.classify.display import DisplayImage, render_display_image
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import settings
 from smol_frontier.hydro import curve, flood_map

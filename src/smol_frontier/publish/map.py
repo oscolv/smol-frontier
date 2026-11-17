@@ -68,7 +68,7 @@ def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
     item_id = str(record["item_id_used"])
     backend = str(record["backend_used"])
     cache_dir = paths.cache_dir()
-    path = ingest._cache_path(cache_dir, item_id)
+    path = ingest.cache_path(cache_dir, item_id)
     if not path.is_file():
         try:
             ingest_scene(get_scene(backend, item_id), cache_dir=cache_dir)

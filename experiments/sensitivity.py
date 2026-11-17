@@ -50,7 +50,7 @@ from smol_frontier.classify import masks as masks_mod
 from smol_frontier.classify import pipeline as pipeline_mod
 from smol_frontier.config import settings
 from smol_frontier.gate import load_reference
-from smol_frontier.ingest import _cache_path, ingest_scene
+from smol_frontier.ingest import cache_path, ingest_scene
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import SceneMeta
 
@@ -146,7 +146,7 @@ def spectral_off():
 
 def measure_scene(item_id: str, day: str) -> dict:
     """Ingest one scene from cache; classify + quality (no bed correction)."""
-    path = _cache_path(paths.cache_dir(), item_id)
+    path = cache_path(paths.cache_dir(), item_id)
     if not path.exists():
         msg = f"scene {item_id} not in data/cache"
         raise FileNotFoundError(msg)

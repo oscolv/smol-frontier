@@ -44,7 +44,7 @@ from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
 from smol_frontier.hydro.levels import last_day_with_level
-from smol_frontier.ingest import _cache_path
+from smol_frontier.ingest import cache_path
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import (
     EARTH_SEARCH,
@@ -311,7 +311,7 @@ def cache_sha256(item_id: str) -> str | None:
     """sha256 of the cached scene file, or None when not cached."""
     if not item_id:
         return None
-    return sha256_file(_cache_path(paths.cache_dir(), item_id))
+    return sha256_file(cache_path(paths.cache_dir(), item_id))
 
 
 def list_reference_targets() -> list[SeriesTarget]:

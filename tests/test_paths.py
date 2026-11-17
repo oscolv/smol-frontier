@@ -8,17 +8,14 @@ from smol_frontier import paths, series
 from smol_frontier.config import PROJECT_ROOT
 
 
-def test_resolvers_match_repo_layout() -> None:
+def test_resolvers_match_repo_layout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(paths.DATA_DIR_ENV, raising=False)
     assert paths.cache_dir() == PROJECT_ROOT / "data/cache"
     assert paths.series_dir() == PROJECT_ROOT / "outputs/series"
     assert paths.publish_dir() == PROJECT_ROOT / "outputs/publish"
     assert paths.gate_dir() == PROJECT_ROOT / "outputs/identity_gate"
-    assert paths.classify_dir() == PROJECT_ROOT / "outputs"
+    assert paths.outputs_dir() == PROJECT_ROOT / "outputs"
     assert paths.levels_path() == PROJECT_ROOT / "data/hydro/ENDHD.csv"
-
-
-def test_committed_levels_path() -> None:
-    assert paths.COMMITTED_LEVELS_PATH == PROJECT_ROOT / "data/hydro/ENDHD.csv"
 
 
 def _under(root: Path) -> dict[str, Path]:
@@ -27,7 +24,7 @@ def _under(root: Path) -> dict[str, Path]:
         "series_dir": root / "outputs/series",
         "publish_dir": root / "outputs/publish",
         "gate_dir": root / "outputs/identity_gate",
-        "classify_dir": root / "outputs",
+        "outputs_dir": root / "outputs",
     }
 
 
@@ -39,7 +36,7 @@ def test_data_dir_unset_and_empty_keep_repo_layout(
         "series_dir": PROJECT_ROOT / "outputs/series",
         "publish_dir": PROJECT_ROOT / "outputs/publish",
         "gate_dir": PROJECT_ROOT / "outputs/identity_gate",
-        "classify_dir": PROJECT_ROOT / "outputs",
+        "outputs_dir": PROJECT_ROOT / "outputs",
     }
     monkeypatch.delenv(paths.DATA_DIR_ENV, raising=False)
     assert {name: getattr(paths, name)() for name in expected} == expected

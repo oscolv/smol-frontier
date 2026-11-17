@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -238,15 +239,24 @@ def test_update_check_does_not_write(tmp_path: Path) -> None:
 
 
 @responses.activate
-def test_update_removes_owned_stale_temp_files_only(tmp_path: Path) -> None:
+def test_update_removes_owned_stale_temp_files_only(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     responses.add(responses.GET, SIH_URL, body=_csv([_row("2024-01-01")]), status=200)
     owned = [tmp_path / "ENDHD.csv.abc123.tmp", tmp_path / "ENDHD.csv.json.xyz.tmp"]
     unrelated = [tmp_path / "other.csv.abc.tmp", tmp_path / "notes.txt"]
     for f in owned + unrelated:
         f.write_text("x")
-    update_levels(path=tmp_path / "ENDHD.csv")
+    with caplog.at_level(logging.INFO, logger="smol_frontier.hydro.levels"):
+        update_levels(path=tmp_path / "ENDHD.csv")
     assert not any(f.exists() for f in owned)
     assert all(f.exists() for f in unrelated)
+    removals = [
+        r.getMessage() for r in caplog.records if "stale temp" in r.getMessage()
+    ]
+    assert len(removals) == len(owned)
+    for f in owned:
+        assert any(f.name in message for message in removals)
 
 
 @responses.activate
@@ -377,16 +387,31 @@ def test_readers_use_committed_record_until_the_data_copy_exists(
     assert "level_m: 102.50" in show.output
 
 
+@pytest.mark.parametrize(
+    ("rows", "reason"),
+    [
+        ([_row("2024-01-01", "100.00")], "fewer days (1) than local (2)"),
+        (
+            [_row("2023-12-31", "99.00"), _row("2024-01-01", "100.00")],
+            "ends earlier",
+        ),
+        (
+            [_row("2024-01-01", "100.00"), _row("2024-01-02", "101.50")],
+            "revises Nivel(m)",
+        ),
+    ],
+    ids=["fewer-days", "earlier-end", "level-revision"],
+)
 @responses.activate
-def test_first_refresh_into_empty_data_dir_rejects_fewer_days_than_committed(
-    data_dir: SimpleNamespace,
+def test_first_refresh_into_empty_data_dir_is_validated_against_committed(
+    data_dir: SimpleNamespace, rows: list[tuple[str, str, str, str]], reason: str
 ) -> None:
-    responses.add(
-        responses.GET, SIH_URL, body=_csv([_row("2024-01-01", "100.00")]), status=200
-    )
+    responses.add(responses.GET, SIH_URL, body=_csv(rows), status=200)
+    committed_bytes = data_dir.committed.read_bytes()
     result = CliRunner().invoke(app, ["levels", "update"])
     assert result.exit_code == 1
-    assert "fewer days (1) than local (2)" in result.output
+    assert reason in result.output
+    assert data_dir.committed.read_bytes() == committed_bytes
     assert not data_dir.copy.exists()
     assert not (data_dir.copy.parent / "ENDHD.csv.json").exists()
     assert paths.levels_read_path() == data_dir.committed

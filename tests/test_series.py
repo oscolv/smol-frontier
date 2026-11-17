@@ -10,7 +10,7 @@ import hashlib
 import importlib
 import json
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -533,6 +533,36 @@ def test_cli_maps_catalog_outage_on_extend_to_exit_2(
     assert "Earth Search is unreachable" in result.output
     assert "Retry later" in result.output
     assert not any(tmp_path.iterdir())
+
+
+def test_new_scene_search_queries_earth_search_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict[str, object]] = []
+
+    def fake_search(start: date, end: date, max_cloud: float, **kwargs: object) -> list:
+        calls.append({"start": start, "end": end, **kwargs})
+        return [
+            SimpleNamespace(
+                id="S2C_14QMH_20261111_0_L2A",
+                datetime=datetime(2026, 11, 11, 17, 0),
+            )
+        ]
+
+    monkeypatch.setattr(series, "search_scenes", fake_search)
+    targets = series.list_extend_targets(date(2026, 11, 1), date(2026, 11, 16))
+    # WHY: a Planetary Computer search would hand back PC item ids, which
+    #   differ from Earth Search ids and would churn the series identity.
+    assert calls == [
+        {
+            "start": date(2026, 11, 2),
+            "end": date(2026, 11, 16),
+            "backends": ("earth-search",),
+        }
+    ]
+    assert targets == [
+        series.SeriesTarget(day=date(2026, 11, 11), item_id="S2C_14QMH_20261111_0_L2A")
+    ]
 
 
 def test_build_without_extend_never_searches_new_scenes(

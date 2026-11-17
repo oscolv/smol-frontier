@@ -94,12 +94,18 @@ cmd_doctor() {
     echo "cache:      empty (first ingest downloads every scene)"
   fi
   if [ "$net" = 1 ]; then
+    # Mirror smolf's SIH access: the site's bot protection redirect-loops (or
+    # 403s) clients without cookies and smolf's User-Agent, so send both.
+    local ua
+    if ! ua=$("$(dirname "$SMOLF")/python" -c 'from smol_frontier.hydro.levels import USER_AGENT; print(USER_AGENT)' 2>/dev/null) || [ -z "$ua" ]; then
+      echo "net:        SKIP (cannot read smolf USER_AGENT)"; bad=1
+    else
     for url in https://earth-search.aws.element84.com/v1 \
                https://planetarycomputer.microsoft.com/api/stac/v1 \
                https://sih.conagua.gob.mx/basedatos/Presas/ENDHD.csv; do
       # Keep curl's HTTP code and its exit status apart: a failure after the
       # last response (time limit, redirect loop) must not corrupt the code.
-      code=$(curl -s -o /dev/null -m 20 -L -w '%{http_code}' "$url") && rc=0 || rc=$?
+      code=$(curl -s -o /dev/null -m 20 -L -b "" -A "$ua" -w '%{http_code}' "$url") && rc=0 || rc=$?
       [ -n "$code" ] || code=000
       if [ "$rc" = 0 ]; then
         echo "net:        $code $url"
@@ -107,6 +113,7 @@ cmd_doctor() {
         echo "net:        $code (curl exit $rc) $url"
       fi
     done
+    fi
   fi
   echo "evidence:   $(find "$run/evidence" -type f | wc -l) files in $run/evidence"
   return $bad

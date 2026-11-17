@@ -32,7 +32,7 @@ Read-only. It needs `smolf: <version>` (the CLI validates `SMOLF_DATA_DIR` on ev
 
 - `git: DIRTY` lists every change, but a series run records `dirty: true` only for changes outside the hashed hydrology inputs (`data/hydro/ENDHD.csv`, the stage–area curve, the flood-stage map, their sidecars). A run with `dirty: true` is refused by `publish` with exit 2. Commit or use `--ref`.
 - `smolf: FAIL ... must be an absolute path outside the checkout` (relative value) or `... must be outside the checkout (<path>)` (value inside it) means a bad `SMOLF_DATA_DIR`.
-- `net: 200 <url>` is healthy. `net: <code> (curl exit <rc>) <url>` means curl gave up after the last HTTP code it saw: 28 = time limit, 6 = could not resolve host, 7 = could not connect, 47 = too many redirects. `000` means no HTTP response at all.
+- `net: 200 <url>` is healthy. `net: <code> (curl exit <rc>) <url>` means curl gave up after the last HTTP code it saw: 28 = time limit, 6 = could not resolve host, 7 = could not connect, 47 = too many redirects (a redirect loop). The probe sends cookies and smolf's own User-Agent, like `levels update`, because the SIH redirect-loops clients without them. `000` means no HTTP response at all.
 - `net: 000 ...` or any `(curl exit ...)` line means that feature's real path cannot be verified now. Report it as unverified. Do not swap in a mock.
 
 ## Drive

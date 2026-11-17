@@ -54,12 +54,16 @@ def resolve_out_dir(out_dir: Path) -> Path:
     the old contract behind a stray ``.previous-*`` link. Resolving first
     makes the foreign check, staging and the swap all act on the target, so
     the link itself is never touched and keeps pointing at the new contract.
-    A broken symlink (or a loop) is refused: resolving it would silently
-    create a directory wherever the dangling link happens to point.
+    A broken symlink (or a loop) anywhere in the path, the last component
+    or an ancestor, is refused: resolving it would silently create a
+    directory wherever the dangling link points (e.g. ``outputs/`` linked to
+    an unmounted drive would publish onto the underlying filesystem). A
+    missing parent with no symlink in the way is still created later.
     """
-    if out_dir.is_symlink() and not out_dir.exists():
-        msg = f"--out {out_dir} is a broken symlink"
-        raise PublishRefused(msg)
+    for part in (out_dir, *out_dir.absolute().parents):
+        if part.is_symlink() and not part.exists():
+            msg = f"--out {out_dir} goes through a broken symlink: {part}"
+            raise PublishRefused(msg)
     try:
         return out_dir.resolve()
     except (OSError, RuntimeError) as exc:  # a loop in a parent component

@@ -1830,6 +1830,28 @@ def test_publish_out_broken_symlink_refused(series_root: Path, tmp_path: Path) -
     assert _siblings(tmp_path) == ["pub", "series"]
 
 
+def test_publish_out_broken_symlink_ancestor_refused(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    par = tmp_path / "par"  # e.g. outputs/ linked to an unmounted drive
+    par.symlink_to(tmp_path / "gone" / "deeper", target_is_directory=True)
+    result = _publish(par / "pub", "--run", RUN_ID)
+    assert result.exit_code == 2, result.output
+    assert "broken symlink" in result.output
+    assert par.is_symlink()
+    assert _siblings(tmp_path) == ["par", "series"]
+
+
+def test_publish_out_missing_parents_created(series_root: Path, tmp_path: Path) -> None:
+    _write_run(series_root)
+    out = tmp_path / "a" / "b" / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    assert (out / "publish.json").is_file()
+    assert _siblings(out.parent) == ["pub"]
+
+
 # --- schema versioning --------------------------------------------------------
 
 

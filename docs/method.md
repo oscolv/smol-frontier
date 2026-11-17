@@ -206,6 +206,11 @@ the `series.csv` sha256 — a series is identified by that hash, not by
 date. `--resume` reuses finished scenes only when the fingerprint matches,
 else it refuses with exit 1 (not retryable: start a new run).
 
+The config hash is the sha256 of the canonical settings dump (every
+threshold and parameter in `config.py`), excluding input-file locations
+(`AOI_PATH`). Input contents are pinned separately by sha256 in the
+manifest's `inputs`, so moving the checkout does not block `--resume`.
+
 `series build` exit codes:
 
 - 0: the run completed.

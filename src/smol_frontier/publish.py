@@ -330,9 +330,9 @@ def current_level(levels_path: Path | None = None) -> dict[str, object] | None:
     """Last day with a level in the SIH record, or None when there is none.
 
     Independent of the wall clock and of the run. A missing file counts as
-    no record. ``levels_path`` defaults to the committed level record.
+    no record. ``levels_path`` defaults to ``paths.levels_read_path()``.
     """
-    path = Path(paths.levels_path() if levels_path is None else levels_path)
+    path = Path(paths.levels_read_path() if levels_path is None else levels_path)
     if not path.is_file():
         return None
     rows = [row for row in levels.load_levels(path) if not math.isnan(row.level_m)]

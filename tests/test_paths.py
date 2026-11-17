@@ -64,11 +64,30 @@ def test_data_dir_is_read_at_call_time(
     assert paths.series_dir() == tmp_path / "b/outputs/series"
 
 
-def test_data_dir_does_not_move_the_level_record(
+def test_level_record_without_data_dir_is_the_committed_copy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(paths.DATA_DIR_ENV, raising=False)
+    assert paths.levels_path() == paths.COMMITTED_LEVELS_PATH
+    assert paths.levels_read_path() == paths.COMMITTED_LEVELS_PATH
+
+
+def test_data_dir_moves_the_level_record_write_target(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
-    assert paths.levels_path() == PROJECT_ROOT / "data/hydro/ENDHD.csv"
+    assert paths.levels_path() == tmp_path / "hydro/ENDHD.csv"
+
+
+def test_level_read_path_falls_back_until_the_data_copy_exists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
+    assert paths.levels_read_path() == paths.COMMITTED_LEVELS_PATH
+    copy = tmp_path / "hydro/ENDHD.csv"
+    copy.parent.mkdir()
+    copy.write_bytes(b"x")
+    assert paths.levels_read_path() == copy
 
 
 def test_data_dir_never_changes_the_config_hash(

@@ -6,10 +6,14 @@ import os
 import time
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import responses
+from typer.testing import CliRunner
 
+from smol_frontier import paths, publish, series
+from smol_frontier.cli import app
 from smol_frontier.hydro.levels import (
     SIH_URL,
     LevelsDownloadError,
@@ -17,6 +21,7 @@ from smol_frontier.hydro.levels import (
     LevelsValidationError,
     check_regression,
     download_levels,
+    last_day_with_level,
     level_on,
     load_levels,
     parse_levels_bytes,
@@ -299,3 +304,100 @@ def test_live_download_endhd() -> None:
     print(f"  first: {rows[0].date} last: {rows[-1].date}")
     assert len(rows) > 20000
     assert all(row.date is not None for row in rows)
+
+
+# --- SMOLF_DATA_DIR: write to the data folder, read it once it exists --------
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    """Empty data folder plus a tmp stand-in for the committed record."""
+    committed = tmp_path / "repo/data/hydro/ENDHD.csv"
+    committed.parent.mkdir(parents=True)
+    committed.write_bytes(
+        _csv([_row("2024-01-01", "100.00"), _row("2024-01-02", "101.00")])
+    )
+    monkeypatch.setattr(paths, "COMMITTED_LEVELS_PATH", committed)
+    root = tmp_path / "data_root"
+    root.mkdir()
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(root))
+    return SimpleNamespace(
+        root=root, committed=committed, copy=root / "hydro/ENDHD.csv"
+    )
+
+
+def _readers() -> dict[str, object]:
+    return {
+        "load_levels": [row.date for row in load_levels()],
+        "level_on": level_on(date(2024, 1, 2)),
+        "last_day_with_level": last_day_with_level(),
+        "current_level": publish.current_level(),
+        "ENDHD_csv": series.input_hashes()["ENDHD_csv"],
+    }
+
+
+@responses.activate
+def test_readers_use_committed_record_until_the_data_copy_exists(
+    data_dir: SimpleNamespace,
+) -> None:
+    sha = hashlib.sha256
+    before = _readers()
+    assert before["last_day_with_level"] == date(2024, 1, 2)
+    assert before["level_on"] == 101.00
+    assert before["ENDHD_csv"] == sha(data_dir.committed.read_bytes()).hexdigest()
+    show = CliRunner().invoke(app, ["levels", "show", "2024-01-02"])
+    assert show.exit_code == 0, show.output
+    assert "level_m: 101.00" in show.output
+
+    refreshed = _csv(
+        [
+            _row("2024-01-01", "100.00"),
+            _row("2024-01-02", "101.00"),
+            _row("2024-01-03", "102.50"),
+        ]
+    )
+    responses.add(responses.GET, SIH_URL, body=refreshed, status=200)
+    committed_bytes = data_dir.committed.read_bytes()
+    update = CliRunner().invoke(app, ["levels", "update"])
+    assert update.exit_code == 0, update.output
+    assert f"output: {data_dir.copy}" in update.output
+    assert data_dir.copy.read_bytes() == refreshed
+    assert (data_dir.copy.parent / "ENDHD.csv.json").is_file()
+    assert data_dir.committed.read_bytes() == committed_bytes
+
+    after = _readers()
+    assert after["last_day_with_level"] == date(2024, 1, 3)
+    assert after["current_level"]["date"] == "2024-01-03"
+    assert after["current_level"]["levels_sha256"] == sha(refreshed).hexdigest()
+    assert after["ENDHD_csv"] == sha(refreshed).hexdigest()
+    show = CliRunner().invoke(app, ["levels", "show", "2024-01-03"])
+    assert show.exit_code == 0, show.output
+    assert "level_m: 102.50" in show.output
+
+
+@responses.activate
+def test_first_refresh_into_empty_data_dir_rejects_fewer_days_than_committed(
+    data_dir: SimpleNamespace,
+) -> None:
+    responses.add(
+        responses.GET, SIH_URL, body=_csv([_row("2024-01-01", "100.00")]), status=200
+    )
+    result = CliRunner().invoke(app, ["levels", "update"])
+    assert result.exit_code == 1
+    assert "fewer days (1) than local (2)" in result.output
+    assert not data_dir.copy.exists()
+    assert not (data_dir.copy.parent / "ENDHD.csv.json").exists()
+    assert paths.levels_read_path() == data_dir.committed
+
+
+@responses.activate
+def test_explicit_path_skips_the_committed_baseline(
+    data_dir: SimpleNamespace, tmp_path: Path
+) -> None:
+    responses.add(
+        responses.GET, SIH_URL, body=_csv([_row("2024-01-01", "100.00")]), status=200
+    )
+    target = tmp_path / "elsewhere/ENDHD.csv"
+    report = update_levels(path=target)
+    assert report.written is True
+    assert not data_dir.copy.exists()

@@ -221,7 +221,7 @@ def levels_show(
     ],
 ) -> None:
     """Print the SIH level for one exact day (no interpolation)."""
-    if not paths.levels_path().exists():
+    if not paths.levels_read_path().exists():
         typer.echo("no local levels file; run `smolf levels update` first")
         raise typer.Exit(1)
     match = next((row for row in load_levels() if row.date == day.date()), None)
@@ -237,7 +237,7 @@ def levels_show(
 @hydro_app.command("curve")
 def hydro_curve() -> None:
     """Build the stage–area curve from the SIH record and write it."""
-    if not paths.levels_path().exists():
+    if not paths.levels_read_path().exists():
         typer.echo("no local levels file; run `smolf levels update` first")
         raise typer.Exit(1)
     report = build_curve()

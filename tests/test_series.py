@@ -7,6 +7,7 @@ the `smolf series build` CLI, never a pytest test.
 
 import csv
 import hashlib
+import importlib
 import json
 import math
 from datetime import date, timedelta
@@ -572,6 +573,27 @@ def test_level_and_curve_inputs_do_not_mark_the_tree_dirty() -> None:
     assert "data/hydro/ENDHD.csv.json" in series.HASHED_INPUT_PATHS
     assert series.is_dirty(porcelain) is False
     assert series.is_dirty("") is False
+
+
+def test_series_import_ignores_a_data_dir_outside_the_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(tmp_path))
+    copy = tmp_path / "hydro/ENDHD.csv"
+    copy.parent.mkdir()
+    copy.write_bytes(b"x")
+    assert paths.levels_read_path() == copy  # the record resolves outside the repo
+    before = series.HASHED_INPUT_PATHS
+    snapshot = dict(series.__dict__)
+    try:
+        reloaded = importlib.reload(series)
+        assert reloaded.HASHED_INPUT_PATHS == before
+        assert reloaded.is_dirty(" M src/smol_frontier/series.py\n")
+        assert reloaded.is_dirty(" M data/hydro/ENDHD.csv\n") is False
+    finally:
+        # Put back the original objects so classes imported elsewhere still match.
+        series.__dict__.clear()
+        series.__dict__.update(snapshot)
 
 
 def test_code_and_other_data_changes_still_mark_the_tree_dirty() -> None:

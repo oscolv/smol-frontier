@@ -137,6 +137,10 @@ class StaleLevelsError(Exception):
 #   the hash identifies the exact bytes used. Their provenance sidecars
 #   (*.json) carry download metadata only. Code and config changes still
 #   count as dirty.
+# HOW: built from the committed repo constants only (never from the paths
+#   resolver), so importing this module never depends on SMOLF_DATA_DIR and
+#   `relative_to` never sees an out-of-repo path. A data-folder copy outside
+#   the repo is invisible to `git status` and needs no exemption.
 HASHED_INPUT_PATHS = tuple(
     path.relative_to(PROJECT_ROOT).as_posix()
     for base in (
@@ -282,7 +286,7 @@ def input_hashes() -> dict[str, str | None]:
     """sha256 of every series input file (None when missing)."""
     return {
         "aoi_polygon": sha256_file(settings.AOI_PATH),
-        "ENDHD_csv": sha256_file(paths.levels_path()),
+        "ENDHD_csv": sha256_file(paths.levels_read_path()),
         "stage_area_curve_csv": sha256_file(DEFAULT_CURVE_CSV_PATH),
         "flood_stage_tif": sha256_file(DEFAULT_FLOOD_PATH),
         "reference_csv": sha256_file(REFERENCE_CSV),

@@ -32,7 +32,7 @@ from smol_frontier.classify.geotiff import (
 )
 from smol_frontier.cli import app
 from smol_frontier.config import PROJECT_ROOT, settings
-from smol_frontier.hydro import curve, flood_map
+from smol_frontier.hydro import curve, flood_map, levels
 from smol_frontier.hydro.bed import bed_margin
 from smol_frontier.sources.stac import SceneMeta
 
@@ -1827,6 +1827,7 @@ def test_publish_map_and_png_paths_share_one_stem() -> None:
 
 # --- SMOLF_DATA_DIR: series build then publish under one data root -----------
 _REAL_CACHE_DIR = paths.cache_dir  # scene_env replaces it with a tmp cache
+_REAL_LEVELS_PATH = paths.levels_path  # levels_file replaces it with a tmp record
 
 
 def _tree(root: Path) -> set[str]:
@@ -1887,6 +1888,53 @@ def test_data_dir_holds_cache_series_and_publish(
     }
     assert _tree(PROJECT_ROOT / "outputs") == repo_outputs
     assert _tree(PROJECT_ROOT / "data/cache") == repo_cache
+
+
+def test_data_dir_levels_update_series_build_and_publish(
+    data_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daily job: refresh levels, build, publish; the repo stays untouched."""
+    (tmp_path / "committed").mkdir()
+    committed = _write_levels(
+        tmp_path / "committed/ENDHD.csv",
+        [("2024-01-01", "2009.0"), ("2024-01-02", "2009.1")],
+    )
+    refreshed = _write_levels(
+        tmp_path / "download.csv",
+        [
+            ("2024-01-01", "2009.0"),
+            ("2024-01-02", "2009.1"),
+            ("2024-01-03", "2009.2"),
+            ("2024-01-04", "2009.3"),
+            ("2024-01-05", "2009.4"),
+        ],
+    ).read_bytes()
+    monkeypatch.setattr(paths, "COMMITTED_LEVELS_PATH", committed)
+    monkeypatch.setattr(paths, "levels_path", _REAL_LEVELS_PATH)
+    monkeypatch.setattr(levels, "download_levels", lambda: refreshed)
+    monkeypatch.setattr(series, "last_day_with_level", levels.last_day_with_level)
+    repo = {
+        rel: _tree(PROJECT_ROOT / rel)
+        for rel in ("outputs", "data/cache", "data/hydro")
+    }
+
+    update = CliRunner().invoke(app, ["levels", "update"])
+    assert update.exit_code == 0, update.output
+    copy = data_root / "hydro/ENDHD.csv"
+    assert copy.read_bytes() == refreshed
+    assert (data_root / "hydro/ENDHD.csv.json").is_file()
+    build = CliRunner().invoke(app, ["series", "build"])
+    assert build.exit_code == 0, build.output
+    result = CliRunner().invoke(app, ["publish"])
+    assert result.exit_code == 0, result.output
+
+    (manifest_path,) = (data_root / "outputs/series").glob("*/manifest.json")
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["inputs"]["ENDHD_csv"] == _sha(refreshed)
+    latest = json.loads((data_root / "outputs/publish/latest.json").read_text())
+    assert latest["current_level"]["date"] == "2024-01-05"
+    assert latest["current_level"]["levels_sha256"] == _sha(refreshed)
+    assert {rel: _tree(PROJECT_ROOT / rel) for rel in repo} == repo
 
 
 def test_publish_out_wins_over_data_dir(data_root: Path, tmp_path: Path) -> None:

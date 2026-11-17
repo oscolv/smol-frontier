@@ -356,8 +356,8 @@ def _sidecar_path(path: Path) -> Path:
 
 
 def load_levels(path: Path | str | None = None) -> list[LevelRow]:
-    """Load parsed rows from the local SIH copy (default: data/hydro)."""
-    target = paths.levels_path() if path is None else Path(path)
+    """Load parsed rows from the local SIH copy (default: `levels_read_path()`)."""
+    target = paths.levels_read_path() if path is None else Path(path)
     return parse_levels_bytes(target.read_bytes())
 
 
@@ -382,12 +382,21 @@ def update_levels(
 ) -> LevelsUpdate:
     """Download, validate, and (unless check) store the SIH record.
 
+    The download is validated against the target when it exists. With the
+    default target (no `path`) and no copy there yet, it is validated against
+    the record readers would otherwise use (`levels_read_path()`), so the
+    first refresh into a fresh data folder cannot regress the committed copy.
     On any rejection the local copy is kept and LevelsError is raised.
     """
     target = paths.levels_path() if path is None else Path(path)
+    baseline = target
+    if path is None and not target.exists():
+        # First refresh into an empty data folder: validate the download
+        # against the committed copy the readers fall back to.
+        baseline = paths.levels_read_path()
     data = download_levels()
     new_rows = parse_levels_bytes(data)
-    old_rows = parse_levels_bytes(target.read_bytes()) if target.exists() else None
+    old_rows = parse_levels_bytes(baseline.read_bytes()) if baseline.exists() else None
     revisions = (
         check_regression(new_rows, old_rows, force=force)
         if old_rows is not None

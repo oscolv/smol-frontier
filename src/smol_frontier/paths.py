@@ -1,4 +1,4 @@
-"""Default write locations and the level record's path.
+"""Default write locations and the level record's paths.
 
 Every function is evaluated at call time (never captured at import), so a
 caller or test can redirect it. Call sites use ``paths.series_dir()`` through
@@ -19,6 +19,7 @@ __all__ = [
     "classify_dir",
     "gate_dir",
     "levels_path",
+    "levels_read_path",
     "publish_dir",
     "series_dir",
 ]
@@ -33,7 +34,8 @@ COMMITTED_LEVELS_PATH = PROJECT_ROOT / "data/hydro/ENDHD.csv"
 #   scene cache and every output must be redirectable to a writable folder
 #   without touching code or `Settings` (which feeds the run's config hash).
 # HOW: read from the environment at call time by `_data_root()`; unset or
-#   empty keeps the repo layout. The root holds `cache/` and `outputs/`.
+#   empty keeps the repo layout. The root holds `cache/`, `outputs/` and
+#   `hydro/ENDHD.csv[.json]` (the refreshed SIH level record).
 DATA_DIR_ENV = "SMOLF_DATA_DIR"
 
 
@@ -84,5 +86,20 @@ def classify_dir() -> Path:
 
 
 def levels_path() -> Path:
-    """Path of the SIH level record the pipeline reads and `levels update` writes."""
+    """Path `levels update` writes the SIH level record (and its sidecar) to."""
+    root = _data_root()
+    if root is not None:
+        return root / "hydro/ENDHD.csv"
+    return COMMITTED_LEVELS_PATH
+
+
+def levels_read_path() -> Path:
+    """Path every reader takes the SIH level record from.
+
+    The write target when that file exists, else the committed copy, so an
+    empty data folder still reads the record shipped with the checkout.
+    """
+    target = levels_path()
+    if target.exists():
+        return target
     return COMMITTED_LEVELS_PATH

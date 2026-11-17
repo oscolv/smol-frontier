@@ -97,8 +97,15 @@ cmd_doctor() {
     for url in https://earth-search.aws.element84.com/v1 \
                https://planetarycomputer.microsoft.com/api/stac/v1 \
                https://sih.conagua.gob.mx/basedatos/Presas/ENDHD.csv; do
-      code=$(curl -s -o /dev/null -m 20 -L -w '%{http_code}' "$url" || echo 000)
-      echo "net:        $code $url"
+      # Keep curl's HTTP code and its exit status apart: a failure after the
+      # last response (time limit, redirect loop) must not corrupt the code.
+      code=$(curl -s -o /dev/null -m 20 -L -w '%{http_code}' "$url") && rc=0 || rc=$?
+      [ -n "$code" ] || code=000
+      if [ "$rc" = 0 ]; then
+        echo "net:        $code $url"
+      else
+        echo "net:        $code (curl exit $rc) $url"
+      fi
     done
   fi
   echo "evidence:   $(find "$run/evidence" -type f | wc -l) files in $run/evidence"

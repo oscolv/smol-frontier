@@ -170,5 +170,5 @@ enforced in this repo. Anything not implemented yet says **planned**.
   nothing: the next successful run covers it.
 - **Where in this repo:** `sources/stac.py` (`AllBackendsFailed`),
   `series.py` (`CatalogUnavailable`, `list_extend_targets()`), `cli.py`
-  (exit 2), `docs/method.md` (exit-code list), `tests/test_series.py`,
-  `tests/test_stac.py`.
+  (exit 2, also for `classify` and `fetch`), `docs/method.md` (exit-code
+  list), `tests/test_series.py`, `tests/test_stac.py`, `tests/test_ingest.py`.

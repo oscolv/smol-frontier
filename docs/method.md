@@ -18,6 +18,10 @@ the last reference date. Same-date duplicates keep the highest
 reference scene is tile 14QMH, so this is one scene per date with the
 latest processing.
 
+When every catalog fails, `smolf classify` and `smolf fetch` print one
+`error: …` line on stderr and exit 2 (retry later, nothing written), the
+same contract as `series build --extend` (§9).
+
 - `MAX_CLOUD_COVER_CATALOG = 50.0` (config.py): catalog cloud-cover ceiling
   for newly searched scenes. Generous on purpose — the per-pixel SCL mask
   and the spectral cloud test filter clouds later anyway.

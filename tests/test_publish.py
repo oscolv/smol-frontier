@@ -12,7 +12,7 @@ import json
 import os
 import re
 import warnings
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -31,7 +31,7 @@ from smol_frontier.classify.geotiff import (
     write_display_png,
 )
 from smol_frontier.cli import app
-from smol_frontier.config import settings
+from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map
 from smol_frontier.hydro.bed import bed_margin
 from smol_frontier.sources.stac import SceneMeta
@@ -1823,3 +1823,76 @@ def test_publish_map_and_png_paths_share_one_stem() -> None:
     assert publish.png_path(record) == "map/2024-01-04_S2B_X.png"
     for path in (publish.map_path(record), publish.png_path(record)):
         assert publish.is_allowed(path)
+
+
+# --- SMOLF_DATA_DIR: series build then publish under one data root -----------
+_REAL_CACHE_DIR = paths.cache_dir  # scene_env replaces it with a tmp cache
+
+
+def _tree(root: Path) -> set[str]:
+    return {p.relative_to(root).as_posix() for p in root.rglob("*")}
+
+
+@pytest.fixture
+def data_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, scene_env: SimpleNamespace
+) -> Path:
+    """`series build` runs with fakes; every default path comes from the env."""
+    root = tmp_path / "data_root"
+    root.mkdir()
+    monkeypatch.setenv(paths.DATA_DIR_ENV, str(root))
+    monkeypatch.setattr(paths, "cache_dir", _REAL_CACHE_DIR)
+    records = {r["item_id_requested"]: r for r in _default_records()}
+    targets = [
+        series.SeriesTarget(date.fromisoformat(r["date"]), item_id)
+        for item_id, r in records.items()
+    ]
+
+    def fake_process(target: series.SeriesTarget) -> dict:
+        record = copy.deepcopy(records[target.item_id])
+        if record["status"] == "ok":  # cache the scene; the record pins its sha256
+            data = _cache_bytes(target.item_id)
+            paths.cache_dir().mkdir(parents=True, exist_ok=True)
+            (paths.cache_dir() / f"{target.item_id}.tif").write_bytes(data)
+            record["cache_sha256"] = _sha(data)
+        return record
+
+    monkeypatch.setattr(series, "process_scene", fake_process)
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    monkeypatch.setattr(series, "last_day_with_level", lambda: targets[-1].day)
+    monkeypatch.setattr(series, "DEFAULT_CURVE_CSV_PATH", scene_env.curve_path)
+    monkeypatch.setattr(series, "DEFAULT_FLOOD_PATH", scene_env.flood_path)
+    monkeypatch.setattr(
+        series,
+        "current_fingerprint",
+        lambda: {"git_commit": "0" * 40, "dirty": False, "config_hash": "1" * 64},
+    )
+    return root
+
+
+def test_data_dir_holds_cache_series_and_publish(
+    data_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_outputs = _tree(PROJECT_ROOT / "outputs")
+    repo_cache = _tree(PROJECT_ROOT / "data/cache")
+    build = CliRunner().invoke(app, ["series", "build"])
+    assert build.exit_code == 0, build.output
+    result = CliRunner().invoke(app, ["publish"])
+    assert result.exit_code == 0, result.output
+    assert len(list((data_root / "outputs/series").glob("*/series.csv"))) == 1
+    assert (data_root / "cache" / f"{LATEST_ITEM}.tif").is_file()
+    published = data_root / "outputs/publish"
+    assert {"latest.json", "series.json", "publish.json"} <= {
+        p.name for p in published.iterdir()
+    }
+    assert _tree(PROJECT_ROOT / "outputs") == repo_outputs
+    assert _tree(PROJECT_ROOT / "data/cache") == repo_cache
+
+
+def test_publish_out_wins_over_data_dir(data_root: Path, tmp_path: Path) -> None:
+    assert CliRunner().invoke(app, ["series", "build"]).exit_code == 0
+    out = tmp_path / "explicit"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    assert (out / "latest.json").is_file()
+    assert not (data_root / "outputs/publish").exists()

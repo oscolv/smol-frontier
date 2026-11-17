@@ -466,6 +466,11 @@ def series_build(
     typer.echo(f"wall: {time.strftime('%H:%M:%S', time.gmtime(wall))}")
 
 
+def _one_line(exc: Exception) -> str:
+    """Collapse whitespace so an exception message prints as one stderr line."""
+    return " ".join(str(exc).split())
+
+
 @app.command("publish")
 def publish(
     run: Annotated[
@@ -490,7 +495,9 @@ def publish(
     run (cache, flood-stage map, hectares), and an --out directory that is
     not a previous publish; an output failing its own schema or the raster
     guard is a bug (exit 1). The output directory is replaced atomically; on
-    any failure it is untouched.
+    any failure the previous contract is never lost, though publish's own
+    leftovers (stale staging, restorable or superseded previous dirs) may be
+    cleaned up first.
     """
     # WHY explicit: the newest complete run is not always the one meant (a
     #   later test or reference-only run wins by id), so the caller names it.
@@ -503,10 +510,11 @@ def publish(
     try:
         out_dir = publish_run(run_id=run, out_dir=out)
     except PublishRefused as exc:
-        typer.echo(f"refused: {exc}", err=True)
+        # WHY collapsed: a refusal may embed a multi-line exception; stderr gets one line.
+        typer.echo(f"refused: {_one_line(exc)}", err=True)
         raise typer.Exit(2)
     except ContractInvalid as exc:
-        typer.echo(f"error: {exc}", err=True)
+        typer.echo(f"error: {_one_line(exc)}", err=True)
         raise typer.Exit(1)
     typer.echo(f"published: {out_dir / 'latest.json'}")
 

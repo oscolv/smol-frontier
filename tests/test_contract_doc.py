@@ -4,7 +4,8 @@ Walks the three contract schemas recursively (properties, $defs, if/then/
 else, items, anyOf...) and checks each property name appears in the
 contract document as inline code — bare (`cover_band`) or as the last
 segment of a dotted path (`map.bounds`, `files[].sha256`) — so the docs
-cannot drift from the schemas.
+cannot drift from the schemas. Every enum value of every schema must also
+appear in the document as inline code.
 """
 
 import json
@@ -42,6 +43,26 @@ def _property_names(node: object) -> set[str]:
     return names
 
 
+def _enum_values(node: object) -> set[str]:
+    """Every string in every ``enum`` list anywhere in the schema."""
+    values: set[str] = set()
+    if isinstance(node, dict):
+        enum = node.get("enum")
+        if isinstance(enum, list):
+            values.update(v for v in enum if isinstance(v, str))
+        for value in node.values():
+            values |= _enum_values(value)
+    elif isinstance(node, list):
+        for value in node:
+            values |= _enum_values(value)
+    return values
+
+
+def _enum_documented(value: str, text: str) -> bool:
+    """True when ``value`` appears as inline code (alone or in a list)."""
+    return re.search(rf"`{re.escape(value)}`", text) is not None
+
+
 def _documented(prop: str, text: str) -> bool:
     """True when ``prop`` appears as inline code, bare or as a path's tail."""
     return re.search(rf"`(?:[A-Za-z0-9_\[\]]+\.)*{re.escape(prop)}`", text) is not None
@@ -68,3 +89,24 @@ def test_contract_doc_lists_every_schema_property(name: str) -> None:
         prop for prop in _property_names(_schema(name)) if not _documented(prop, text)
     )
     assert not missing, f"{name}.schema.json properties missing from docs: {missing}"
+
+
+def test_enum_walk_finds_nested_values() -> None:
+    assert {"GOOD", "DOUBTFUL", "POOR"} <= _enum_values(_schema("latest"))
+    assert {"GREEN", "EXPOSED_BED"} <= _enum_values(_schema("series"))
+
+
+def test_enum_documented_requires_inline_code() -> None:
+    assert _enum_documented("GOOD", "enum `GOOD`, `DOUBTFUL`")
+    assert not _enum_documented("RED", "RED without backticks")
+
+
+@pytest.mark.parametrize("name", SCHEMAS)
+def test_contract_doc_lists_every_schema_enum_value(name: str) -> None:
+    text = CONTRACT_DOC.read_text(encoding="utf-8")
+    missing = sorted(
+        value
+        for value in _enum_values(_schema(name))
+        if not _enum_documented(value, text)
+    )
+    assert not missing, f"{name}.schema.json enum values missing from docs: {missing}"

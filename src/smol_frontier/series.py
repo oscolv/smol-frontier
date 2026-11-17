@@ -44,7 +44,7 @@ from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
 from smol_frontier.hydro.levels import last_day_with_level
-from smol_frontier.ingest import _cache_path
+from smol_frontier.ingest import cache_path
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import (
     EARTH_SEARCH,
@@ -73,6 +73,7 @@ __all__ = [
     "load_records",
     "new_run_id",
     "process_scene",
+    "record_sort_key",
     "utc_now",
     "write_series_csv",
 ]
@@ -311,7 +312,7 @@ def cache_sha256(item_id: str) -> str | None:
     """sha256 of the cached scene file, or None when not cached."""
     if not item_id:
         return None
-    return sha256_file(_cache_path(paths.cache_dir(), item_id))
+    return sha256_file(cache_path(paths.cache_dir(), item_id))
 
 
 def list_reference_targets() -> list[SeriesTarget]:
@@ -489,13 +490,24 @@ def _write_scene_json(scenes_dir: Path, record: dict[str, object]) -> Path:
     return path
 
 
+def record_sort_key(record: dict[str, object]) -> tuple[str, str]:
+    """The one order of scene records: (date, requested item id).
+
+    WHY: the requested id is the scene's identity in the run (it names the
+    scene JSON); the used id can differ after a fallback and would order two
+    same-date scenes differently. Loading and publishing share this key so
+    latest.json and the last series.json entry describe the same scene.
+    """
+    return (str(record["date"]), str(record["item_id_requested"]))
+
+
 def load_records(scenes_dir: Path) -> list[dict[str, object]]:
     """Load every scene JSON, sorted by (date, item id)."""
     records = [
         json.loads(path.read_text(encoding="utf-8"))
         for path in scenes_dir.glob("*.json")
     ]
-    records.sort(key=lambda rec: (str(rec["date"]), str(rec["item_id_requested"])))
+    records.sort(key=record_sort_key)
     return records
 
 

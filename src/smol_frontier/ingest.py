@@ -39,7 +39,7 @@ from smol_frontier.sources.stac import SceneMeta
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BAND_ORDER", "IngestedScene", "ingest_scene"]
+__all__ = ["BAND_ORDER", "IngestedScene", "cache_path", "ingest_scene"]
 
 BAND_ORDER = ("B02", "B03", "B04", "B05", "B08", "B8A", "B11", "SCL")
 BANDS_20M = frozenset({"B05", "B8A", "B11", "SCL"})
@@ -152,7 +152,8 @@ def _check_product(
     )
 
 
-def _cache_path(cache_dir: Path, scene_id: str) -> Path:
+def cache_path(cache_dir: Path, scene_id: str) -> Path:
+    """The cache file of a scene: ``<cache_dir>/<scene id, "/" -> "_">.tif``."""
     return cache_dir / f"{scene_id.replace('/', '_')}.tif"
 
 
@@ -243,7 +244,7 @@ def ingest_scene(
     cache_dir = paths.cache_dir() if cache_dir is None else Path(cache_dir)
     if aoi_geom is None:
         aoi_geom = utm_geometry()
-    path = _cache_path(cache_dir, scene.id)
+    path = cache_path(cache_dir, scene.id)
     if path.exists():
         try:
             scene, bands, transform, crs = _read_cache(path)

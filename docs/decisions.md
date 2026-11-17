@@ -149,9 +149,11 @@ enforced in this repo. Anything not implemented yet says **planned**.
   constants it needs keeps one source for every number; versioned schemas
   make upgrades deliberate; the raster guard and the allowlist make leaking
   source imagery impossible by construction.
-- **Where in this repo:** `src/smol_frontier/publish.py` (`publish_run()`,
+- **Where in this repo:** `src/smol_frontier/publish/` (`publish_run()`,
   `SCHEMA_VERSION`, `ALLOWED_FILES`), `src/smol_frontier/schemas/`,
-  `classify/geotiff.py` (`write_published_geotiff()` and `write_display_png()`, the uint8 0–5 guard),
+  `classify/geotiff.py` (`write_published_geotiff()` and `guard_published()`,
+  the uint8 0–5 guard), `classify/display.py` (`write_display_png()`, which
+  passes the same guard),
   `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
   `docs/contract.md`, `tests/test_publish.py`,
   `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.
@@ -172,3 +174,23 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `series.py` (`CatalogUnavailable`, `list_extend_targets()`), `cli.py`
   (exit 2, also for `classify` and `fetch`), `docs/method.md` (exit-code
   list), `tests/test_series.py`, `tests/test_stac.py`, `tests/test_ingest.py`.
+
+## 15. Publisher as a package; `schema_version` and `removed_ha` deferred
+
+- **Rule:** the publisher is the package `src/smol_frontier/publish/`
+  (`errors`, `select`, `documents`, `map`, `writer`), one responsibility
+  per module under rule 3, and `smol_frontier.publish` keeps re-exporting
+  its public names. The `schema_version` pattern `^1\.[0-9]+\.[0-9]+$`
+  also accepts a trailing newline; the schema is left as is, smolf always
+  writes the constant `1.0.0`, and consumers compare the exact string.
+  Nulling `removed_ha` when `bed_applied` is false is deferred as well.
+  Both changes wait for the next major contract version (issue #38).
+- **Why:** one module had grown to hold run selection, document building,
+  map rendering and the directory swap, which made each hard to test and
+  to change. Changing a schema is a contract change: fixing the pattern
+  or nulling a field that 1.0.0 consumers may read would break files
+  that validate today, so both ride with the next major version instead
+  of a silent edit.
+- **Where in this repo:** `src/smol_frontier/publish/`,
+  `src/smol_frontier/schemas/` (unchanged), `docs/contract.md`
+  ("Versioning"), `tests/test_publish.py`, `tests/test_contract_doc.py`.

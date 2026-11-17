@@ -18,16 +18,19 @@ miss would otherwise trigger a network re-ingest. No network.
 import hashlib
 import json
 import shutil
+import warnings
 from pathlib import Path
 
 import numpy as np
 import pytest
 import rasterio
+from rasterio.warp import transform_bounds
 
-from smol_frontier import paths, publish
+from smol_frontier import aoi, paths, publish
+from smol_frontier.classify.display import DISPLAY_CRS
 from smol_frontier.config import settings
 from smol_frontier.hydro import flood_map
-from smol_frontier.ingest import _cache_path
+from smol_frontier.ingest import cache_path
 
 FIXTURES = Path(__file__).parent / "fixtures" / "publish_regression"
 SCENE_2026_10_12 = "S2B_14QMH_20261012_0_L2A"
@@ -45,12 +48,20 @@ RUN_INPUTS = {
     ),
 }
 
+# WHY: the display PNG covers the scene grid, not the AOI polygon, so it
+#   overshoots the AOI bbox: the UTM envelope of the geographic bbox (grid
+#   convergence), the 10 m snapping of the ingest window and the EPSG:3857
+#   envelope of the UTM grid add 2-3 display pixels per side today.
+# HOW: measured on the 2026-10-12 map (18.9-33.7 m against a 10.69 m display
+#   pixel); 4 px leaves one pixel of headroom without hiding a real shift.
+AOI_BBOX_TOLERANCE_PX = 4
+
 
 def _publish_fixture(tmp_path: Path, item_id: str) -> tuple[dict, Path]:
     """Publish a one-scene run built from the committed record; skip if uncached."""
     source = FIXTURES / f"{item_id}.json"
     record = json.loads(source.read_text(encoding="utf-8"))
-    cached = _cache_path(paths.cache_dir(), item_id)
+    cached = cache_path(paths.cache_dir(), item_id)
     if not cached.exists():
         pytest.skip(f"scene {item_id} not in data/cache (CI): run `smolf fetch`")
     digest = hashlib.sha256(cached.read_bytes()).hexdigest()
@@ -118,3 +129,29 @@ def test_publish_regression_2024_06_09(tmp_path: Path) -> None:
     assert latest["pct_reservoir_corrected"] == 1.09
     assert latest["cover_band"] == "GREEN"
     assert _class5_ha(out_dir, latest) == 418.51
+
+
+def test_publish_regression_png_bounds_enclose_aoi_bbox(tmp_path: Path) -> None:
+    """The PNG extent contains the AOI bbox and overshoots it by <= 4 px."""
+    latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
+    (south, west), (north, east) = latest["map"]["bounds"]
+    left, bottom, right, top = transform_bounds(
+        "EPSG:4326", DISPLAY_CRS, west, south, east, north
+    )
+    aoi_left, aoi_bottom, aoi_right, aoi_top = transform_bounds(
+        "EPSG:4326", DISPLAY_CRS, *aoi.wgs84_bbox()
+    )
+    # the PNG is deliberately not georeferenced (bounds live in latest.json)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(out_dir / latest["map"]["png"]) as src:
+            height, width = src.shape
+    pixel_x = (right - left) / width
+    pixel_y = (top - bottom) / height
+    excess_px = {
+        "left": (aoi_left - left) / pixel_x,
+        "bottom": (aoi_bottom - bottom) / pixel_y,
+        "right": (right - aoi_right) / pixel_x,
+        "top": (top - aoi_top) / pixel_y,
+    }
+    assert all(0 <= px <= AOI_BBOX_TOLERANCE_PX for px in excess_px.values()), excess_px

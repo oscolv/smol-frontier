@@ -113,8 +113,9 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 When `bed_applied` is false, every `*_corrected` field and `cover_band`
 are `null` and `bed_reason` says why; smolf never substitutes the raw
 figure. When it is true, they are all non-null. Both schemas define every
-non-POOR scene identically (`tests/test_publish.py` keeps them in step). A POOR entry in `series.json` carries `date`, `item_id`,
-`quality_light` (POOR) and `valid_frac`, and `null` for every other field.
+non-POOR scene identically (`tests/test_publish.py` keeps them in step). A
+POOR entry in `series.json` carries `date`, `item_id`, `quality_light`
+(POOR) and `valid_frac`, and `null` for every other field.
 
 ## `latest.json`
 
@@ -123,7 +124,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `1.x.y` | — | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
+| `schema_version` | string `1.x.y` | — | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y` (see "Versioning" for the trailing-newline caveat). |
 | `smolf_version` | string | — | no | smolf version that wrote the file (`0.2.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
@@ -154,7 +155,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
+| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y` (see "Versioning" for the trailing-newline caveat). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -169,7 +170,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y`. |
+| `schema_version` | string `1.x.y` | no | Contract version; smolf writes exactly `1.0.0`, the schema accepts any `1.x.y` (see "Versioning" for the trailing-newline caveat). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -216,9 +217,21 @@ not applied, no pixel is class 5.
   any transfer.
 - Before replacing the output directory, smolf validates every JSON file
   against its schema; the whole contract is assembled in a sibling
-  temporary directory and swapped in by rename. A reader never sees a
-  half-written contract, and on any failure the previous directory is left
-  untouched.
+  temporary directory (`.<name>.staging-*`) and swapped in by rename, the
+  old directory moving to `.<name>.previous-*` for the instant of the
+  swap. A reader never sees a half-written contract, and on any failure
+  the previous contract is never lost; only publish's own leftovers (stale
+  staging, restorable or superseded previous directories) may be cleaned
+  up first.
+- `--out` is resolved to its real path first, so publishing through a
+  symlinked `--out` replaces the target and keeps the link in place.
+- At the start of each publish smolf cleans up its own debris next to
+  `--out`: stale `.<name>.staging-*` directories are removed when they
+  hold only allowlisted files (anything else is left alone); a lone
+  `.<name>.previous-*` (a crash between the swap's two renames) is
+  renamed back when `--out` is missing, while several are refused; once
+  `--out` holds a valid contract, old `.<name>.previous-*` directories are
+  removed when each is itself a valid contract.
 
 ## Refusals and exit codes
 
@@ -232,7 +245,15 @@ not applied, no pixel is class 5.
 
 - the output directory exists, is not empty, and is not a previous
   publish (no `publish.json`, or any file outside the allowlist): smolf
-  only ever replaces its own contract, never unrelated data;
+  only ever replaces its own contract, never unrelated data. The check
+  needs `publish.json` at the top level before it looks further, so a
+  foreign directory is refused without walking its tree; `--out` that is
+  a file is refused too;
+- a symlink anywhere in the `--out` path is broken (its target is
+  missing), unless it is the final component and a lone
+  `.<target>.previous-*` can be restored, or several `.<name>.previous-*`
+  directories remain with
+  `--out` missing (restore one by hand);
 - the run is unknown, or there is no complete run (`--latest` selects the
   newest run, by run id, whose manifest is readable and whose status is
   complete; a run with a corrupt manifest is skipped);
@@ -244,8 +265,11 @@ not applied, no pixel is class 5.
   still match), or the re-ingest fails;
 - the re-classified scene's hectares per class differ from the run row at
   the hundredth;
-- the flood-stage map or the stage–area curve differs (sha256) from the
-  one the run's manifest recorded;
+- the exposed-bed correction was applied to the latest scene and the
+  flood-stage map or the stage–area curve differs (sha256) from the one
+  the run's manifest recorded. These two hashes are checked only in that
+  case: without the correction no class 5 exists, and neither input
+  touches the published figures;
 - the exposed-bed margin recomputed from the row's `level_m` with the
   committed stage–area curve does not round to the row's margin, or the
   class-5 area differs from `removed_ha` at the hundredth.
@@ -258,6 +282,11 @@ not applied, no pixel is class 5.
   schema accepts any version with the same major (pattern
   `^1\.[0-9]+\.[0-9]+$`), so files from a later minor release still
   validate against an older tag's schemas.
+- The `schema_version` pattern `^1\.[0-9]+\.[0-9]+$` also matches a
+  value with a trailing newline (`$` matches before a final `\n`). smolf
+  always writes the constant, and consumers must compare the exact
+  string. The schema fix is deferred to the next major contract version
+  (see `docs/decisions.md` entry 15 and issue #38).
 - Every contract change bumps the smolf version and is released under a
   git tag. The contract starts at `schema_version` 1.0.0, first released
   as smolf `v0.2.0`.

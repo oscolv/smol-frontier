@@ -20,7 +20,7 @@ from smol_frontier.cli import app
 from smol_frontier.ingest import (
     BAND_ORDER,
     IngestedScene,
-    _cache_path,
+    cache_path,
     ingest_scene,
 )
 from smol_frontier.sources.radiometry import AnomalousProduct, dn_to_reflectance
@@ -210,7 +210,7 @@ def _fake_ingested() -> IngestedScene:
 
 def test_ingest_anomalous_cached_product_raises() -> None:
     """Cache hit on the 8-bit 2026-10-27 MPC product raises (fixture kept)."""
-    if not _cache_path(paths.cache_dir(), SCENE_ANOMALOUS_2026_10_27).exists():
+    if not cache_path(paths.cache_dir(), SCENE_ANOMALOUS_2026_10_27).exists():
         pytest.skip("anomalous scene not in data/cache (CI)")
     meta = SceneMeta(
         id=SCENE_ANOMALOUS_2026_10_27,

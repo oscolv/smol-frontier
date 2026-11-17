@@ -390,7 +390,7 @@ def test_publish_latest_golden_values(
         # 49.996 publishes as 50.00, so the band is RED, not YELLOW.
         "pct_reservoir_corrected": 50.0,
         "cover_band": "RED",
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -460,7 +460,8 @@ def test_publish_latest_bed_not_applied_nulls(
         level_m=None,
         margin_m=None,
         expected_bed_ha=None,
-        removed_ha=None,
+        # a stale number in the row: the publisher must still null it
+        removed_ha=0.0,
         dense_corrected_ha=None,
         interface_corrected_ha=None,
         hyacinth_corrected_ha=None,
@@ -474,6 +475,7 @@ def test_publish_latest_bed_not_applied_nulls(
     assert latest["bed_applied"] is False
     assert latest["bed_reason"] == reason
     for key in (
+        "removed_ha",
         "dense_corrected_ha",
         "interface_corrected_ha",
         "hyacinth_corrected_ha",
@@ -844,6 +846,34 @@ def test_publish_latest_schema_rejects_corrected_figure_without_bed(
         publish.validate("latest", doc)
 
 
+@pytest.mark.parametrize("name", ["latest", "series"])
+def test_publish_schema_removed_ha_follows_bed_applied(
+    series_root: Path, tmp_path: Path, name: str
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    doc = json.loads((out / f"{name}.json").read_text(encoding="utf-8"))
+    scenes = [doc] if name == "latest" else doc["scenes"]
+    scene = next(s for s in scenes if s["bed_applied"] is True)
+    scene["removed_ha"] = None
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate(name, doc)
+    scene["bed_applied"] = False
+    for key in (
+        "dense_corrected_ha",
+        "interface_corrected_ha",
+        "hyacinth_corrected_ha",
+        "pct_reservoir_corrected",
+        "cover_band",
+    ):
+        scene[key] = None
+    publish.validate(name, doc)
+    scene["removed_ha"] = 0.0
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate(name, doc)
+
+
 def test_publish_latest_output_dir_is_world_readable(
     series_root: Path, tmp_path: Path
 ) -> None:
@@ -883,7 +913,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "1.0.0"
+    assert doc["schema_version"] == "2.0.0"
     assert doc["smolf_version"] == __version__
     assert [s["quality_light"] for s in scenes] == [
         "GOOD",
@@ -935,6 +965,7 @@ def test_publish_series_bed_not_applied_nulls(
 ) -> None:
     entry = _series_run(series_root, tmp_path)["scenes"][4]
     assert entry["bed_applied"] is False
+    assert entry["removed_ha"] is None
     assert entry["hyacinth_corrected_ha"] is None
     assert entry["cover_band"] is None
     assert entry["hyacinth_raw_ha"] == 631.11
@@ -1513,9 +1544,9 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "1.0.0",
+        "schema_version": "2.0.0",
         "series_sha256": "cd" * 32,
-        "smolf_version": "0.2.0",
+        "smolf_version": "0.3.0",
     }
 
 
@@ -1604,7 +1635,8 @@ def _drop_sha(doc: dict) -> None:
         lambda d: d.update(files=[]),
         lambda d: d.update(generated_utc="2026-11-16 10:00:00"),
         lambda d: d.update(generated_utc="2026-11-16T10:00:00+00:00"),
-        lambda d: d.update(schema_version="2.0.0"),
+        lambda d: d.update(schema_version="1.0.0"),
+        lambda d: d.update(schema_version="2.0.0\n"),
         lambda d: d.update(series_sha256="short"),
         lambda d: d.pop("run_id"),
         lambda d: d.pop("smolf_version"),
@@ -2068,6 +2100,7 @@ def test_publish_schema_version_pattern_major_matches_code(name: str) -> None:
     assert rule["type"] == "string"
     major = publish.SCHEMA_VERSION.split(".")[0]
     assert rule["pattern"] == rf"^{major}\.[0-9]+\.[0-9]+$"
+    assert rule["not"] == {"pattern": r"\n"}
 
 
 @pytest.mark.parametrize("name", ["latest", "series", "publish"])
@@ -2078,9 +2111,19 @@ def test_publish_schema_accepts_later_minor_rejects_other_major(
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
     doc = json.loads((out / f"{name}.json").read_text(encoding="utf-8"))
-    for later in ("1.0.1", "1.7.0", "1.12.3"):
+    for later in ("2.0.1", "2.7.0", "2.12.3"):
         publish.validate(name, {**doc, "schema_version": later})
-    for other in ("2.0.0", "0.9.0", "1.0", "v1.0.0", "1.0.0-rc1", 1):
+    for other in (
+        "1.0.0",
+        "3.0.0",
+        "2.0",
+        "v2.0.0",
+        "2.0.0-rc1",
+        "2.0.0\n",
+        "2.0.0\n\n",
+        " 2.0.0",
+        1,
+    ):
         with pytest.raises(publish.ContractInvalid):
             publish.validate(name, {**doc, "schema_version": other})
 

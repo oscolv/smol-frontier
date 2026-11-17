@@ -16,12 +16,16 @@ from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _requi
 from smol_frontier.publish.map import map_path, png_path
 
 # WHY: contract version written into every document. Each schema accepts any
-#   version with this major (pattern ^1\.[0-9]+\.[0-9]+$), so a consumer
-#   validating with the schemas of the tag it pinned keeps accepting later
-#   minor releases. Bump the major on any breaking change (rename/remove a
-#   field, change a type, unit or meaning, add or remove an enum value), the
-#   minor on additive ones (a new optional field).
-SCHEMA_VERSION = "1.0.0"
+#   version with this major (pattern ^2\.[0-9]+\.[0-9]+$ plus "not" a
+#   pattern \n: a bare $ lets a trailing newline through in Python's re,
+#   and a lookahead would not compile in RE2-based validators), so a
+#   consumer validating with the schemas of the tag it pinned keeps
+#   accepting later minor releases. Bump the major on any breaking change
+#   (rename/remove a field, change a type, unit or meaning, add or remove an
+#   enum value), the minor on additive ones (a new optional field).
+#   2.0.0: removed_ha is null whenever bed_applied is false, and the
+#   schema_version pattern rejects a trailing newline (issue #38).
+SCHEMA_VERSION = "2.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
@@ -59,6 +63,7 @@ _SCENE_FIELDS = (
 # WHY: figures that exist only when the exposed-bed correction was applied;
 #   otherwise they are published as null and never replaced by raw figures.
 _CORRECTED_FIELDS = (
+    "removed_ha",
     "dense_corrected_ha",
     "interface_corrected_ha",
     "hyacinth_corrected_ha",

@@ -14,7 +14,10 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "pattern": "^1\\.[0-9]+\\.[0-9]+$"
+      "pattern": "^2\\.[0-9]+\\.[0-9]+$",
+      "not": {
+        "pattern": "\\n"
+      }
     },
     "smolf_version": {
       "type": "string",
@@ -363,6 +366,9 @@
             },
             "then": {
               "properties": {
+                "removed_ha": {
+                  "type": "null"
+                },
                 "dense_corrected_ha": {
                   "type": "null"
                 },
@@ -382,6 +388,9 @@
             },
             "else": {
               "properties": {
+                "removed_ha": {
+                  "type": "number"
+                },
                 "dense_corrected_ha": {
                   "type": "number"
                 },

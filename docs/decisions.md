@@ -194,3 +194,22 @@ enforced in this repo. Anything not implemented yet says **planned**.
 - **Where in this repo:** `src/smol_frontier/publish/`,
   `src/smol_frontier/schemas/` (unchanged), `docs/contract.md`
   ("Versioning"), `tests/test_publish.py`, `tests/test_contract_doc.py`.
+
+## 16. Contract 2.0.0: `removed_ha` follows `bed_applied`
+
+- **Rule:** `schema_version` 2.0.0 (smolf 0.3.0) publishes `removed_ha` as
+  `null` whenever `bed_applied` is false, like every corrected figure, and
+  both per-scene schemas require it (`null` when false, a number when
+  true). The `schema_version` rule is the pattern `^2\.[0-9]+\.[0-9]+$`
+  plus `"not": {"pattern": "\n"}`, so a trailing newline no longer
+  validates; no lookahead, which RE2-based validators reject. Supersedes
+  the deferral in entry 15.
+- **Why:** a removed area only exists when the correction ran; a number
+  there without a correction invites a consumer to subtract it from the
+  raw figure. The run rows already carry `None` in that case, but 1.0.0
+  neither enforced it in the publisher nor in the schema. Both changes
+  reject files that validate under 1.x, so they ship together as one
+  major bump.
+- **Where in this repo:** `src/smol_frontier/publish/documents.py`
+  (`SCHEMA_VERSION`, `_CORRECTED_FIELDS`), `src/smol_frontier/schemas/`,
+  `docs/contract.md` ("Versioning"), `tests/test_publish.py`.

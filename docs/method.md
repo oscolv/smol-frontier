@@ -261,8 +261,8 @@ last `ok` scene plus run context, constants and the current SIH level),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "1.0.0"`, written exactly; each schema accepts any
-`1.x.y`, and only a new optional field is a minor change — see the
+(`SCHEMA_VERSION = "2.0.0"`, written exactly; each schema accepts any
+`2.x.y`, and only a new optional field is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded
 like `series.csv` (2 decimals; fractions 4); nothing is filtered.
@@ -305,7 +305,7 @@ valid contract, each only if it is itself a valid contract.
 
 Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`
 2026-10-12, `hyacinth_corrected_ha` 818.34, `pct_reservoir_corrected`
-64.86, GOOD, CLEAN, RED, `smolf_version` 0.2.0, `schema_version` 1.0.0.
+64.86, GOOD, CLEAN, RED, `smolf_version` 0.3.0, `schema_version` 2.0.0.
 The 2024-06-09 control (Planetary Computer copy) publishes raw 432.25 ha →
 corrected 13.74 ha, `removed_ha` 418.51, EXPOSED_BED, with 41 851 class-5
 pixels (418.51 ha).

@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+# Drive the real `smolf` CLI in an isolated verification run and keep evidence.
+#
+# A run is one directory outside the checkout:
+#   <run>/data/      SMOLF_DATA_DIR for this run (cache, outputs, hydro/ENDHD.csv)
+#   <run>/checkout/  optional read-only git worktree of the code under test
+#   <run>/evidence/  transcripts: <n>-<feature>.cmd/.out/.err/.rc (kept by cleanup)
+#   <run>/env        shell file with SMOLF_DATA_DIR and SMOLF (the binary used)
+#
+# Usage:
+#   smolf-verify new [--ref <commit>] [--shared-cache]   create a run, print its dir
+#   smolf-verify doctor <run> [--net]                   read-only health check
+#   smolf-verify run <run> <feature-id> -- <smolf args> run smolf, record evidence
+#   smolf-verify hectares <run> <geotiff>               per-class hectares of a classified map
+#   smolf-verify cleanup <run>                          remove checkout and data, keep evidence
+set -euo pipefail
+
+here=$(cd "$(dirname "$0")" && pwd -P)
+repo=$(git -C "$here" rev-parse --show-toplevel)
+home_dir=${SMOLF_VERIFY_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/smolf-verify}
+
+die() { echo "smolf-verify: $*" >&2; exit 2; }
+
+load_run() {
+  run=$(cd "${1:?run dir required}" 2>/dev/null && pwd -P) || die "no such run: $1"
+  [ -f "$run/env" ] || die "not a run dir (no env file): $run"
+  # shellcheck disable=SC1091
+  . "$run/env"
+}
+
+cmd_new() {
+  local ref="" shared=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --ref) ref=${2:?--ref needs a commit}; shift 2 ;;
+      --shared-cache) shared=1; shift ;;
+      *) die "new: unknown option $1" ;;
+    esac
+  done
+  local run_id; run_id=$(date -u +%Y%m%dT%H%M%SZ)-$$
+  local run="$home_dir/$run_id"
+  mkdir -p "$run/data" "$run/evidence"
+  local smolf="$repo/.venv/bin/smolf" code="$repo"
+  if [ -n "$ref" ]; then
+    git -C "$repo" worktree add -q --detach "$run/checkout" "$ref"
+    (cd "$run/checkout" && uv sync -q --frozen)
+    chmod -R a-w "$run/checkout"
+    smolf="$run/checkout/.venv/bin/smolf"
+    code="$run/checkout"
+  fi
+  [ -x "$smolf" ] || die "no smolf binary at $smolf (run \`uv sync\` in $repo)"
+  if [ "$shared" = 1 ]; then
+    # Reuse the checkout's scene cache so a series build does not re-download
+    # ~470 scenes (about an hour cold). Never run two builds on it at once.
+    ln -s "$repo/data/cache" "$run/data/cache"
+  fi
+  {
+    echo "SMOLF_DATA_DIR='$run/data'"
+    echo "SMOLF='$smolf'"
+    echo "SMOLF_CODE='$code'"
+    echo "export SMOLF_DATA_DIR"
+  } > "$run/env"
+  echo "$run"
+}
+
+cmd_doctor() {
+  load_run "$1"; shift
+  local net=0 bad=0
+  [ "${1:-}" = "--net" ] && net=1
+  echo "run:        $run"
+  echo "code:       $SMOLF_CODE ($(git -C "$SMOLF_CODE" rev-parse --short HEAD))"
+  echo "data dir:   $SMOLF_DATA_DIR"
+  if out=$("$SMOLF" version 2>&1); then
+    echo "smolf:      $out"
+  else
+    echo "smolf:      FAIL $out"; bad=1
+  fi
+  local dirty; dirty=$(git -C "$SMOLF_CODE" status --porcelain)
+  if [ -n "$dirty" ]; then
+    echo "git:        DIRTY (series runs record dirty: true and publish refuses)"
+    echo "$dirty" | sed 's/^/            /'
+  else
+    echo "git:        clean"
+  fi
+  if [ -w "$SMOLF_CODE/src" ]; then echo "checkout:   writable"; else echo "checkout:   read-only"; fi
+  local cache="$SMOLF_DATA_DIR/cache"
+  if [ -d "$cache" ]; then
+    echo "cache:      $(find -L "$cache" -maxdepth 1 -name '*.tif' | wc -l) scenes ($( [ -L "$cache" ] && echo shared || echo own ))"
+  else
+    echo "cache:      empty (first ingest downloads every scene)"
+  fi
+  if [ "$net" = 1 ]; then
+    for url in https://earth-search.aws.element84.com/v1 \
+               https://planetarycomputer.microsoft.com/api/stac/v1 \
+               https://sih.conagua.gob.mx/basedatos/Presas/ENDHD.csv; do
+      code=$(curl -s -o /dev/null -m 20 -L -w '%{http_code}' "$url" || echo 000)
+      echo "net:        $code $url"
+    done
+  fi
+  echo "evidence:   $(find "$run/evidence" -type f | wc -l) files in $run/evidence"
+  return $bad
+}
+
+cmd_run() {
+  load_run "$1"; shift
+  local feature=${1:?feature id required}; shift
+  [ "${1:-}" = "--" ] && shift
+  local n; n=$(printf '%02d' $(( $(find "$run/evidence" -name '*.cmd' | wc -l) + 1 )))
+  local base="$run/evidence/$n-$feature"
+  printf 'cd /tmp && SMOLF_DATA_DIR=%q %q' "$SMOLF_DATA_DIR" "$SMOLF" > "$base.cmd"
+  printf ' %q' "$@" >> "$base.cmd"; echo >> "$base.cmd"
+  local rc=0
+  (cd /tmp && "$SMOLF" "$@") > "$base.out" 2> "$base.err" || rc=$?
+  echo "$rc" > "$base.rc"
+  cat "$base.out"
+  echo "[smolf-verify] exit=$rc evidence=$base.{cmd,out,err,rc}" >&2
+  return 0
+}
+
+cmd_hectares() {
+  load_run "$1"; shift
+  local tif=${1:?classified GeoTIFF required}
+  local py; py=$(dirname "$SMOLF")/python
+  (cd /tmp && "$py" - "$tif" <<'PY'
+import sys
+
+import rasterio
+
+from smol_frontier.config import settings
+
+with rasterio.open(sys.argv[1]) as src:
+    data = src.read(1)
+    pixel_ha = abs(src.transform.a * src.transform.e) / 10_000
+for name in ("CLASS_WATER", "CLASS_DENSE_HYACINTH", "CLASS_INTERFACE", "CLASS_BARE_SOIL"):
+    code = getattr(settings, name)
+    print(f"{name.removeprefix('CLASS_').lower()}_ha: {(data == code).sum() * pixel_ha:.2f}")
+PY
+  )
+}
+
+cmd_cleanup() {
+  load_run "$1"
+  if [ -d "$run/checkout" ]; then
+    chmod -R u+w "$run/checkout"
+    git -C "$repo" worktree remove --force "$run/checkout"
+    git -C "$repo" worktree prune
+  fi
+  # rm -rf does not follow the shared-cache symlink; only the link goes.
+  rm -rf "$run/data"
+  echo "kept evidence: $run/evidence ($(find "$run/evidence" -type f | wc -l) files)"
+}
+
+case ${1:-} in
+  new) shift; cmd_new "$@" ;;
+  doctor) shift; cmd_doctor "$@" ;;
+  run) shift; cmd_run "$@" ;;
+  hectares) shift; cmd_hectares "$@" ;;
+  cleanup) shift; cmd_cleanup "$@" ;;
+  *) sed -n '2,16p' "$0"; exit 2 ;;
+esac

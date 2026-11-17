@@ -19,7 +19,7 @@ RUN=$($V new --ref HEAD --shared-cache)  # prints the run dir
 ```
 
 - `--ref <commit>` checks the commit out into `$RUN/checkout` as a git worktree, runs `uv sync --frozen` there, and makes it read-only (`chmod -R a-w`). That is the production shape: code read-only, all writes under `SMOLF_DATA_DIR`. Without `--ref` the run uses the repo's own `.venv/bin/smolf` and checkout (writable). Commit first: `--ref` checks out committed code only.
-- `--shared-cache` symlinks `$RUN/data/cache` to the repo's `data/cache` (about 480 scenes, ~1.4 MB each). Without it the first `series build` downloads every scene (about an hour). Never run two builds against the same shared cache at once: cache files are written in place.
+- `--shared-cache` symlinks `$RUN/data/cache` to the scene cache (about 480 scenes, ~1.4 MB each). It uses the current checkout's `data/cache`, or the main checkout's when you run from a git worktree without one. When neither exists, `new` exits 2 and creates nothing. Without it the first `series build` downloads every scene (about an hour). Never run two builds against the same shared cache at once: cache files are written in place.
 - Ready means `doctor` passes (below). No seed step: an empty data dir is valid. Readers fall back to the committed level record until `levels update` writes `$RUN/data/hydro/ENDHD.csv`.
 
 ## Doctor
@@ -32,7 +32,9 @@ Read-only. It needs `smolf: <version>` (the CLI validates `SMOLF_DATA_DIR` on ev
 
 - `git: DIRTY` lists every change, but a series run records `dirty: true` only for changes outside the hashed hydrology inputs (`data/hydro/ENDHD.csv`, the stage–area curve, the flood-stage map, their sidecars). A run with `dirty: true` is refused by `publish` with exit 2. Commit or use `--ref`.
 - `smolf: FAIL ... must be an absolute path outside the checkout` (relative value) or `... must be outside the checkout (<path>)` (value inside it) means a bad `SMOLF_DATA_DIR`.
-- `net: 000` means that feature's real path cannot be verified now. Report it as unverified. Do not swap in a mock.
+- `cache: BROKEN link -> <target>` means the shared-cache link points at a missing directory, and doctor fails. Run `cleanup`, then `new --shared-cache` again.
+- `net: 200 <url>` is healthy. `net: <code> (curl exit <rc>) <url>` means curl gave up after the last HTTP code it saw: 28 = time limit, 6 = could not resolve host, 7 = could not connect, 47 = too many redirects (a redirect loop). The probe sends cookies and smolf's own User-Agent, like `levels update`, because the SIH redirect-loops clients without them. `000` means no HTTP response at all.
+- `net: 000 ...` or any `(curl exit ...)` line means that feature's real path cannot be verified now. Report it as unverified. Do not swap in a mock.
 
 ## Drive
 

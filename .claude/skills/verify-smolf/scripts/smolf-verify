@@ -52,6 +52,8 @@ cmd_new() {
       cache_src="$repo/data/cache"
     elif [ -d "$main_root/data/cache" ]; then
       cache_src="$main_root/data/cache"
+    elif [ "$main_root" = "$repo" ]; then
+      die "new: --shared-cache found no cache dir at $repo/data/cache"
     else
       die "new: --shared-cache found no cache dir: tried $repo/data/cache and $main_root/data/cache"
     fi

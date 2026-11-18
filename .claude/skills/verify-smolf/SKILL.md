@@ -47,7 +47,7 @@ $V hectares "$RUN" <classified.tif>           # per-class hectares of a written 
 
 Two `run` options inject into smolf's Python for that one command only, through a `sitecustomize.py` written to `$RUN/inject/`:
 
-- `--block-host <host>` (repeatable) makes DNS fail for that host at `socket.getaddrinfo`, which is where a real outage surfaces. Use `earth-search.aws.element84.com` to simulate Earth Search down. It covers Python HTTP (STAC API, Planetary Computer signing, the SIH), not GDAL/curl reads of scene files. Proof that the block caused the failure: `.err` contains `blocked by smolf-verify`.
+- `--block-host <host>` (repeatable) makes DNS fail for that host at `socket.getaddrinfo`, which is where a real outage surfaces. Use `earth-search.aws.element84.com` to simulate Earth Search down. It covers Python HTTP (STAC API, Planetary Computer signing, the SIH), not GDAL/curl reads of scene files. Proof that the block caused the failure: `.err` contains `blocked by smolf-verify`, except for publish, which cuts the reason at 300 characters (see publish.md).
 - `--log-level INFO` turns on smolf's own log, which the CLI never configures (by default only WARNING and above reach stderr). The feature recipes, with exact commands and expected values, are in [`features/`](features/README.md).
 
 ## Evidence

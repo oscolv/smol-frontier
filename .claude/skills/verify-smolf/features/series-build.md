@@ -34,4 +34,4 @@ Preconditions:
 - Exit 2 also covers `--workers 0` and `--extend` with `--resume` (argument checks) and an unreachable Earth Search on `--extend` (`error: Earth Search is unreachable … Retry later.`). Read the message, not just the code.
 - A dirty checkout doesn't fail the build. It records `code.dirty: true`, which `publish` later refuses.
 - `errors=` counts per-scene failures (network blips). The run still completes, so check that `errors=0` before calling it proof.
-- `skipped=` counts POOR-light scenes (valid fraction too low); they stay out of `series.csv`. A reference-only run (the Resume step) gives `skipped=0`. The `--extend` run adds 2 skipped newer scenes as of 2026-11-17 (`requested=471 ok=469 skipped=2`).
+- `skipped=` counts POOR-light scenes (valid fraction too low); they stay out of `series.csv`. A reference-only run (the Resume step) gives `skipped=0`. The `--extend` run adds 2 skipped newer scenes as of 2026-11-18 (`requested=471 ok=469 skipped=2`); `requested` grows as new scenes appear.

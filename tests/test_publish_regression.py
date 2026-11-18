@@ -108,9 +108,12 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["regime"] == "CLEAN"
     assert latest["cover_band"] == "RED"
     assert latest["display_status"] == "FULL"
+    assert latest["display_ha"] == {"total": 818, "dense": 350, "interface": 468}
     assert latest["bed_applied"] is True
     assert latest["removed_ha"] == 0.0
     assert latest["reservoir_area_ha"] == 1261.75
+    assert latest["constants"]["green_max_ha"] == 378.53
+    assert latest["constants"]["red_min_ha"] == 630.88
     assert latest["smolf_version"] == "0.5.0"
     assert latest["schema_version"] == "3.0.0"
     assert _class5_ha(out_dir, latest) == 0.0
@@ -130,6 +133,7 @@ def test_publish_regression_2024_06_09(tmp_path: Path) -> None:
     assert latest["pct_reservoir_corrected"] == 1.09
     assert latest["cover_band"] == "GREEN"
     assert latest["display_status"] == "FULL"
+    assert latest["display_ha"] == {"total": 14, "dense": 4, "interface": 10}
     assert _class5_ha(out_dir, latest) == 418.51
 
 

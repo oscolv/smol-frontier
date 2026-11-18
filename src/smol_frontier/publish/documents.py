@@ -14,7 +14,11 @@ from shapely.geometry.polygon import orient
 from smol_frontier import __version__, aoi, paths, series
 from smol_frontier.config import settings
 from smol_frontier.hydro import levels
-from smol_frontier.publish.aggregates import display_status
+from smol_frontier.publish.aggregates import (
+    display_ha,
+    display_status,
+    hectare_cutoff,
+)
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
 from smol_frontier.publish.map import map_path, png_path
 
@@ -30,7 +34,8 @@ from smol_frontier.publish.map import map_path, png_path
 #   schema_version pattern rejects a trailing newline (issue #38).
 #   2.1.0: latest.json gains the optional reservoir_outline (issue #42).
 #   3.0.0: every scene carries display_status, and reservoir_outline is
-#   required (issue #45, spec #44).
+#   required (issue #45, spec #44); every scene carries display_ha and
+#   constants gain green_max_ha / red_min_ha (issue #46).
 SCHEMA_VERSION = "3.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
@@ -198,6 +203,7 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
             entry[field] = None
         entry["valid_frac"] = _round(record["valid_frac"], _DECIMALS_FRACTION)
         entry["display_status"] = display_status(entry, settings.FRAC_PUBLISHABLE)
+        entry["display_ha"] = None
         return entry
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     entry = {
@@ -213,6 +219,7 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
             entry[field] = None
     entry["cover_band"] = _cover_band(entry["pct_reservoir_corrected"])
     entry["display_status"] = display_status(entry, settings.FRAC_PUBLISHABLE)
+    entry["display_ha"] = display_ha(entry)
     return entry
 
 
@@ -242,12 +249,15 @@ def latest_document(
     document["run_counts"] = {key: counts[key] for key in ("ok", "skipped", "errors")}
     document["run_id"] = run_id
     document["series_sha256"] = manifest["series_sha256"]
-    document["reservoir_area_ha"] = round(aoi.reservoir_area_ha(), _DECIMALS_DEFAULT)
+    area_ha = round(aoi.reservoir_area_ha(), _DECIMALS_DEFAULT)
+    document["reservoir_area_ha"] = area_ha
     document["reservoir_outline"] = reservoir_outline()
     document["constants"] = {
         "frac_publishable": settings.FRAC_PUBLISHABLE,
         "green_max_pct": settings.GREEN_MAX_PCT,
         "red_min_pct": settings.RED_MIN_PCT,
+        "green_max_ha": hectare_cutoff(area_ha, settings.GREEN_MAX_PCT),
+        "red_min_ha": hectare_cutoff(area_ha, settings.RED_MIN_PCT),
     }
     document["current_level"] = current_level(levels_path)
     # bounds come from the warped PNG, so publish_run fills them in

@@ -233,6 +233,24 @@ as 30.00 %, so its `cover_band` is YELLOW (and 630.87 ha publishes as
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
 | `scenes` | array of per-scene objects | no | Every `ok` and every POOR (skipped) scene of the run, sorted by date then item id, with the per-scene fields above. Error scenes are excluded (see `run_counts.errors` in `latest.json`). |
+| `monthly` | array of month objects | no | Median corrected hectares per calendar month, for the series chart (see below). Empty only when `scenes` is. |
+| `monthly[].month` | string `YYYY-MM` | no | Calendar month (UTC dates). |
+| `monthly[].median_ha` | number ≥ 0, ha | when `n_scenes` is 0 | Ordinary median of the month's non-HIDDEN `hyacinth_corrected_ha`. |
+| `monthly[].n_scenes` | integer ≥ 0 | no | The month's scenes with `display_status` `FULL` or `LOWER_BOUND`. |
+
+### `monthly`
+
+One entry per calendar month, contiguous and in order, from the month of
+the first scene to the month of the last; HIDDEN and POOR scenes count
+toward that span but not toward any median. `median_ha` is the ordinary
+median of the published (2-decimal) `hyacinth_corrected_ha` of the
+month's `FULL` and `LOWER_BOUND` scenes: the middle value, or the mean of
+the two middle values when the count is even, computed on exact decimals
+and rounded half up to 2 decimals. A month with no such scene carries
+`median_ha: null` and `n_scenes: 0`, so a chart breaks its line there
+instead of inventing a value. `LOWER_BOUND` scenes enter the median at
+face value; a consumer that wants to flag such months can count them in
+`scenes`.
 
 Quality flags (degrading/informational) are not part of 3.0.0.
 
@@ -412,6 +430,8 @@ map/photo toggle on a web map:
     every POOR entry) and the required `display_ha` (integer
     `{total, dense, interface}`, `null` when the corrected figures are);
     `constants` gains the required `green_max_ha` and `red_min_ha`;
+    `series.json` gains the required `monthly` (per-month median of
+    corrected hectares, with `n_scenes`);
     `latest.json` gains the required `image` (`path`, `bounds`,
     `attribution`), a Sentinel-2 true-colour WebP on the `map.png` grid,
     and `publish.json`'s `files[].path` pattern admits

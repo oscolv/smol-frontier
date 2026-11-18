@@ -278,7 +278,12 @@ corrected figures as whole hectares: the total rounded half up, the dense
 and interface parts apportioned by largest remainder (ties to dense) so
 they sum to it. `constants.green_max_ha` and `red_min_ha` are the two
 bands in hectares of the published reservoir area, rounded half up
-(`publish.aggregates.hectare_cutoff()`).
+(`publish.aggregates.hectare_cutoff()`). `series.json`'s `monthly`
+(`publish.aggregates.monthly_medians()`) gives, for every calendar month
+from the first scene to the last, the median of the published corrected
+hectares of its non-HIDDEN scenes (mean of the two middle values when
+even, rounded half up to 2 decimals) and their count; a month with none
+is `null`/0.
 
 Runs do not persist class maps, so the latest scene is re-classified from
 the scene cache after its sha256 matches the record's `cache_sha256` (a

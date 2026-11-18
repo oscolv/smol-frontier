@@ -91,3 +91,54 @@ def hectare_cutoff(reservoir_area_ha: float, pct: float) -> float:
     """
     exact = _decimal(reservoir_area_ha) * _decimal(pct) / 100
     return float(exact.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _month_index(day: str) -> int:
+    """A ``YYYY-MM-DD`` date as a running month count."""
+    year, number = int(day[:4]), int(day[5:7])
+    return year * 12 + number - 1
+
+
+def _median(values: list[Decimal]) -> Decimal:
+    """Ordinary median: the middle value, or the mean of the two middle ones."""
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def monthly_medians(scenes: list[dict[str, object]]) -> list[dict[str, object]]:
+    """``[{month, median_ha, n_scenes}]``, one entry per calendar month.
+
+    Months run contiguously from the first to the last scene month (HIDDEN
+    scenes count toward the span). ``n_scenes`` counts the month's FULL and
+    LOWER_BOUND scenes; ``median_ha`` is the ordinary median of their
+    published ``hyacinth_corrected_ha`` rounded half up to 2 decimals, or
+    None when the month has none. An empty ``scenes`` gives an empty list.
+    """
+    if not scenes:
+        return []
+    by_month: dict[int, list[Decimal]] = {}
+    for scene in scenes:
+        index = _month_index(str(scene["date"]))
+        values = by_month.setdefault(index, [])
+        if scene["display_status"] != HIDDEN:
+            values.append(_decimal(scene["hyacinth_corrected_ha"]))
+    entries: list[dict[str, object]] = []
+    for index in range(min(by_month), max(by_month) + 1):
+        values = by_month.get(index, [])
+        median = (
+            float(_median(values).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+            if values
+            else None
+        )
+        year, month = divmod(index, 12)
+        entries.append(
+            {
+                "month": f"{year:04d}-{month + 1:02d}",
+                "median_ha": median,
+                "n_scenes": len(values),
+            }
+        )
+    return entries

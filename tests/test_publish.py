@@ -1183,7 +1183,76 @@ def test_publish_series_schema_requires_display_fields(
         publish.validate("series", doc)
 
 
-@pytest.mark.parametrize("key", ["scenes", "run_id", "series_sha256", "schema_version"])
+def test_publish_series_monthly_mixes_full_lower_bound_and_hidden(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [
+        _record(
+            "2024-01-01",
+            "S2A_14QMH_20240101_0_L2A",
+            "ok",
+            hyacinth_corrected_ha=630.56,
+            dense_corrected_ha=400.0,
+            interface_corrected_ha=230.56,
+        ),
+        _record(
+            "2024-01-11",
+            "S2B_14QMH_20240111_0_L2A",
+            "ok",
+            valid_frac=0.9,
+            hyacinth_corrected_ha=100.004,
+            dense_corrected_ha=60.0,
+            interface_corrected_ha=40.004,
+        ),
+        _record(
+            "2024-01-21",
+            "S2A_14QMH_20240121_0_L2A",
+            "ok",
+            light="DOUBTFUL",
+            hyacinth_corrected_ha=999.0,
+            dense_corrected_ha=600.0,
+            interface_corrected_ha=399.0,
+        ),
+        _record("2024-01-26", "S2B_14QMH_20240126_0_L2A", "error"),
+        _record("2024-03-02", "S2A_14QMH_20240302_0_L2A", "skipped"),
+    ]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    doc = _series(out)
+    statuses = [s["display_status"] for s in doc["scenes"]]
+    assert statuses == ["FULL", "LOWER_BOUND", "HIDDEN", "HIDDEN"]
+    assert doc["monthly"] == [
+        {"month": "2024-01", "median_ha": 365.28, "n_scenes": 2},
+        {"month": "2024-02", "median_ha": None, "n_scenes": 0},
+        {"month": "2024-03", "median_ha": None, "n_scenes": 0},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("index", "key", "value"),
+    [
+        (0, "median_ha", None),
+        (1, "median_ha", 12.0),
+        (0, "n_scenes", -1),
+        (0, "month", "2024-13"),
+        (0, "month", "2024-1"),
+    ],
+)
+def test_publish_series_schema_rejects_bad_monthly(
+    series_root: Path, tmp_path: Path, index: int, key: str, value: object
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    doc["monthly"].append({"month": "2024-02", "median_ha": None, "n_scenes": 0})
+    publish.validate("series", doc)
+    doc["monthly"][index][key] = value
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)
+
+
+@pytest.mark.parametrize(
+    "key", ["scenes", "monthly", "run_id", "series_sha256", "schema_version"]
+)
 def test_publish_series_schema_rejects_missing_top_level(
     series_root: Path, tmp_path: Path, key: str
 ) -> None:

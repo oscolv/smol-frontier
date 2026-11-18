@@ -2,7 +2,12 @@
 
 import pytest
 
-from smol_frontier.publish.aggregates import display_ha, display_status, hectare_cutoff
+from smol_frontier.publish.aggregates import (
+    display_ha,
+    display_status,
+    hectare_cutoff,
+    monthly_medians,
+)
 from smol_frontier.publish.errors import ContractInvalid
 
 FRAC = 0.95
@@ -96,3 +101,79 @@ def test_display_ha_refuses_parts_that_cannot_reach_the_total(
 )
 def test_hectare_cutoff(area: float, pct: float, expected: float) -> None:
     assert hectare_cutoff(area, pct) == expected
+
+
+def _scene(day: str, ha: float | None, status: str = "FULL") -> dict:
+    return {"date": day, "hyacinth_corrected_ha": ha, "display_status": status}
+
+
+def _median_of(scenes: list[dict]) -> tuple[float | None, int]:
+    (entry,) = monthly_medians(scenes)
+    return entry["median_ha"], entry["n_scenes"]
+
+
+def test_monthly_median_odd_count_is_middle_value() -> None:
+    scenes = [
+        _scene("2024-03-01", 30.0),
+        _scene("2024-03-11", 10.0),
+        _scene("2024-03-21", 20.0, "LOWER_BOUND"),
+    ]
+    assert _median_of(scenes) == (20.0, 3)
+
+
+def test_monthly_median_even_count_is_mean_of_middle_pair() -> None:
+    scenes = [
+        _scene("2024-03-01", 10.0),
+        _scene("2024-03-06", 40.0),
+        _scene("2024-03-11", 20.0),
+        _scene("2024-03-16", 31.0),
+    ]
+    assert _median_of(scenes) == (25.5, 4)
+
+
+def test_monthly_median_even_count_rounds_half_up_on_exact_decimals() -> None:
+    scenes = [_scene("2024-03-01", 378.52), _scene("2024-03-06", 378.53)]
+    assert _median_of(scenes) == (378.53, 2)
+
+
+def test_monthly_median_single_scene() -> None:
+    assert _median_of([_scene("2024-03-01", 818.34)]) == (818.34, 1)
+
+
+def test_monthly_median_all_hidden_month_is_null_and_zero() -> None:
+    scenes = [
+        _scene("2024-03-01", None, "HIDDEN"),
+        _scene("2024-03-06", 500.0, "HIDDEN"),
+    ]
+    assert _median_of(scenes) == (None, 0)
+
+
+def test_monthly_median_ignores_hidden_scenes_in_a_mixed_month() -> None:
+    scenes = [
+        _scene("2024-03-01", 10.0),
+        _scene("2024-03-06", 999.0, "HIDDEN"),
+        _scene("2024-03-11", 20.0, "LOWER_BOUND"),
+    ]
+    assert _median_of(scenes) == (15.0, 2)
+
+
+def test_monthly_medians_span_is_contiguous_across_years() -> None:
+    scenes = [
+        _scene("2023-11-15", None, "HIDDEN"),
+        _scene("2024-02-03", 12.0),
+    ]
+    assert monthly_medians(scenes) == [
+        {"month": "2023-11", "median_ha": None, "n_scenes": 0},
+        {"month": "2023-12", "median_ha": None, "n_scenes": 0},
+        {"month": "2024-01", "median_ha": None, "n_scenes": 0},
+        {"month": "2024-02", "median_ha": 12.0, "n_scenes": 1},
+    ]
+
+
+def test_monthly_medians_order_does_not_depend_on_input_order() -> None:
+    scenes = [_scene("2024-02-03", 12.0), _scene("2024-01-10", 4.0)]
+    assert [e["month"] for e in monthly_medians(scenes)] == ["2024-01", "2024-02"]
+
+
+def test_monthly_medians_empty() -> None:
+    assert monthly_medians([]) == []

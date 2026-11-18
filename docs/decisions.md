@@ -157,6 +157,16 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `cli.py` (exit 2 on `PublishRefused`, exit 1 on `ContractInvalid`),
   `docs/contract.md`, `tests/test_publish.py`,
   `tests/test_publish_regression.py`, `tests/test_contract_doc.py`.
+- **Amended (contract 3.0.0, spec #44):** smolf now owns the
+  deterministic quality gate and publishes it per scene as
+  `display_status` (`HIDDEN`: not GOOD or no corrected figure;
+  `LOWER_BOUND`: published `valid_frac` below `frac_publishable`; `FULL`
+  otherwise), computed by `publish.aggregates.display_status()`. The
+  consumer asked for figures over "the scenes it shows" (monthly medians,
+  same-month comparisons) without doing arithmetic; a second copy of the
+  gate on either side would drift. Figures are still published as
+  computed, nothing is filtered out, and the consumer's editorial holds and
+  withdrawals stay downstream, unknown to smolf.
 
 ## 14. A catalog outage on the new-scene search is a retryable refusal
 

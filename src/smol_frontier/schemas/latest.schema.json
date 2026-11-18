@@ -26,11 +26,13 @@
     "hyacinth_corrected_ha",
     "pct_reservoir_corrected",
     "cover_band",
+    "display_status",
     "newest_acquisition",
     "run_counts",
     "run_id",
     "series_sha256",
     "reservoir_area_ha",
+    "reservoir_outline",
     "constants",
     "current_level",
     "map"
@@ -38,7 +40,7 @@
   "properties": {
     "schema_version": {
       "type": "string",
-      "pattern": "^2\\.[0-9]+\\.[0-9]+$",
+      "pattern": "^3\\.[0-9]+\\.[0-9]+$",
       "not": {"pattern": "\\n"}
     },
     "smolf_version": {"type": "string", "minLength": 1},
@@ -70,6 +72,10 @@
       "anyOf": [{"$ref": "#/$defs/percent"}, {"type": "null"}]
     },
     "cover_band": {"enum": ["GREEN", "YELLOW", "RED", null]},
+    "display_status": {
+      "description": "Display gate of the scene, the deterministic part of a consumer's quality gate: HIDDEN when quality_light is not GOOD or hyacinth_corrected_ha is null; LOWER_BOUND when valid_frac is below constants.frac_publishable (figures read 'at least'); FULL otherwise. A consumer's editorial holds and withdrawals are not reflected.",
+      "enum": ["FULL", "LOWER_BOUND", "HIDDEN"]
+    },
     "newest_acquisition": {
       "description": "Newest scene of the run of any quality (ok or skipped, never error); may be POOR and newer than the scene above.",
       "type": "object",
@@ -94,7 +100,7 @@
     "series_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "reservoir_area_ha": {"type": "number", "exclusiveMinimum": 0},
     "reservoir_outline": {
-      "description": "Reservoir polygon (the basin behind reservoir_area_ha) as an RFC 7946 MultiPolygon geometry: EPSG:4326, [longitude, latitude], 6 decimals, exterior rings counter-clockwise and holes clockwise. Not required, so 2.0.0 documents still validate; smolf writes it from 2.1.0 on.",
+      "description": "Reservoir polygon (the basin behind reservoir_area_ha) as an RFC 7946 MultiPolygon geometry: EPSG:4326, [longitude, latitude], 6 decimals, exterior rings counter-clockwise and holes clockwise. Required since 3.0.0.",
       "type": "object",
       "required": ["type", "coordinates"],
       "properties": {

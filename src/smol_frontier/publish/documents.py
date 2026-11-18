@@ -21,6 +21,7 @@ from smol_frontier.publish.aggregates import (
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
 from smol_frontier.publish.map import map_path, png_path
+from smol_frontier.publish.truecolour import attribution, image_path
 
 # WHY: contract version written into every document. Each schema accepts any
 #   version with this major (pattern ^3\.[0-9]+\.[0-9]+$ plus "not" a
@@ -35,7 +36,8 @@ from smol_frontier.publish.map import map_path, png_path
 #   2.1.0: latest.json gains the optional reservoir_outline (issue #42).
 #   3.0.0: every scene carries display_status, and reservoir_outline is
 #   required (issue #45, spec #44); every scene carries display_ha and
-#   constants gain green_max_ha / red_min_ha (issue #46).
+#   constants gain green_max_ha / red_min_ha (issue #46); latest.json
+#   carries image, a Sentinel-2 true-colour photo (issue #48).
 SCHEMA_VERSION = "3.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
@@ -262,6 +264,10 @@ def latest_document(
     document["current_level"] = current_level(levels_path)
     # bounds come from the warped PNG, so publish_run fills them in
     document["map"] = {"geotiff": map_path(record), "png": png_path(record)}
+    document["image"] = {
+        "path": image_path(record),
+        "attribution": attribution(record["date"]),
+    }
     return document
 
 

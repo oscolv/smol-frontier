@@ -29,9 +29,11 @@ The pipeline in order, one line per stage:
   and flood-stage map (`hydro/flood_map.py`, `smolf hydro flood-map`)
 - Series builder + manifest — `series.py` (`smolf series build`, resumable;
   a series is identified by its `series.csv` sha256, not by date)
-- Publish contract — `publish/` (`select`, `documents`, `map`, `writer`) +
-  `schemas/` (`smolf publish`; neutral, versioned JSON + latest map from one
-  complete run; see `docs/contract.md`)
+- Publish contract — `publish/` (`select`, `documents`, `aggregates`,
+  `map`, `truecolour`, `writer`) + `schemas/` (`smolf publish`; neutral,
+  versioned JSON + latest map + its Sentinel-2 true-colour photo, read
+  from the item's COGs at publish time, from one complete run; see
+  `docs/contract.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene

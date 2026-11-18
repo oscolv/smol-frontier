@@ -167,6 +167,16 @@ enforced in this repo. Anything not implemented yet says **planned**.
   gate on either side would drift. Figures are still published as
   computed, nothing is filtered out, and the consumer's editorial holds and
   withdrawals stay downstream, unknown to smolf.
+- **Amended (contract 3.0.0, issue #48):** "leaking source imagery
+  impossible by construction" now reads "leaking PlanetScope imagery or
+  raw reflectance impossible by construction". The ban existed to protect
+  PlanetScope's licence, which does not allow redistributing its imagery;
+  Sentinel-2 L2A is free to publish under the Copernicus licence with
+  attribution. `latest.json` therefore carries a Sentinel-2 true-colour
+  photo of its scene, written only through a separate guard
+  (`publish.truecolour.guard_true_colour()`: collection `sentinel-2-l2a`,
+  uint8, 3 or 4 bands); the class-map guard is unchanged. See
+  `docs/adr/0001-publish-sentinel-2-true-colour.md`.
 
 ## 14. A catalog outage on the new-scene search is a retryable refusal
 

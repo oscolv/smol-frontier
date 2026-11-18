@@ -5,7 +5,8 @@ runs that cannot back a reproducible contract (incomplete, dirty, no scene
 with figures), maps the run's scene records to the English contract fields,
 validates every document against its packaged JSON Schema, re-classifies
 the latest scene from the hash-verified scene cache into the published map
-(classes 0-5, class 5 = removed by the exposed-bed correction), and swaps
+(classes 0-5, class 5 = removed by the exposed-bed correction), reads its
+Sentinel-2 true-colour photo on the map's display grid, and swaps
 the output directory in atomically. The run manifest is provenance, never
 contract: nothing is copied out of it verbatim.
 
@@ -16,7 +17,8 @@ byte-identical files; only the integrity index `publish.json` carries a timestam
 
 # WHY a package: one module per job (decision rule 3) — `select` picks the
 #   run, `documents` maps it to the contract, `map` rebuilds the latest
-#   scene's map, `writer` stages and swaps the output in. Every public name
+#   scene's map, `truecolour` reads and writes its photo, `writer` stages
+#   and swaps the output in. Every public name
 #   stays importable from `smol_frontier.publish`.
 
 from smol_frontier.config import settings as settings  # re-exported (tests read it)
@@ -36,8 +38,10 @@ from smol_frontier.publish.documents import (
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused
 from smol_frontier.publish.map import PublishedMap, build_map, map_path, png_path
 from smol_frontier.publish.select import select_run
+from smol_frontier.publish.truecolour import guard_true_colour, image_path
 from smol_frontier.publish.writer import (
     ALLOWED_FILES,
+    ALLOWED_IMAGE_PATTERN,
     ALLOWED_MAP_PATTERN,
     INDEX_FILE,
     check_out_dir,
@@ -48,6 +52,7 @@ from smol_frontier.publish.writer import (
 
 __all__ = [
     "ALLOWED_FILES",
+    "ALLOWED_IMAGE_PATTERN",
     "ALLOWED_MAP_PATTERN",
     "INDEX_FILE",
     "SCHEMA_VERSION",
@@ -58,6 +63,8 @@ __all__ = [
     "canonical_json",
     "check_out_dir",
     "current_level",
+    "guard_true_colour",
+    "image_path",
     "is_allowed",
     "latest_document",
     "latest_record",

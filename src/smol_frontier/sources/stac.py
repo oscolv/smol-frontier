@@ -92,6 +92,10 @@ class SceneMeta:
     #   records it per scene (tile_cloud_pct). None when the catalog omits it
     #   or the scene was rebuilt from an old cache file without the tag.
     cloud_cover: float | None = None
+    # WHY: the STAC collection the item came from, so the published
+    #   true-colour guard can refuse anything but Sentinel-2 L2A. None when
+    #   the scene was rebuilt from a cache file (the cache does not keep it).
+    collection: str | None = None
 
 
 def _baseline_key(value: str | None) -> tuple[int, tuple[int, ...]]:
@@ -152,6 +156,7 @@ def item_to_scene(item: pystac.Item, source: str) -> SceneMeta | None:
         ),
         assets=hrefs,
         cloud_cover=cloud_cover,
+        collection=item.collection_id,
     )
 
 

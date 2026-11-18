@@ -30,11 +30,14 @@ Changes from earlier versions are listed under "Versioning".
 - **Provenance, not contract.** The series run's `manifest.json` is
   internal provenance; it is never copied out. Each document carries
   `run_id` and `series_sha256` so any figure traces back to the exact run.
-- **Derived products only.** Both raster writers (GeoTIFF and PNG) accept
-  a uint8 class array with values 0–5 and nothing else (the PNG writer
-  colours the classes itself), and only allowlisted files are ever
-  written, so source imagery or reflectance of any sensor cannot be
-  published.
+- **Derived products, plus Sentinel-2 photos.** Both map writers
+  (GeoTIFF and PNG) accept a uint8 class array with values 0–5 and nothing
+  else (the PNG writer colours the classes itself), and only allowlisted
+  files are ever written. The one exception is a separate, guarded
+  true-colour writer that accepts only uint8 RGB/RGBA from STAC collection
+  `sentinel-2-l2a`, published under the Copernicus licence with
+  attribution (see "True-colour image"). PlanetScope imagery and raw
+  reflectance of any sensor cannot be published.
 
 ## Directory layout
 
@@ -48,11 +51,14 @@ series.json
 publish.json
 map/<date>_<item_id>.tif
 map/<date>_<item_id>.png
+image/<date>_<item_id>.webp
 ```
 
-The two map files are those of the scene described by `latest.json`; maps
-of earlier scenes are not kept. Map file names change with the scene, so a
-cache can never pair a new `latest.json` with an old map.
+The two map files and the image are those of the scene described by
+`latest.json`; maps and images of earlier scenes are not kept. Their
+file names change with the scene, so a cache can never pair a new
+`latest.json` with an old map or image. The allowlist also reserves
+`image/clipped/<date>_<item_id>.webp` for reservoir-clipped photos.
 
 ## Conventions
 
@@ -207,6 +213,10 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `map.geotiff` | string | — | no | Relative path `map/<date>_<item_id>.tif`. |
 | `map.png` | string | — | no | Relative path `map/<date>_<item_id>.png`. |
 | `map.bounds` | `[[south, west], [north, east]]` | degrees, EPSG:4326 | no | Extent of the PNG, 6 decimals, for a web-map image overlay. |
+| `image` | object | — | no | Sentinel-2 true-colour photo of the same scene (see "True-colour image"). Since 3.0.0. |
+| `image.path` | string | — | no | Relative path `image/<date>_<item_id>.webp`. |
+| `image.bounds` | `[[south, west], [north, east]]` | degrees, EPSG:4326 | no | Always equal to `map.bounds`: the photo is on exactly the `map.png` grid. |
+| `image.attribution` | string | — | no | `Copernicus Sentinel data <year>`, the year of the scene; show it wherever the photo is shown (Copernicus licence). |
 
 The hectare cut-offs are for drawing; `cover_band`, computed from the
 published percentage, stays authoritative. At the exact boundary the two
@@ -269,6 +279,35 @@ not applied, no pixel is class 5.
   Place it on a web map with `map.bounds`, given in EPSG:4326 as
   `[[south, west], [north, east]]` (latitude first).
 
+## True-colour image
+
+`image.path` is a natural-colour photo of the `latest.json` scene, for a
+map/photo toggle on a web map:
+
+- **Grid:** exactly the `map.png` grid (same width, height and EPSG:3857
+  transform), so `image.bounds` equals `map.bounds` and the two never
+  misalign. It is not clipped to the reservoir.
+- **Source:** bands B04, B03, B02 read at publish time straight from the
+  scene's STAC item (exact `item_id`, Earth Search unless the run used
+  another backend), not from smolf's scene cache, warped bilinearly onto
+  the grid. DN become surface reflectance through smolf's radiometry
+  module, with the scene's BOA offset derived once from B02 over the
+  reservoir by the same rule and guard as the figures, so post-2022
+  scenes are not washed out.
+- **Stretch:** one fixed linear window, reflectance 0–0.30 → 0–255 with no
+  gamma (`TRUE_COLOUR_MIN`, `TRUE_COLOUR_MAX` in `config.py`), the same
+  for every image, so dates and years compare visually. Brighter pixels
+  (clouds, roofs) saturate; no-data pixels are black.
+- **Encoding:** RGB WebP at quality 90, not georeferenced; 88–166 KB on
+  the control scenes.
+- **Integrity:** the image is an illustration bound to `item_id`. Its
+  bytes are listed with their sha256 in `publish.json`, but unlike the
+  map it is not verified against the run (the run never saw these
+  pixels): a backend that reprocesses the item would change the photo,
+  never a figure.
+- **Licence:** Sentinel-2 data are free to publish under the Copernicus
+  licence with attribution; show `image.attribution` with the photo.
+
 ## Determinism and integrity
 
 - `latest.json` and `series.json` are canonical JSON: sorted keys, 2-space
@@ -278,6 +317,8 @@ not applied, no pixel is class 5.
   publish of the same run changes only `current_level` (and `publish.json`).
 - `publish.json` lists the sha256 of every other file; verify them after
   any transfer.
+- The image is deterministic for the same item bytes: rerunning publish
+  with an unchanged STAC item rewrites it byte for byte.
 - Before replacing the output directory, smolf validates every JSON file
   against its schema; the whole contract is assembled in a sibling
   temporary directory (`.<name>.staging-*`) and swapped in by rename, the
@@ -302,7 +343,7 @@ not applied, no pixel is class 5.
 | --- | --- |
 | 0 | Published. |
 | 2 | Precondition refusal, one line `refused: <reason>` on stderr; nothing is written. Also: neither or both of `--run` and `--latest` (`error: …`). |
-| 1 | Unexpected error, or smolf's own output failing its schema or the raster guard (a bug); nothing is published. |
+| 1 | Unexpected error, or smolf's own output failing its schema or a raster guard (class map or true colour; a bug); nothing is published. |
 
 `publish` refuses (exit 2) when:
 
@@ -335,7 +376,10 @@ not applied, no pixel is class 5.
   touches the published figures;
 - the exposed-bed margin recomputed from the row's `level_m` with the
   committed stage–area curve does not round to the row's margin, or the
-  class-5 area differs from `removed_ha` at the hundredth.
+  class-5 area differs from `removed_ha` at the hundredth;
+- the latest scene's true-colour image cannot be read (STAC item missing,
+  catalog or COG unreachable): a contract without its photo would be
+  partial.
 
 ## Versioning
 
@@ -368,7 +412,11 @@ not applied, no pixel is class 5.
     every POOR entry) and the required `display_ha` (integer
     `{total, dense, interface}`, `null` when the corrected figures are);
     `constants` gains the required `green_max_ha` and `red_min_ha`;
-    `reservoir_outline` is required; the version pattern
+    `latest.json` gains the required `image` (`path`, `bounds`,
+    `attribution`), a Sentinel-2 true-colour WebP on the `map.png` grid,
+    and `publish.json`'s `files[].path` pattern admits
+    `image/<date>_<item_id>.webp` and `image/clipped/<date>_<item_id>.webp`
+    (ADR 0001); `reservoir_outline` is required; the version pattern
     of all three schemas is `^3\.[0-9]+\.[0-9]+$`, so 2.x consumers reject
     3.x files until they move to `v0.5.0`.
 - **Breaking (major `schema_version`):** removing or renaming a field,

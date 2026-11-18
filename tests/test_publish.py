@@ -42,6 +42,7 @@ from smol_frontier.cli import app
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map, levels
 from smol_frontier.hydro.bed import bed_margin
+from smol_frontier.publish import truecolour
 from smol_frontier.sources.stac import SceneMeta
 
 RUN_ID = "20240110T120000"
@@ -116,6 +117,14 @@ FAKE_HA = {
 }
 
 
+def _fake_reflectance(shape: tuple) -> np.ndarray:
+    rows, cols = np.indices(shape, dtype=np.float64)
+    ramp = (rows + cols) / max(sum(shape) - 2, 1)
+    reflectance = np.stack([0.30 * ramp, 0.20 * (1 - ramp), np.full(shape, 0.05)])
+    reflectance[:, 0, 0] = np.nan
+    return reflectance
+
+
 def _cache_bytes(item_id: str) -> bytes:
     return f"cached scene {item_id}\n".encode()
 
@@ -159,6 +168,8 @@ def scene_env(
         ingest_calls=[],
         download=_cache_bytes,
         ha=dict(FAKE_HA),
+        photo_calls=[],
+        photo_collection="sentinel-2-l2a",
     )
 
     def fake_get_scene(backend: str, item_id: str) -> SceneMeta:
@@ -185,6 +196,13 @@ def scene_env(
     def fake_classify(ing: object) -> SimpleNamespace:
         return SimpleNamespace(class_map=_class_map(), ha_per_class=dict(env.ha))
 
+    def fake_read_true_colour(
+        backend: str, item_id: str, transform: rasterio.Affine, shape: tuple
+    ) -> truecolour.TrueColour:
+        env.photo_calls.append((backend, item_id, transform, shape))
+        return truecolour.TrueColour(_fake_reflectance(shape), env.photo_collection)
+
+    monkeypatch.setattr(truecolour, "read_true_colour", fake_read_true_colour)
     monkeypatch.setattr(publish.map, "get_scene", fake_get_scene)
     monkeypatch.setattr(publish.map, "ingest_scene", fake_ingest_scene)
     monkeypatch.setattr(publish.map, "classify_scene", fake_classify)
@@ -366,6 +384,7 @@ def test_publish_latest_golden_values(
     result = _publish(out, "--run", RUN_ID)
     assert result.exit_code == 0, result.output
     assert sorted(p.name for p in out.iterdir()) == [
+        "image",
         "latest.json",
         "map",
         "publish.json",
@@ -423,6 +442,11 @@ def test_publish_latest_golden_values(
             "geotiff": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.tif",
             "png": "map/2024-01-04_S2B_14QMH_20240104_0_L2A.png",
             "bounds": _latest(out)["map"]["bounds"],
+        },
+        "image": {
+            "path": "image/2024-01-04_S2B_14QMH_20240104_0_L2A.webp",
+            "bounds": _latest(out)["map"]["bounds"],
+            "attribution": "Copernicus Sentinel data 2024",
         },
     }
 
@@ -791,7 +815,9 @@ def test_publish_latest_schema_tolerates_extra_fields(
     publish.validate("latest", doc)
 
 
-@pytest.mark.parametrize("field", ["reservoir_outline", "display_status", "display_ha"])
+@pytest.mark.parametrize(
+    "field", ["reservoir_outline", "display_status", "display_ha", "image"]
+)
 def test_publish_latest_schema_requires_3_0_0_fields(
     series_root: Path, tmp_path: Path, field: str
 ) -> None:
@@ -1090,6 +1116,7 @@ def test_publish_series_in_allowlist(series_root: Path, tmp_path: Path) -> None:
     out = tmp_path / "pub"
     assert _publish(out).exit_code == 0
     assert {p.name for p in out.iterdir()} == {
+        "image",
         "latest.json",
         "map",
         "publish.json",
@@ -1430,6 +1457,8 @@ def test_publish_map_refusal_keeps_previous_output(
     assert _publish(out, "--run", RUN_ID).exit_code == 2
     assert sorted(p.relative_to(out).as_posix() for p in out.rglob("*")) == before
     assert before == [
+        "image",
+        "image/2024-01-01_A.webp",
         "latest.json",
         "map",
         "map/2024-01-01_A.png",
@@ -1654,6 +1683,138 @@ def test_publish_png_schema_requires_png_and_bounds(
             )
 
 
+IMAGE_REL = f"image/2024-01-04_{LATEST_ITEM}.webp"
+
+
+def _webp(path: Path) -> tuple[np.ndarray, str]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(path) as src:
+            return src.read(), src.driver
+
+
+def test_publish_image_is_rgb_webp_on_the_map_png_grid(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    latest = _latest(out)
+    assert latest["image"] == {
+        "path": IMAGE_REL,
+        "bounds": latest["map"]["bounds"],
+        "attribution": "Copernicus Sentinel data 2024",
+    }
+    pixels, driver = _webp(out / IMAGE_REL)
+    png, png_meta = _png(out)
+    assert driver == "WEBP"
+    assert pixels.dtype == np.uint8
+    assert pixels.shape == (3, *png_meta["shape"])
+    assert (out / IMAGE_REL).stat().st_size < 300_000
+    [(backend, item_id, transform, shape)] = scene_env.photo_calls
+    assert (backend, item_id, shape) == ("earth-search", LATEST_ITEM, png.shape[1:])
+    expected = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
+    assert transform == expected.transform
+    low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
+    blue = round((0.05 - low) / (high - low) * 255)
+    assert abs(int(np.median(pixels[2])) - blue) <= 2
+
+
+def test_publish_image_listed_with_sha256_and_byte_identical(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    first, second = tmp_path / "a", tmp_path / "b"
+    assert _publish(first, "--run", RUN_ID).exit_code == 0
+    assert _publish(second, "--run", RUN_ID).exit_code == 0
+    data = (first / IMAGE_REL).read_bytes()
+    assert data == (second / IMAGE_REL).read_bytes()
+    listed = {f["path"]: f["sha256"] for f in _index(first)["files"]}
+    assert listed[IMAGE_REL] == hashlib.sha256(data).hexdigest()
+
+
+def test_publish_image_reader_failure_exit_2_keeps_previous(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    before = _tree(out, hashed=True)
+
+    def unreachable(*args: object) -> None:
+        msg = "HTTP 503 from earth-search"
+        raise RuntimeError(msg)
+
+    monkeypatch.setattr(truecolour, "read_true_colour", unreachable)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    assert "refused: true-colour image" in result.output
+    assert "HTTP 503" in result.output
+    assert _tree(out, hashed=True) == before
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
+def test_publish_image_non_sentinel2_collection_never_published(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    before = _tree(out, hashed=True)
+    scene_env.photo_collection = "planetscope"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 1
+    assert isinstance(result.exception, ValueError)
+    assert _tree(out, hashed=True) == before
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
+def test_publish_image_allowlist() -> None:
+    for name in (
+        "image/2024-01-01_S2B_14QMH_20240101_0_L2A.webp",
+        "image/clipped/2024-01-01_S2B_14QMH_20240101_0_L2A.webp",
+    ):
+        assert publish.is_allowed(name), name
+    for name in (
+        "image/2024-01-01_A.png",
+        "image/2024-01-01_A.webp.aux.xml",
+        "image/other/2024-01-01_A.webp",
+        "image/clipped/clipped/2024-01-01_A.webp",
+        "image/A.webp",
+        "map/2024-01-01_A.webp",
+    ):
+        assert not publish.is_allowed(name), name
+
+
+def test_publish_out_with_clipped_image_is_a_previous_contract(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    (out / "image" / "clipped").mkdir()
+    (out / "image" / "clipped" / "2023-01-04_A.webp").write_bytes(b"old")
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert not (out / "image" / "clipped").exists()
+
+
+def test_publish_image_schema_rejects_bad_image(
+    series_root: Path, tmp_path: Path
+) -> None:
+    good = _valid_latest(series_root, tmp_path)
+    image = good["image"]
+    for bad in (
+        {**image, "path": "image/clipped/2024-01-04_A.webp"},
+        {**image, "path": "map/2024-01-04_A.png"},
+        {**image, "attribution": "Copernicus Sentinel data"},
+        {**image, "attribution": "PlanetScope 2024"},
+        {key: value for key, value in image.items() if key != "bounds"},
+        {**image, "bounds": [[0, 0]]},
+    ):
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate("latest", {**good, "image": bad})
+
+
 # --- publish.json integrity index ---------------------------------------
 
 
@@ -1685,7 +1846,7 @@ def test_publish_index_lists_every_other_file_with_sha256(
         if p.is_file() and p.name != "publish.json"
     )
     assert [f["path"] for f in index["files"]] == on_disk
-    assert len(on_disk) == 4
+    assert len(on_disk) == 5
     for entry in index["files"]:
         data = (out / entry["path"]).read_bytes()
         assert entry["sha256"] == hashlib.sha256(data).hexdigest()
@@ -2423,9 +2584,13 @@ def test_publish_map_patterns_agree_across_code_and_schemas() -> None:
     assert latest_map["geotiff"]["pattern"] == rf"^{stem}\.tif$"
     assert latest_map["png"]["pattern"] == rf"^{stem}\.png$"
     documents = sorted(publish.ALLOWED_FILES - {publish.INDEX_FILE})
+    images = publish.ALLOWED_IMAGE_PATTERN.pattern
     index_path = _schema("publish")["properties"]["files"]["items"]["properties"]
-    expected = "|".join([*(re.escape(name) for name in documents), allowed])
+    expected = "|".join([*(re.escape(name) for name in documents), allowed, images])
     assert index_path["path"]["pattern"] == f"^(?:{expected})$"
+    unclipped = images.replace("(?:clipped/)?", "")
+    image_schema = _schema("latest")["properties"]["image"]["properties"]
+    assert image_schema["path"]["pattern"] == f"^{unclipped}$"
 
 
 def test_publish_map_and_png_paths_share_one_stem() -> None:

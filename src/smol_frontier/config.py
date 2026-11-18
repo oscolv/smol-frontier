@@ -314,6 +314,17 @@ class Settings:
     #   the dark blue and the soil brown above.
     COLOR_BED_REMOVED: str = "#d0573a"
 
+    # WHY: the published Sentinel-2 true-colour images share one fixed
+    #   linear stretch, reflectance TRUE_COLOUR_MIN..TRUE_COLOUR_MAX to
+    #   0..255 with no gamma, so images of different dates and years are
+    #   visually comparable (a per-image stretch would make a clear and a
+    #   hazy scene look alike).
+    # HOW: 0.30 sits above the red/green/blue reflectance of the reservoir's
+    #   water, hyacinth, crops and bare soil, so only clouds and bright
+    #   roofs saturate; 0 keeps dark water dark instead of lifting it grey.
+    TRUE_COLOUR_MIN: float = 0.0
+    TRUE_COLOUR_MAX: float = 0.30
+
     def traffic_light(self, pct: float) -> str:
         """Classify reservoir-area percent into green/yellow/red bands."""
         if pct < self.GREEN_MAX_PCT:

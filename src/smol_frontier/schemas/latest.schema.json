@@ -323,11 +323,23 @@
             },
             {"type": "null"}
           ]
+        },
+        "featured": {
+          "description": "True for the four years a compact block shows: the last entry (the current year) and the first, middle and last of the years before it, chosen by scene count only, never by hectares (fallbacks for years without a scene in docs/contract.md). Fewer than four only when fewer than three earlier years have a scene. Written by smolf since 3.1.0.",
+          "type": "boolean"
         }
       },
-      "if": {"properties": {"n_scenes": {"const": 0}}},
-      "then": {"properties": {"scene": {"type": "null"}, "image": {"type": "null"}}},
-      "else": {"properties": {"scene": {"type": "object"}, "image": {"type": "object"}}}
+      "allOf": [
+        {
+          "if": {"properties": {"n_scenes": {"const": 0}}},
+          "then": {"properties": {"scene": {"type": "null"}, "image": {"type": "null"}}},
+          "else": {"properties": {"scene": {"type": "object"}, "image": {"type": "object"}}}
+        },
+        {
+          "if": {"required": ["featured"], "properties": {"featured": {"const": true}}},
+          "then": {"properties": {"scene": {"type": "object"}, "image": {"type": "object"}}}
+        }
+      ]
     },
     "display_ha": {
       "type": "object",

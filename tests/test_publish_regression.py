@@ -135,7 +135,7 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["constants"]["green_max_ha"] == 378.53
     assert latest["constants"]["red_min_ha"] == 630.88
     assert latest["smolf_version"] == "0.5.0"
-    assert latest["schema_version"] == "3.0.0"
+    assert latest["schema_version"] == "3.1.0"
     assert _class5_ha(out_dir, latest) == 0.0
 
 
@@ -220,6 +220,35 @@ def test_publish_regression_same_month_clipped_to_the_reservoir(
     opaque = np.count_nonzero(alpha == 255) / alpha.size
     assert set(np.unique(alpha)) == {0, 255}
     assert 0.2 < opaque < 0.9
+    assert year["featured"] is True
+
+
+# WHY: the endho-web fixture run (2017-02 to 2026-11, Earth Search); its
+#   November block is the one the homepage shows.
+FIXTURE_RUN = "20261106T154111"
+
+
+def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:
+    """The real run features 2017, 2021, 2025 and 2026 (spec #56)."""
+    run_dir = paths.series_dir() / FIXTURE_RUN
+    if not (run_dir / "manifest.json").exists():
+        pytest.skip(f"series run {FIXTURE_RUN} not in outputs/series (CI)")
+    records = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (run_dir / "scenes").glob("*.json")
+    ]
+    for record in records:
+        if record["status"] == "ok":
+            item_id = record["item_id_used"]
+            if not cache_path(paths.cache_dir(), item_id).exists():
+                pytest.skip(f"scene {item_id} not in data/cache: run `smolf fetch`")
+    out_dir = publish.publish_run(
+        run_id=FIXTURE_RUN, out_dir=tmp_path / "pub", series_root=paths.series_dir()
+    )
+    latest = json.loads((out_dir / "latest.json").read_text(encoding="utf-8"))
+    years = latest["same_month"]["years"]
+    assert latest["same_month"]["month"] == 11
+    assert [y["year"] for y in years if y["featured"]] == [2017, 2021, 2025, 2026]
 
 
 @pytest.mark.skipif(

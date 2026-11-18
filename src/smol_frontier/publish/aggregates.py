@@ -5,6 +5,7 @@ published decimals), so a derived figure always agrees with the figures a
 consumer sees.
 """
 
+from collections.abc import Iterable
 from decimal import ROUND_FLOOR, ROUND_HALF_UP, Decimal
 
 from smol_frontier.publish.errors import ContractInvalid
@@ -182,7 +183,8 @@ def same_month(scenes: list[dict[str, object]]) -> dict[str, object] | None:
     FULL scene, one ``{year, n_scenes, scene}`` each: ``n_scenes`` counts
     the month's FULL and LOWER_BOUND scenes that year and ``scene`` is their
     lower median (``_SAME_MONTH_SCENE_FIELDS`` only), None when there is
-    none. None when no scene is FULL.
+    none. ``featured`` marks the current year and up to three prior years
+    (``_featured_indices``). None when no scene is FULL.
     """
     full = [scene for scene in scenes if scene["display_status"] == FULL]
     if not full:
@@ -207,4 +209,36 @@ def same_month(scenes: list[dict[str, object]]) -> dict[str, object] | None:
                 else {field: chosen[field] for field in _SAME_MONTH_SCENE_FIELDS},
             }
         )
+    featured = _featured_indices([year["n_scenes"] for year in years])
+    for index, year in enumerate(years):
+        year["featured"] = index in featured
     return {"month": month, "years": years}
+
+
+def _featured_indices(n_scenes: list[int]) -> set[int]:
+    """Indices of the featured years, given each year's scene count.
+
+    WHY: a homepage shows four photos of the month, not one per year. The
+    rule spans the record (first, middle and last year before the current
+    one) and sees only scene counts, never hectares, so the choice cannot
+    editorialize (ADR 0002). The current year (last index) always has a
+    scene. Prior targets are index 0, n-1 and (n-1)//2 over the n prior
+    years, resolved in that order; a target that is empty or already
+    featured falls back to the next prior year with a scene (first:
+    forward; last prior: backward; middle: nearest, ties to the earlier
+    year), or stays empty when none is left.
+    """
+    current = len(n_scenes) - 1
+    featured = {current}
+
+    def pick(order: Iterable[int]) -> None:
+        for index in order:
+            if n_scenes[index] > 0 and index not in featured:
+                featured.add(index)
+                return
+
+    middle = (current - 1) // 2
+    pick(range(current))
+    pick(range(current - 1, -1, -1))
+    pick(sorted(range(current), key=lambda index: (abs(index - middle), index)))
+    return featured

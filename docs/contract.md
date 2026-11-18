@@ -1,4 +1,4 @@
-# Publish contract (`schema_version` 3.0.0)
+# Publish contract (`schema_version` 3.1.0)
 
 What `smolf publish` writes and what a downstream consumer may rely on.
 The JSON Schemas packaged with smolf (`src/smol_frontier/schemas/`:
@@ -183,7 +183,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.0.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | — | no | smolf version that wrote the file (`0.5.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
@@ -231,6 +231,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `same_month.years[].image` | object or `null` | — | when `n_scenes` is 0 | Its reservoir-clipped true-colour photo. |
 | `same_month.years[].image.path` | string | — | no | Relative path `image/clipped/<date>_<item_id>.webp`. |
 | `same_month.years[].image.attribution` | string | — | no | `Copernicus Sentinel data <year>`, the year of that scene. |
+| `same_month.years[].featured` | boolean | — | no | `true` for the years a compact block shows: the current year and the first, middle and last earlier years (see "Featured years"); `false` otherwise. A featured year always has a `scene` and an `image`. Optional in the schema, always written by smolf. Since 3.1.0. |
 
 The hectare cut-offs are for drawing; `cover_band`, computed from the
 published percentage, stays authoritative. At the exact boundary the two
@@ -245,8 +246,9 @@ figure: its month is the calendar month (UTC date) of the latest `FULL`
 scene of the run. `latest.json`'s own scene is unchanged (the last `ok`
 scene, which may be `LOWER_BOUND` or `HIDDEN`). Years run from the year
 of the first scene in `series.json` (POOR scenes included) to the year of
-that `FULL` scene, so every year of the series appears and the consumer
-chooses which to show.
+that `FULL` scene, so every year of the series appears, with its photo,
+for a consumer that draws the whole series; `featured` marks four of
+them for a compact block.
 
 For each year, the month's `FULL` and `LOWER_BOUND` scenes are ordered by
 `hyacinth_corrected_ha` (exact published decimals), ties broken by date
@@ -257,11 +259,38 @@ with no such scene carries `n_scenes: 0`, `scene: null` and
 "True-colour image"); place it with `map.bounds`, since every photo is on
 the `map.png` grid.
 
+#### Featured years
+
+Since 3.1.0 smolf marks the years a compact block shows (`featured:
+true`), so a consumer does not re-implement a selection rule. The rule
+reads only each year's `n_scenes`, never hectares, so the choice cannot
+favour a story (ADR 0002):
+
+- The current year, the last entry of `years`, is always featured; it
+  always has a scene.
+- The prior years are the calendar years before it, empty years
+  included, in ascending order; let n be their count. The targets are
+  index 0 (first), index n−1 (last prior) and index ⌊(n−1)/2⌋ (middle).
+- They are resolved in that order: first, last prior, middle. A target
+  that is empty (`n_scenes` 0) or already featured falls back: the first
+  forward to the next prior year with a scene not yet featured; the last
+  prior backward to the previous one (never onto the current year); the
+  middle to the nearest prior year with a scene not yet featured, ties
+  going to the earlier year. If no candidate remains, the slot stays
+  empty.
+
+So at most four years are featured, never one twice, and fewer than four
+only when fewer than three prior years have a scene (then all of them
+are featured). For a November series from 2017 to 2026 the featured
+years are 2017, 2021, 2025 and 2026. The schema guarantees that a
+featured year has a non-null `scene` and `image`; the bound of four is
+not expressible in JSON Schema and is enforced by smolf's tests.
+
 ## `series.json`
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.0.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -285,7 +314,7 @@ instead of inventing a value. `LOWER_BOUND` scenes enter the median at
 face value; a consumer that wants to flag such months can count them in
 `scenes`.
 
-Quality flags (degrading/informational) are not part of 3.0.0.
+Quality flags (degrading/informational) are not part of 3.1.0.
 
 ## `publish.json`
 
@@ -294,7 +323,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.0.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -487,6 +516,13 @@ one of a same-month scene, clipped to the reservoir. All of them:
     (ADR 0001); `reservoir_outline` is required; the version pattern
     of all three schemas is `^3\.[0-9]+\.[0-9]+$`, so 2.x consumers reject
     3.x files until they move to `v0.5.0`.
+  - `schema_version` 3.1.0 — smolf `v0.6.0` (additive; spec #56, issue
+    #57, ADR 0002): every `same_month.years[]` entry of `latest.json`
+    gains the optional boolean `featured` (always written by smolf),
+    `true` for the current year and the first, middle and last earlier
+    years (see "Featured years"); the schema rejects `featured: true`
+    with a null `scene` or `image`. Every year keeps its hectares and its
+    clipped photo, so 3.0.0 consumers are unaffected.
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a

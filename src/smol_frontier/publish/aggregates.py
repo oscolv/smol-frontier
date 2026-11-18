@@ -180,11 +180,11 @@ def same_month(scenes: list[dict[str, object]]) -> dict[str, object] | None:
 
     ``scenes`` are published entries sorted by date. ``years`` runs from the
     year of the first scene (HIDDEN and POOR included) to the year of that
-    FULL scene, one ``{year, n_scenes, scene}`` each: ``n_scenes`` counts
+    FULL scene, one ``{year, n_scenes, scene, featured}`` each: ``n_scenes`` counts
     the month's FULL and LOWER_BOUND scenes that year and ``scene`` is their
     lower median (``_SAME_MONTH_SCENE_FIELDS`` only), None when there is
-    none. ``featured`` marks the current year and up to three prior years
-    (``_featured_indices``). None when no scene is FULL.
+    none. ``featured`` marks the current year plus the first, middle and last
+    prior years, by scene count only (``_featured_indices``). None when no scene is FULL.
     """
     full = [scene for scene in scenes if scene["display_status"] == FULL]
     if not full:

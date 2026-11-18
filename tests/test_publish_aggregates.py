@@ -272,7 +272,12 @@ def test_same_month_scene_carries_only_the_label_fields() -> None:
     }
 
 
-def _featured(first: int, last: int, empty: set[int] = frozenset(), ha=None) -> list:
+def _featured(
+    first: int,
+    last: int,
+    empty: frozenset[int] | set[int] = frozenset(),
+    ha: dict[int, float] | None = None,
+) -> list[int]:
     """Featured years of a November series from ``first`` to ``last``.
 
     Every year has one FULL November scene except those in ``empty``, which

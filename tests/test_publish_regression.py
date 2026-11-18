@@ -240,8 +240,14 @@ def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:
     for record in records:
         if record["status"] == "ok":
             item_id = record["item_id_used"]
-            if not cache_path(paths.cache_dir(), item_id).exists():
+            cached = cache_path(paths.cache_dir(), item_id)
+            if not cached.exists():
                 pytest.skip(f"scene {item_id} not in data/cache: run `smolf fetch`")
+            digest = hashlib.sha256(cached.read_bytes()).hexdigest()
+            if digest != record["cache_sha256"]:
+                pytest.skip(
+                    f"cached {item_id} is not the file the record was built from"
+                )
     out_dir = publish.publish_run(
         run_id=FIXTURE_RUN, out_dir=tmp_path / "pub", series_root=paths.series_dir()
     )

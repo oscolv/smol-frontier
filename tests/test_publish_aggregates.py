@@ -6,7 +6,9 @@ from smol_frontier.publish.aggregates import (
     display_ha,
     display_status,
     hectare_cutoff,
+    lower_median,
     monthly_medians,
+    same_month,
 )
 from smol_frontier.publish.errors import ContractInvalid
 
@@ -177,3 +179,94 @@ def test_monthly_medians_order_does_not_depend_on_input_order() -> None:
 
 def test_monthly_medians_empty() -> None:
     assert monthly_medians([]) == []
+
+
+def _pick(day: str, ha: float, item_id: str = "X", status: str = "FULL") -> dict:
+    return {
+        "date": day,
+        "item_id": item_id,
+        "hyacinth_corrected_ha": ha,
+        "display_status": status,
+    }
+
+
+def test_lower_median_odd_count_is_middle_scene() -> None:
+    scenes = [_pick("2024-01-01", 30.0), _pick("2024-01-02", 10.0)]
+    scenes.append(_pick("2024-01-03", 20.0))
+    assert lower_median(scenes)["date"] == "2024-01-03"
+
+
+def test_lower_median_even_count_is_lower_of_middle_pair() -> None:
+    scenes = [
+        _pick("2024-01-01", 40.0),
+        _pick("2024-01-02", 10.0),
+        _pick("2024-01-03", 30.0),
+        _pick("2024-01-04", 20.0),
+    ]
+    assert lower_median(scenes)["hyacinth_corrected_ha"] == 20.0
+
+
+def test_lower_median_ties_broken_by_date_then_item_id() -> None:
+    scenes = [
+        _pick("2024-01-09", 10.0, "A"),
+        _pick("2024-01-05", 10.0, "Z"),
+        _pick("2024-01-05", 10.0, "B"),
+    ]
+    assert [lower_median(scenes)[k] for k in ("date", "item_id")] == [
+        "2024-01-05",
+        "Z",
+    ]
+    pair = [_pick("2024-01-05", 10.0, "Z"), _pick("2024-01-05", 10.0, "B")]
+    assert lower_median(pair)["item_id"] == "B"
+
+
+def test_lower_median_compares_exact_decimals_not_text() -> None:
+    scenes = [_pick("2024-01-01", 9.5), _pick("2024-01-02", 10.25)]
+    assert lower_median(scenes)["hyacinth_corrected_ha"] == 9.5
+
+
+def test_lower_median_empty_is_none() -> None:
+    assert lower_median([]) is None
+
+
+def test_same_month_none_without_full_scene() -> None:
+    scenes = [
+        _pick("2024-01-01", 10.0, status="LOWER_BOUND"),
+        _pick("2024-02-01", 10.0, status="HIDDEN"),
+    ]
+    assert same_month(scenes) is None
+    assert same_month([]) is None
+
+
+def test_same_month_month_of_latest_full_years_from_first_scene() -> None:
+    scenes = [
+        _pick("2022-11-30", 1.0, status="HIDDEN"),
+        _pick("2023-03-02", 7.0, "A"),
+        _pick("2023-03-20", 5.0, "B", "LOWER_BOUND"),
+        _pick("2023-03-25", 1.0, "C", "HIDDEN"),
+        _pick("2025-03-08", 9.0, "D"),
+        _pick("2025-04-01", 2.0, "E", "LOWER_BOUND"),
+        _pick("2025-05-01", 3.0, "F", "HIDDEN"),
+    ]
+    block = same_month(scenes)
+    assert block["month"] == 3
+    assert [(y["year"], y["n_scenes"]) for y in block["years"]] == [
+        (2022, 0),
+        (2023, 2),
+        (2024, 0),
+        (2025, 1),
+    ]
+    assert block["years"][0]["scene"] is None
+    assert block["years"][1]["scene"] == _pick("2023-03-20", 5.0, "B", "LOWER_BOUND")
+    assert block["years"][3]["scene"]["item_id"] == "D"
+
+
+def test_same_month_scene_carries_only_the_label_fields() -> None:
+    scene = _pick("2024-06-01", 4.0) | {"valid_frac": 0.99, "display_ha": None}
+    [year] = same_month([scene])["years"]
+    assert set(year["scene"]) == {
+        "item_id",
+        "date",
+        "hyacinth_corrected_ha",
+        "display_status",
+    }

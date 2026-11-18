@@ -142,3 +142,69 @@ def monthly_medians(scenes: list[dict[str, object]]) -> list[dict[str, object]]:
             }
         )
     return entries
+
+
+def lower_median(scenes: list[dict[str, object]]) -> dict[str, object] | None:
+    """The lower-median scene: the ⌈n/2⌉-th by ``hyacinth_corrected_ha``.
+
+    Ties are broken by date, then item id, so the choice is deterministic and
+    always a real scene. None for an empty list. Callers pass non-HIDDEN
+    scenes only (their corrected figure is never null).
+    """
+    if not scenes:
+        return None
+    ordered = sorted(
+        scenes,
+        key=lambda scene: (
+            _decimal(scene["hyacinth_corrected_ha"]),
+            str(scene["date"]),
+            str(scene["item_id"]),
+        ),
+    )
+    return ordered[(len(ordered) + 1) // 2 - 1]
+
+
+# WHY: the per-scene fields a same-month year entry carries — enough to
+#   label the representative scene without a lookup in series.json.
+_SAME_MONTH_SCENE_FIELDS = (
+    "item_id",
+    "date",
+    "hyacinth_corrected_ha",
+    "display_status",
+)
+
+
+def same_month(scenes: list[dict[str, object]]) -> dict[str, object] | None:
+    """``{month, years}`` for the calendar month of the latest FULL scene.
+
+    ``scenes`` are published entries sorted by date. ``years`` runs from the
+    year of the first scene (HIDDEN and POOR included) to the year of that
+    FULL scene, one ``{year, n_scenes, scene}`` each: ``n_scenes`` counts
+    the month's FULL and LOWER_BOUND scenes that year and ``scene`` is their
+    lower median (``_SAME_MONTH_SCENE_FIELDS`` only), None when there is
+    none. None when no scene is FULL.
+    """
+    full = [scene for scene in scenes if scene["display_status"] == FULL]
+    if not full:
+        return None
+    anchor = str(full[-1]["date"])
+    month = int(anchor[5:7])
+    by_year: dict[int, list[dict[str, object]]] = {}
+    for scene in scenes:
+        day = str(scene["date"])
+        if int(day[5:7]) == month and scene["display_status"] != HIDDEN:
+            by_year.setdefault(int(day[:4]), []).append(scene)
+    years: list[dict[str, object]] = []
+    for year in range(int(str(scenes[0]["date"])[:4]), int(anchor[:4]) + 1):
+        shown = by_year.get(year, [])
+        chosen = lower_median(shown)
+        years.append(
+            {
+                "year": year,
+                "n_scenes": len(shown),
+                "scene": None
+                if chosen is None
+                else {field: chosen[field] for field in _SAME_MONTH_SCENE_FIELDS},
+            }
+        )
+    return {"month": month, "years": years}

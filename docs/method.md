@@ -283,7 +283,13 @@ bands in hectares of the published reservoir area, rounded half up
 from the first scene to the last, the median of the published corrected
 hectares of its non-HIDDEN scenes (mean of the two middle values when
 even, rounded half up to 2 decimals) and their count; a month with none
-is `null`/0.
+is `null`/0. `latest.json`'s `same_month`
+(`publish.aggregates.same_month()`) takes the calendar month of the
+latest `FULL` scene and, for every year from the first scene's to that
+scene's, the lower median of the month's non-HIDDEN scenes
+(`lower_median()`: the ⌈n/2⌉-th by corrected hectares, ties by date then
+item id), so each year's figure is a real scene; its photo is clipped to
+the reservoir polygon on the `map.png` grid.
 
 Runs do not persist class maps, so the latest scene is re-classified from
 the scene cache after its sha256 matches the record's `cache_sha256` (a

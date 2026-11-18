@@ -19,10 +19,15 @@ from smol_frontier.publish.aggregates import (
     display_status,
     hectare_cutoff,
     monthly_medians,
+    same_month,
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
 from smol_frontier.publish.map import map_path, png_path
-from smol_frontier.publish.truecolour import attribution, image_path
+from smol_frontier.publish.truecolour import (
+    attribution,
+    clipped_image_path,
+    image_path,
+)
 
 # WHY: contract version written into every document. Each schema accepts any
 #   version with this major (pattern ^3\.[0-9]+\.[0-9]+$ plus "not" a
@@ -39,7 +44,9 @@ from smol_frontier.publish.truecolour import attribution, image_path
 #   required (issue #45, spec #44); every scene carries display_ha and
 #   constants gain green_max_ha / red_min_ha (issue #46); latest.json
 #   carries image, a Sentinel-2 true-colour photo (issue #48); series.json
-#   carries monthly, the per-month median of corrected hectares (issue #47).
+#   carries monthly, the per-month median of corrected hectares (issue #47);
+#   latest.json carries same_month, one lower-median scene and a
+#   reservoir-clipped photo per year (issue #49).
 SCHEMA_VERSION = "3.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
@@ -270,7 +277,26 @@ def latest_document(
         "path": image_path(record),
         "attribution": attribution(record["date"]),
     }
+    document["same_month"] = _same_month_block(_scene_entries(records))
     return document
+
+
+def _same_month_block(scenes: list[dict[str, object]]) -> dict[str, object] | None:
+    """``same_month`` with each year's clipped-photo reference (or null)."""
+    block = same_month(scenes)
+    if block is None:
+        return None
+    for year in block["years"]:
+        scene = year["scene"]
+        year["image"] = (
+            None
+            if scene is None
+            else {
+                "path": clipped_image_path(scene),
+                "attribution": attribution(scene["date"]),
+            }
+        )
+    return block
 
 
 def reservoir_outline() -> dict[str, object]:
@@ -308,6 +334,15 @@ def latest_record(records: list[dict[str, object]]) -> dict[str, object]:
     return [record for record in ordered if record["status"] == "ok"][-1]
 
 
+def _scene_entries(records: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Entries of every ok and skipped record, sorted by date (series.json)."""
+    return [
+        _scene_entry(r)
+        for r in sorted(records, key=series.record_sort_key)
+        if r["status"] in ("ok", "skipped")
+    ]
+
+
 def series_document(
     records: list[dict[str, object]], manifest: dict[str, object]
 ) -> dict:
@@ -316,11 +351,7 @@ def series_document(
     Error scenes are excluded. No quality flags (C16): runs do not persist
     them and publish never recomputes them.
     """
-    scenes = [
-        _scene_entry(r)
-        for r in sorted(records, key=series.record_sort_key)
-        if r["status"] in ("ok", "skipped")
-    ]
+    scenes = _scene_entries(records)
     return {
         "schema_version": SCHEMA_VERSION,
         "smolf_version": __version__,

@@ -7,6 +7,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+import numpy as np
+
 from smol_frontier import __version__, paths, series
 from smol_frontier.classify.display import write_display_png
 from smol_frontier.classify.geotiff import write_published_geotiff
@@ -27,9 +29,16 @@ from smol_frontier.publish.map import (
     png_path,
 )
 from smol_frontier.publish.select import _read_manifest, select_run
+from smol_frontier.publish.truecolour import (
+    IMAGE_DIR,
+    build_true_colour,
+    image_path,
+    stretch,
+    write_true_colour_webp,
+)
 
 # WHY: allowlist — the only files `publish` may ever write, so nothing
-#   unexpected (e.g. source imagery) can reach the published directory.
+#   unexpected (e.g. PlanetScope imagery) can reach the published directory.
 ALLOWED_FILES = frozenset({"latest.json", "series.json", "publish.json"})
 # WHY: the integrity index is written last, over the other staged files; it
 #   is the only file that never lists itself.
@@ -41,10 +50,25 @@ ALLOWED_MAP_PATTERN = re.compile(
     r"map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.(?:tif|png)"
 )
 
+# WHY: Sentinel-2 photos (contract 3.0.0) — the latest scene's under
+#   image/, the reservoir-clipped same-month ones under image/clipped/, both
+#   named <date>_<item_id>.webp so a new document never pairs with an old
+#   image.
+ALLOWED_IMAGE_PATTERN = re.compile(
+    r"image/(?:clipped/)?[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.webp"
+)
+
+# WHY: the only directories a contract holds (the walk sees them as entries).
+_ALLOWED_DIRS = frozenset({_MAP_DIR, IMAGE_DIR, f"{IMAGE_DIR}/clipped"})
+
 
 def is_allowed(name: str) -> bool:
     """True for a relative path `publish` may write (the C6 allowlist)."""
-    return name in ALLOWED_FILES or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
+    return (
+        name in ALLOWED_FILES
+        or ALLOWED_MAP_PATTERN.fullmatch(name) is not None
+        or ALLOWED_IMAGE_PATTERN.fullmatch(name) is not None
+    )
 
 
 def _resolve_out_dir(out_dir: Path) -> Path:
@@ -141,7 +165,7 @@ def _first_foreign(directory: Path) -> str | None:
     """The first entry under ``directory`` outside the allowlist, if any."""
     for path in directory.rglob("*"):
         rel = path.relative_to(directory).as_posix()
-        if not is_allowed(rel) and rel != _MAP_DIR:
+        if not is_allowed(rel) and rel not in _ALLOWED_DIRS:
             return rel
     return None
 
@@ -286,6 +310,7 @@ def _write_contract(
     run_id: str,
     series_sha256: str,
     maps: list[tuple[str, str, PublishedMap]] | None = None,
+    images: list[tuple[str, np.ndarray, str | None]] | None = None,
 ) -> None:
     """Write allowlisted files into a sibling staging dir, then swap it in.
 
@@ -294,8 +319,10 @@ def _write_contract(
     from the bytes actually staged and validated before the swap.
     """
     maps = [] if maps is None else maps
+    images = [] if images is None else images
     map_names = [name for tif, png, _ in maps for name in (tif, png)]
-    for name in [*documents, *map_names]:
+    image_names = [name for name, _, _ in images]
+    for name in [*documents, *map_names, *image_names]:
         if not is_allowed(name):
             msg = f"refusing to publish a file outside the allowlist: {name}"
             raise ValueError(msg)
@@ -317,6 +344,9 @@ def _write_contract(
                 staging / tif, layer.class_map, layer.transform, layer.crs
             )
             write_display_png(staging / png, layer.display)
+        for name, array, collection in images:
+            (staging / name).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+            write_true_colour_webp(staging / name, array, collection)
         index = publish_index(staging, run_id, series_sha256, series.utc_now())
         validate("publish", index)
         (staging / INDEX_FILE).write_text(canonical_json(index), encoding="utf-8")
@@ -359,6 +389,9 @@ def publish_run(
     layer = build_map(record, manifest)
     latest_map = _require_dict(latest["map"], "latest.json map")
     latest_map["bounds"] = layer.display.bounds
+    photo = build_true_colour(record, layer.display)
+    latest_image = _require_dict(latest["image"], "latest.json image")
+    latest_image["bounds"] = layer.display.bounds
     validate("latest", latest)
     validate("series", series_doc)
     _write_contract(
@@ -370,5 +403,6 @@ def publish_run(
         str(manifest["run_id"]),
         str(manifest["series_sha256"]),
         [(map_path(record), png_path(record), layer)],
+        [(image_path(record), stretch(photo.reflectance), photo.collection)],
     )
     return target

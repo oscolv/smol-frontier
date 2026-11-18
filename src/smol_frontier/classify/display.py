@@ -3,8 +3,9 @@
 ``render_display_image`` warps the published class map (classes 0-5) to
 EPSG:3857 with nearest-neighbour resampling and computes its EPSG:4326
 bounds; ``write_display_png`` colours it and writes an RGBA PNG. Both pass
-the single source-imagery guard in ``classify.geotiff`` first, so no
-reflectance or pre-made RGBA can ever reach a published PNG.
+the class-map guard in ``classify.geotiff`` first, so no reflectance or
+pre-made RGBA can ever reach the published map PNG. (Sentinel-2 photos
+go through their own guard, ``publish.truecolour.guard_true_colour``.)
 """
 
 import warnings

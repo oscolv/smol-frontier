@@ -4,9 +4,10 @@ The GeoTIFF opens colored in QGIS: a palette color table on band 1, nodata 0
 (transparent), a band description, and per-class legend tags. Writers:
 ``write_classified_geotiff`` for the classifier's map (classes 0-4), and the
 guarded ``write_published_geotiff`` for the published map (classes 0-5).
-``guard_published`` is the one source-imagery guard every published raster
-passes (this writer and ``classify.display``): it refuses anything that is
-not a uint8 class map, so reflectance or source imagery can never be written.
+``guard_published`` is the guard every published class-map raster passes
+(this writer and ``classify.display``): it refuses anything that is not a
+uint8 class map, so reflectance or imagery can never be written as a map.
+Sentinel-2 photos have their own guard, ``publish.truecolour.guard_true_colour``.
 """
 
 from pathlib import Path

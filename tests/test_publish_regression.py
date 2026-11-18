@@ -17,6 +17,7 @@ miss would otherwise trigger a network re-ingest. No network.
 
 import hashlib
 import json
+import os
 import shutil
 import warnings
 from pathlib import Path
@@ -31,6 +32,7 @@ from smol_frontier.classify.display import DISPLAY_CRS
 from smol_frontier.config import settings
 from smol_frontier.hydro import flood_map
 from smol_frontier.ingest import cache_path
+from smol_frontier.publish import truecolour
 
 FIXTURES = Path(__file__).parent / "fixtures" / "publish_regression"
 SCENE_2026_10_12 = "S2B_14QMH_20261012_0_L2A"
@@ -55,6 +57,24 @@ RUN_INPUTS = {
 # HOW: measured on the 2026-10-12 map (18.9-33.7 m against a 10.69 m display
 #   pixel); 4 px leaves one pixel of headroom without hiding a real shift.
 AOI_BBOX_TOLERANCE_PX = 4
+
+# WHY: the real reader, kept for the opt-in live test (the fixture below
+#   replaces it for every other test).
+_REAL_READER = truecolour.read_true_colour
+
+
+@pytest.fixture(autouse=True)
+def offline_true_colour(monkeypatch: pytest.MonkeyPatch) -> list[tuple]:
+    calls: list[tuple] = []
+
+    def fake(
+        backend: str, item_id: str, transform: rasterio.Affine, shape: tuple
+    ) -> truecolour.TrueColour:
+        calls.append((backend, item_id, shape))
+        return truecolour.TrueColour(np.full((3, *shape), 0.1), truecolour.COLLECTION)
+
+    monkeypatch.setattr(truecolour, "read_true_colour", fake)
+    return calls
 
 
 def _publish_fixture(tmp_path: Path, item_id: str) -> tuple[dict, Path]:
@@ -161,3 +181,35 @@ def test_publish_regression_png_bounds_enclose_aoi_bbox(tmp_path: Path) -> None:
         "top": (top - aoi_top) / pixel_y,
     }
     assert all(0 <= px <= AOI_BBOX_TOLERANCE_PX for px in excess_px.values()), excess_px
+
+
+def _image_shape(out_dir: Path, rel: str) -> tuple[int, int, int]:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(out_dir / rel) as src:
+            return (src.count, *src.shape)
+
+
+def test_publish_regression_image_on_the_png_grid(
+    tmp_path: Path, offline_true_colour: list[tuple]
+) -> None:
+    latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
+    png = _image_shape(out_dir, latest["map"]["png"])
+    assert _image_shape(out_dir, latest["image"]["path"]) == (3, *png[1:])
+    assert latest["image"]["bounds"] == latest["map"]["bounds"]
+    assert latest["image"]["attribution"] == "Copernicus Sentinel data 2026"
+    assert offline_true_colour == [("earth-search", SCENE_2026_10_12, png[1:])]
+
+
+@pytest.mark.skipif(
+    os.environ.get("SMOLF_LIVE") != "1",
+    reason="opt-in live Earth Search test (SMOLF_LIVE=1)",
+)
+def test_publish_regression_live_image_well_under_300_kb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(truecolour, "read_true_colour", _REAL_READER)
+    latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
+    size = (out_dir / latest["image"]["path"]).stat().st_size
+    print(f"\nSMOLF_LIVE: {latest['image']['path']} {size} bytes")
+    assert size < 300_000

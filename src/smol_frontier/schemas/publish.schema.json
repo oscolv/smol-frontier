@@ -48,7 +48,7 @@
           "path": {
             "description": "POSIX path relative to the output directory; only allowlisted names.",
             "type": "string",
-            "pattern": "^(?:latest\\.json|series\\.json|map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.(?:tif|png))$"
+            "pattern": "^(?:latest\\.json|series\\.json|map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.(?:tif|png)|image/(?:clipped/)?[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.webp)$"
           },
           "sha256": {
             "type": "string",

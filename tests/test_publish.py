@@ -419,7 +419,7 @@ def test_publish_latest_golden_values(
         "cover_band": "RED",
         "display_status": "FULL",
         "display_ha": {"total": 631, "dense": 400, "interface": 231},
-        "schema_version": "3.0.0",
+        "schema_version": "3.1.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -467,6 +467,7 @@ def test_publish_latest_golden_values(
                         "hyacinth_corrected_ha": 630.56,
                         "display_status": "FULL",
                     },
+                    "featured": True,
                     "image": {
                         "path": "image/clipped/2024-01-01_S2A_14QMH_20240101_0_L2A.webp",
                         "attribution": "Copernicus Sentinel data 2024",
@@ -1022,7 +1023,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "3.0.0"
+    assert doc["schema_version"] == "3.1.0"
     assert doc["smolf_version"] == __version__
     assert [
         (s["quality_light"], s["bed_applied"], s["display_status"]) for s in scenes
@@ -1985,12 +1986,19 @@ def test_publish_same_month_from_latest_full_scene_with_empty_year(
                     "hyacinth_corrected_ha": 100.0,
                     "display_status": "LOWER_BOUND",
                 },
+                "featured": True,
                 "image": {
                     "path": _clipped("2023-02-13", "S2B_B_20230213"),
                     "attribution": "Copernicus Sentinel data 2023",
                 },
             },
-            {"year": 2024, "n_scenes": 0, "scene": None, "image": None},
+            {
+                "year": 2024,
+                "n_scenes": 0,
+                "scene": None,
+                "featured": False,
+                "image": None,
+            },
             {
                 "year": 2025,
                 "n_scenes": 1,
@@ -2000,6 +2008,7 @@ def test_publish_same_month_from_latest_full_scene_with_empty_year(
                     "hyacinth_corrected_ha": 500.0,
                     "display_status": "FULL",
                 },
+                "featured": True,
                 "image": {
                     "path": _clipped("2025-02-10", "S2B_D_20250210"),
                     "attribution": "Copernicus Sentinel data 2025",
@@ -2131,6 +2140,11 @@ def test_publish_same_month_schema_rejects_bad_blocks(
     year = block["years"][0]
     empty = {"year": 2023, "n_scenes": 0, "scene": None, "image": None}
     publish.validate("latest", {**good, "same_month": {**block, "years": [empty]}})
+    not_featured = {**empty, "featured": False}
+    publish.validate(
+        "latest", {**good, "same_month": {**block, "years": [not_featured]}}
+    )
+    assert all(isinstance(y["featured"], bool) for y in block["years"])
     for bad in (
         {**block, "month": 13},
         {**block, "month": 0},
@@ -2139,6 +2153,10 @@ def test_publish_same_month_schema_rejects_bad_blocks(
         {**block, "years": [{**year, "scene": None}]},
         {**block, "years": [{**year, "image": None}]},
         {**block, "years": [{**empty, "image": year["image"]}]},
+        {**block, "years": [{**empty, "featured": True}]},
+        {**block, "years": [{**year, "featured": True, "scene": None}]},
+        {**block, "years": [{**year, "featured": True, "image": None}]},
+        {**block, "years": [{**year, "featured": "yes"}]},
         {**block, "years": [{**year, "n_scenes": -1}]},
         {
             **block,
@@ -2166,7 +2184,7 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "3.0.0",
+        "schema_version": "3.1.0",
         "series_sha256": "cd" * 32,
         "smolf_version": "0.5.0",
     }

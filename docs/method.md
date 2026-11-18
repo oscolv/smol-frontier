@@ -262,7 +262,7 @@ RFC 7946 MultiPolygon and the current SIH level),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "3.0.0"`, written exactly; each schema accepts any
+(`SCHEMA_VERSION = "3.1.0"`, written exactly; each schema accepts any
 `3.x.y`, and only a new optional field is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded
@@ -288,7 +288,9 @@ is `null`/0. `latest.json`'s `same_month`
 latest `FULL` scene and, for every year from the first scene's to that
 scene's, the lower median of the month's non-HIDDEN scenes
 (`lower_median()`: the ⌈n/2⌉-th by corrected hectares, ties by date then
-item id), so each year's figure is a real scene; its photo is clipped to
+item id), so each year's figure is a real scene. Each year carries `featured`
+(`_featured_indices()`: the current year plus the first, middle and last
+prior years, chosen by scene count only, never hectares; ADR 0002); its photo is clipped to
 the reservoir polygon on the `map.png` grid.
 
 Runs do not persist class maps, so the latest scene is re-classified from

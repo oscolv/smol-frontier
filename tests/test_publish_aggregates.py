@@ -270,3 +270,88 @@ def test_same_month_scene_carries_only_the_label_fields() -> None:
         "hyacinth_corrected_ha",
         "display_status",
     }
+
+
+def _featured(
+    first: int,
+    last: int,
+    empty: frozenset[int] | set[int] = frozenset(),
+    ha: dict[int, float] | None = None,
+) -> list[int]:
+    """Featured years of a November series from ``first`` to ``last``.
+
+    Every year has one FULL November scene except those in ``empty``, which
+    only hold a hidden June scene (so the series still starts in ``first``).
+    ``ha`` maps a year to its hectares (default 1.0). Also checks the
+    invariants every featured set must hold.
+    """
+    scenes = []
+    for year in range(first, last + 1):
+        if year in empty:
+            scenes.append(_pick(f"{year}-06-01", 1.0, f"H{year}", "HIDDEN"))
+        else:
+            hectares = (ha or {}).get(year, 1.0)
+            scenes.append(_pick(f"{year}-11-10", hectares, f"Y{year}"))
+    years = same_month(scenes)["years"]
+    assert all(isinstance(y["featured"], bool) for y in years)
+    featured = [y for y in years if y["featured"]]
+    assert len(featured) <= 4
+    assert all(y["scene"] is not None for y in featured)
+    assert years[-1]["featured"]
+    return [y["year"] for y in featured]
+
+
+def test_same_month_features_first_middle_last_prior_and_current() -> None:
+    assert _featured(2017, 2026) == [2017, 2021, 2025, 2026]
+
+
+def test_same_month_featured_empty_first_falls_forward() -> None:
+    assert _featured(2017, 2026, empty={2017}) == [2018, 2021, 2025, 2026]
+    assert _featured(2017, 2026, empty={2017, 2018}) == [2019, 2021, 2025, 2026]
+
+
+def test_same_month_featured_empty_last_prior_falls_backward() -> None:
+    assert _featured(2017, 2026, empty={2025}) == [2017, 2021, 2024, 2026]
+    assert _featured(2017, 2026, empty={2024, 2025}) == [2017, 2021, 2023, 2026]
+
+
+def test_same_month_featured_empty_middle_goes_to_nearest_year() -> None:
+    assert _featured(2017, 2026, empty={2020, 2021}) == [2017, 2022, 2025, 2026]
+    assert _featured(2017, 2026, empty={2021, 2022}) == [2017, 2020, 2025, 2026]
+
+
+def test_same_month_featured_middle_tie_goes_to_earlier_year() -> None:
+    assert _featured(2017, 2026, empty={2021}) == [2017, 2020, 2025, 2026]
+
+
+def test_same_month_featured_fallbacks_never_repeat_a_year() -> None:
+    # The middle target (2021) is empty and its nearest years with a scene
+    # (2019, 2023) are already the first and last prior picks.
+    empty = {2017, 2018, 2020, 2021, 2022, 2024, 2025}
+    assert _featured(2017, 2026, empty=empty) == [2019, 2023, 2026]
+    # Two prior years: the middle target is the first, already featured.
+    assert _featured(2024, 2026) == [2024, 2025, 2026]
+
+
+@pytest.mark.parametrize(
+    ("first", "empty", "expected"),
+    [
+        (2026, set(), [2026]),
+        (2023, {2023, 2024, 2025}, [2026]),
+        (2022, {2022, 2023, 2025}, [2024, 2026]),
+        (
+            2017,
+            {y for y in range(2017, 2026) if y not in (2018, 2023)},
+            [2018, 2023, 2026],
+        ),
+    ],
+)
+def test_same_month_featured_short_series_features_every_prior_year(
+    first: int, empty: set[int], expected: list[int]
+) -> None:
+    assert _featured(first, 2026, empty=empty) == expected
+
+
+def test_same_month_featured_does_not_read_hectares() -> None:
+    hectares = {year: 1000.0 - 90 * (year - 2017) for year in range(2017, 2027)}
+    assert _featured(2017, 2026, ha=hectares) == _featured(2017, 2026)

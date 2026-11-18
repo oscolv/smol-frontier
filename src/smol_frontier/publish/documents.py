@@ -47,7 +47,9 @@ from smol_frontier.publish.truecolour import (
 #   carries monthly, the per-month median of corrected hectares (issue #47);
 #   latest.json carries same_month, one lower-median scene and a
 #   reservoir-clipped photo per year (issue #49).
-SCHEMA_VERSION = "3.0.0"
+#   3.1.0: every same_month year carries featured, true for the current
+#   year and up to three earlier ones (issue #57, spec #56).
+SCHEMA_VERSION = "3.1.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.

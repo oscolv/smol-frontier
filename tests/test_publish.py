@@ -21,13 +21,15 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
+from rasterio.features import rasterize
 from rasterio.warp import (
     Resampling,
     calculate_default_transform,
     reproject,
     transform_bounds,
+    transform_geom,
 )
-from shapely.geometry import LinearRing, shape
+from shapely.geometry import LinearRing, box, mapping, shape
 from typer.testing import CliRunner
 
 from smol_frontier import __version__, aoi, paths, publish, series
@@ -117,10 +119,10 @@ FAKE_HA = {
 }
 
 
-def _fake_reflectance(shape: tuple) -> np.ndarray:
+def _fake_reflectance(shape: tuple, blue: float = 0.05) -> np.ndarray:
     rows, cols = np.indices(shape, dtype=np.float64)
     ramp = (rows + cols) / max(sum(shape) - 2, 1)
-    reflectance = np.stack([0.30 * ramp, 0.20 * (1 - ramp), np.full(shape, 0.05)])
+    reflectance = np.stack([0.30 * ramp, 0.20 * (1 - ramp), np.full(shape, blue)])
     reflectance[:, 0, 0] = np.nan
     return reflectance
 
@@ -170,6 +172,7 @@ def scene_env(
         ha=dict(FAKE_HA),
         photo_calls=[],
         photo_collection="sentinel-2-l2a",
+        photo_blue={},  # item id -> blue reflectance of its fake photo
     )
 
     def fake_get_scene(backend: str, item_id: str) -> SceneMeta:
@@ -200,7 +203,10 @@ def scene_env(
         backend: str, item_id: str, transform: rasterio.Affine, shape: tuple
     ) -> truecolour.TrueColour:
         env.photo_calls.append((backend, item_id, transform, shape))
-        return truecolour.TrueColour(_fake_reflectance(shape), env.photo_collection)
+        blue = env.photo_blue.get(item_id, 0.05)
+        return truecolour.TrueColour(
+            _fake_reflectance(shape, blue), env.photo_collection
+        )
 
     monkeypatch.setattr(truecolour, "read_true_colour", fake_read_true_colour)
     monkeypatch.setattr(publish.map, "get_scene", fake_get_scene)
@@ -447,6 +453,26 @@ def test_publish_latest_golden_values(
             "path": "image/2024-01-04_S2B_14QMH_20240104_0_L2A.webp",
             "bounds": _latest(out)["map"]["bounds"],
             "attribution": "Copernicus Sentinel data 2024",
+        },
+        # two FULL January scenes tie on hectares: the earlier date wins
+        "same_month": {
+            "month": 1,
+            "years": [
+                {
+                    "year": 2024,
+                    "n_scenes": 2,
+                    "scene": {
+                        "item_id": "S2A_14QMH_20240101_0_L2A",
+                        "date": "2024-01-01",
+                        "hyacinth_corrected_ha": 630.56,
+                        "display_status": "FULL",
+                    },
+                    "image": {
+                        "path": "image/clipped/2024-01-01_S2A_14QMH_20240101_0_L2A.webp",
+                        "attribution": "Copernicus Sentinel data 2024",
+                    },
+                }
+            ],
         },
     }
 
@@ -1528,6 +1554,8 @@ def test_publish_map_refusal_keeps_previous_output(
     assert before == [
         "image",
         "image/2024-01-01_A.webp",
+        "image/clipped",
+        "image/clipped/2024-01-01_A.webp",
         "latest.json",
         "map",
         "map/2024-01-01_A.png",
@@ -1780,7 +1808,9 @@ def test_publish_image_is_rgb_webp_on_the_map_png_grid(
     assert pixels.dtype == np.uint8
     assert pixels.shape == (3, *png_meta["shape"])
     assert (out / IMAGE_REL).stat().st_size < 300_000
-    [(backend, item_id, transform, shape)] = scene_env.photo_calls
+    [(backend, item_id, transform, shape)] = [
+        call for call in scene_env.photo_calls if call[1] == LATEST_ITEM
+    ]
     assert (backend, item_id, shape) == ("earth-search", LATEST_ITEM, png.shape[1:])
     expected = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
     assert transform == expected.transform
@@ -1861,10 +1891,11 @@ def test_publish_out_with_clipped_image_is_a_previous_contract(
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
-    (out / "image" / "clipped").mkdir()
-    (out / "image" / "clipped" / "2023-01-04_A.webp").write_bytes(b"old")
+    stale = out / "image" / "clipped" / "2023-01-04_A.webp"
+    stale.write_bytes(b"old")
     assert _publish(out, "--run", RUN_ID).exit_code == 0
-    assert not (out / "image" / "clipped").exists()
+    assert not stale.exists()
+    assert (out / "image" / "clipped").is_dir()
 
 
 def test_publish_image_schema_rejects_bad_image(
@@ -1882,6 +1913,245 @@ def test_publish_image_schema_rejects_bad_image(
     ):
         with pytest.raises(publish.ContractInvalid):
             publish.validate("latest", {**good, "image": bad})
+
+
+# --- same_month block ----------------------------------------------------
+
+
+def _ha_record(day: str, item_id: str, ha: float, **overrides: object) -> dict:
+    """ok record whose corrected hectares are ``ha`` (all dense)."""
+    return _record(
+        day,
+        item_id,
+        "ok",
+        hyacinth_corrected_ha=ha,
+        dense_corrected_ha=ha,
+        interface_corrected_ha=0.0,
+        **overrides,
+    )
+
+
+def _same_month_records() -> list[dict]:
+    """Feb 2023 FULL+LOWER_BOUND, no Feb 2024, Feb 2025 FULL+DOUBTFUL, then a
+    LOWER_BOUND and a DOUBTFUL March 2025: latest.json is the DOUBTFUL one,
+    the month comes from the latest FULL scene (February)."""
+    return [
+        _record("2023-01-05", "S2A_POOR_20230105", "skipped"),
+        _ha_record("2023-02-03", "S2A_A_20230203", 300.0),
+        _ha_record("2023-02-13", "S2B_B_20230213", 100.0, valid_frac=0.9),
+        _ha_record("2024-07-01", "S2A_C_20240701", 50.0),
+        _ha_record("2025-02-10", "S2B_D_20250210", 500.0),
+        _ha_record("2025-02-20", "S2A_E_20250220", 10.0, light="DOUBTFUL"),
+        _ha_record("2025-03-01", "S2B_F_20250301", 20.0, valid_frac=0.9),
+        _ha_record("2025-03-15", "S2A_G_20250315", 30.0, light="DOUBTFUL"),
+    ]
+
+
+def _clipped(day: str, item_id: str) -> str:
+    return f"image/clipped/{day}_{item_id}.webp"
+
+
+@pytest.mark.parametrize(
+    ("newest", "item_id", "status"),
+    [
+        ("2025-03-15", "S2A_G_20250315", "HIDDEN"),
+        ("2025-03-01", "S2B_F_20250301", "LOWER_BOUND"),
+    ],
+)
+def test_publish_same_month_from_latest_full_scene_with_empty_year(
+    series_root: Path,
+    tmp_path: Path,
+    scene_env: SimpleNamespace,
+    newest: str,
+    item_id: str,
+    status: str,
+) -> None:
+    records = [r for r in _same_month_records() if r["date"] <= newest]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    latest = _latest(out)
+    assert (latest["date"], latest["display_status"]) == (newest, status)
+    assert latest["same_month"] == {
+        "month": 2,
+        "years": [
+            {
+                "year": 2023,
+                "n_scenes": 2,
+                "scene": {
+                    "item_id": "S2B_B_20230213",
+                    "date": "2023-02-13",
+                    "hyacinth_corrected_ha": 100.0,
+                    "display_status": "LOWER_BOUND",
+                },
+                "image": {
+                    "path": _clipped("2023-02-13", "S2B_B_20230213"),
+                    "attribution": "Copernicus Sentinel data 2023",
+                },
+            },
+            {"year": 2024, "n_scenes": 0, "scene": None, "image": None},
+            {
+                "year": 2025,
+                "n_scenes": 1,
+                "scene": {
+                    "item_id": "S2B_D_20250210",
+                    "date": "2025-02-10",
+                    "hyacinth_corrected_ha": 500.0,
+                    "display_status": "FULL",
+                },
+                "image": {
+                    "path": _clipped("2025-02-10", "S2B_D_20250210"),
+                    "attribution": "Copernicus Sentinel data 2025",
+                },
+            },
+        ],
+    }
+    assert sorted(p.name for p in (out / "image" / "clipped").iterdir()) == [
+        "2023-02-13_S2B_B_20230213.webp",
+        "2025-02-10_S2B_D_20250210.webp",
+    ]
+    read = sorted(item_id for _, item_id, _, _ in scene_env.photo_calls)
+    assert read == sorted([item_id, "S2B_B_20230213", "S2B_D_20250210"])
+
+
+def test_publish_same_month_latest_scene_photo_read_once(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root, records=[_ha_record("2024-01-04", LATEST_ITEM, 10.0)])
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert [call[1] for call in scene_env.photo_calls] == [LATEST_ITEM]
+    assert (out / IMAGE_REL).is_file()
+    assert (out / _clipped("2024-01-04", LATEST_ITEM)).is_file()
+
+
+def test_publish_same_month_clipped_images_are_rgba_transparent_outside(
+    series_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scene_env: SimpleNamespace,
+) -> None:
+    blue = {"S2B_B_20230213": 0.10, "S2B_D_20250210": 0.25}
+    scene_env.photo_blue.update(blue)
+    # WHY a stand-in polygon: the fixture grid lies outside the real
+    #   reservoir; this one covers the grid's top half.
+    reservoir = box(460_000.0, 2_249_900.0, 460_200.0, 2_250_000.0)
+    monkeypatch.setattr(aoi, "utm_geometry", lambda: reservoir)
+    _write_run(series_root, records=_same_month_records())
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    png_path = out / _latest(out)["map"]["png"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(png_path) as src:
+            png_shape = src.shape
+    display = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
+    geom = transform_geom(GRID_CRS, "EPSG:3857", mapping(reservoir))
+    inside = rasterize(
+        [(geom, 1)], out_shape=png_shape, transform=display.transform, fill=0
+    ).astype(bool)
+    assert 0 < inside.sum() < inside.size
+    for year in _latest(out)["same_month"]["years"]:
+        if year["image"] is None:
+            continue
+        pixels, driver = _webp(out / year["image"]["path"])
+        assert driver == "WEBP"
+        assert pixels.dtype == np.uint8
+        assert pixels.shape == (4, *png_shape)
+        assert (pixels[3][~inside] == 0).all()
+        assert (pixels[3][inside] == 255).all()
+        # the photo under each path is that year's scene's
+        low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
+        expected = (blue[year["scene"]["item_id"]] - low) / (high - low) * 255
+        assert abs(int(np.median(pixels[2][inside])) - round(expected)) <= 2
+
+
+def test_publish_same_month_images_listed_with_sha256_and_byte_identical(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root, records=_same_month_records())
+    first, second = tmp_path / "a", tmp_path / "b"
+    assert _publish(first, "--run", RUN_ID).exit_code == 0
+    assert _publish(second, "--run", RUN_ID).exit_code == 0
+    listed = {f["path"]: f["sha256"] for f in _index(first)["files"]}
+    names = [
+        _clipped("2023-02-13", "S2B_B_20230213"),
+        _clipped("2025-02-10", "S2B_D_20250210"),
+    ]
+    for name in names:
+        data = (first / name).read_bytes()
+        assert data == (second / name).read_bytes()
+        assert listed[name] == hashlib.sha256(data).hexdigest()
+
+
+def test_publish_same_month_null_without_full_scene(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [
+        _ha_record("2024-01-01", "S2A_A_20240101", 10.0, valid_frac=0.9),
+        _ha_record("2024-01-04", LATEST_ITEM, 20.0, light="DOUBTFUL"),
+    ]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert _latest(out)["same_month"] is None
+    assert not (out / "image" / "clipped").exists()
+
+
+def test_publish_same_month_reader_failure_exit_2_keeps_previous(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_run(series_root, records=_same_month_records())
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    before = _tree(out, hashed=True)
+    reader = truecolour.read_true_colour
+
+    def fails_for_2023(backend: str, item_id: str, *args: object):
+        if item_id == "S2B_B_20230213":
+            msg = "HTTP 503 from earth-search"
+            raise RuntimeError(msg)
+        return reader(backend, item_id, *args)
+
+    monkeypatch.setattr(truecolour, "read_true_colour", fails_for_2023)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    assert "refused: true-colour image of S2B_B_20230213" in result.output
+    assert _tree(out, hashed=True) == before
+    assert _siblings(tmp_path) == ["pub", "series"]
+
+
+def test_publish_same_month_schema_rejects_bad_blocks(
+    series_root: Path, tmp_path: Path
+) -> None:
+    good = _valid_latest(series_root, tmp_path)
+    publish.validate("latest", {**good, "same_month": None})
+    block = good["same_month"]
+    year = block["years"][0]
+    empty = {"year": 2023, "n_scenes": 0, "scene": None, "image": None}
+    publish.validate("latest", {**good, "same_month": {**block, "years": [empty]}})
+    for bad in (
+        {**block, "month": 13},
+        {**block, "month": 0},
+        {**block, "years": []},
+        {key: value for key, value in block.items() if key != "years"},
+        {**block, "years": [{**year, "scene": None}]},
+        {**block, "years": [{**year, "image": None}]},
+        {**block, "years": [{**empty, "image": year["image"]}]},
+        {**block, "years": [{**year, "n_scenes": -1}]},
+        {
+            **block,
+            "years": [{**year, "scene": {**year["scene"], "display_status": "HIDDEN"}}],
+        },
+        {**block, "years": [{**year, "image": {**year["image"], "path": IMAGE_REL}}]},
+        {**block, "years": [{**year, "image": {**year["image"], "attribution": "x"}}]},
+    ):
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate("latest", {**good, "same_month": bad})
+    without = {key: value for key, value in good.items() if key != "same_month"}
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("latest", without)
 
 
 # --- publish.json integrity index ---------------------------------------
@@ -1915,7 +2185,7 @@ def test_publish_index_lists_every_other_file_with_sha256(
         if p.is_file() and p.name != "publish.json"
     )
     assert [f["path"] for f in index["files"]] == on_disk
-    assert len(on_disk) == 5
+    assert len(on_disk) == 6
     for entry in index["files"]:
         data = (out / entry["path"]).read_bytes()
         assert entry["sha256"] == hashlib.sha256(data).hexdigest()

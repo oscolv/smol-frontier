@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from smol_frontier import __version__, paths, series
-from smol_frontier.classify.display import write_display_png
+from smol_frontier.classify.display import DisplayImage, write_display_png
 from smol_frontier.classify.geotiff import write_published_geotiff
 from smol_frontier.publish.documents import (
     SCHEMA_VERSION,
@@ -30,8 +30,11 @@ from smol_frontier.publish.map import (
 )
 from smol_frontier.publish.select import _read_manifest, select_run
 from smol_frontier.publish.truecolour import (
+    CLIPPED_DIR,
     IMAGE_DIR,
+    TrueColour,
     build_true_colour,
+    clip_to_reservoir,
     image_path,
     stretch,
     write_true_colour_webp,
@@ -59,7 +62,7 @@ ALLOWED_IMAGE_PATTERN = re.compile(
 )
 
 # WHY: the only directories a contract holds (the walk sees them as entries).
-_ALLOWED_DIRS = frozenset({_MAP_DIR, IMAGE_DIR, f"{IMAGE_DIR}/clipped"})
+_ALLOWED_DIRS = frozenset({_MAP_DIR, IMAGE_DIR, CLIPPED_DIR})
 
 
 def is_allowed(name: str) -> bool:
@@ -389,9 +392,12 @@ def publish_run(
     layer = build_map(record, manifest)
     latest_map = _require_dict(latest["map"], "latest.json map")
     latest_map["bounds"] = layer.display.bounds
-    photo = build_true_colour(record, layer.display)
+    photos: dict[str, TrueColour] = {}
+    photo = _photo(photos, record, layer.display)
     latest_image = _require_dict(latest["image"], "latest.json image")
     latest_image["bounds"] = layer.display.bounds
+    images = [(image_path(record), stretch(photo.reflectance), photo.collection)]
+    images += _clipped_images(latest, records, layer.display, photos)
     validate("latest", latest)
     validate("series", series_doc)
     _write_contract(
@@ -403,6 +409,41 @@ def publish_run(
         str(manifest["run_id"]),
         str(manifest["series_sha256"]),
         [(map_path(record), png_path(record), layer)],
-        [(image_path(record), stretch(photo.reflectance), photo.collection)],
+        images,
     )
     return target
+
+
+def _photo(
+    photos: dict[str, TrueColour], record: dict[str, object], display: DisplayImage
+) -> TrueColour:
+    """The record's photo on the ``map.png`` grid, read once per item id.
+
+    WHY memoised: the latest scene can also be a same-month representative,
+    and each read costs a network round trip of ~30 s.
+    """
+    item_id = str(record["item_id_used"])
+    if item_id not in photos:
+        photos[item_id] = build_true_colour(record, display)
+    return photos[item_id]
+
+
+def _clipped_images(
+    latest: dict[str, object],
+    records: list[dict[str, object]],
+    display: DisplayImage,
+    photos: dict[str, TrueColour],
+) -> list[tuple[str, np.ndarray, str | None]]:
+    """RGBA photos of every same-month representative, clipped to the reservoir."""
+    block = latest["same_month"]
+    if block is None:
+        return []
+    by_item = {str(r["item_id_used"]): r for r in records if r["status"] == "ok"}
+    images = []
+    for year in _require_dict(block, "latest.json same_month")["years"]:
+        if year["scene"] is None:
+            continue
+        photo = _photo(photos, by_item[year["scene"]["item_id"]], display)
+        rgba = clip_to_reservoir(stretch(photo.reflectance), display.transform)
+        images.append((year["image"]["path"], rgba, photo.collection))
+    return images

@@ -52,13 +52,14 @@ publish.json
 map/<date>_<item_id>.tif
 map/<date>_<item_id>.png
 image/<date>_<item_id>.webp
+image/clipped/<date>_<item_id>.webp   (one per same_month year with a scene)
 ```
 
-The two map files and the image are those of the scene described by
-`latest.json`; maps and images of earlier scenes are not kept. Their
-file names change with the scene, so a cache can never pair a new
-`latest.json` with an old map or image. The allowlist also reserves
-`image/clipped/<date>_<item_id>.webp` for reservoir-clipped photos.
+The two map files and `image/<date>_<item_id>.webp` are those of the
+scene described by `latest.json`; the clipped photos are those of the
+`same_month` scenes. Files of earlier publishes are not kept. File names
+change with the scene, so a cache can never pair a new `latest.json` with
+an old map or image.
 
 ## Conventions
 
@@ -217,12 +218,44 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `image.path` | string | — | no | Relative path `image/<date>_<item_id>.webp`. |
 | `image.bounds` | `[[south, west], [north, east]]` | degrees, EPSG:4326 | no | Always equal to `map.bounds`: the photo is on exactly the `map.png` grid. |
 | `image.attribution` | string | — | no | `Copernicus Sentinel data <year>`, the year of the scene; show it wherever the photo is shown (Copernicus licence). |
+| `same_month` | object or `null` | — | yes | The same calendar month in every year of the series (see "Same month, every year"); `null` when the run has no `FULL` scene. Since 3.0.0. |
+| `same_month.month` | integer 1–12 | — | no | Calendar month of the latest `FULL` scene of the run (not necessarily the scene above). |
+| `same_month.years` | array of year objects | — | no | One per year, ascending, from the year of the first scene of `series.json` to the year of that `FULL` scene. |
+| `same_month.years[].year` | integer | — | no | The year. |
+| `same_month.years[].n_scenes` | integer ≥ 0 | scenes | no | That month's scenes that year with `display_status` `FULL` or `LOWER_BOUND`. |
+| `same_month.years[].scene` | object or `null` | — | when `n_scenes` is 0 | The representative scene: the lower median of those scenes. |
+| `same_month.years[].scene.item_id` | string | — | no | Its STAC item id (as in `series.json`). |
+| `same_month.years[].scene.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
+| `same_month.years[].scene.hyacinth_corrected_ha` | number ≥ 0 | ha | no | Its published corrected hectares. |
+| `same_month.years[].scene.display_status` | enum `FULL`, `LOWER_BOUND` | — | no | Its `display_status`; `LOWER_BOUND` reads "at least". |
+| `same_month.years[].image` | object or `null` | — | when `n_scenes` is 0 | Its reservoir-clipped true-colour photo. |
+| `same_month.years[].image.path` | string | — | no | Relative path `image/clipped/<date>_<item_id>.webp`. |
+| `same_month.years[].image.attribution` | string | — | no | `Copernicus Sentinel data <year>`, the year of that scene. |
 
 The hectare cut-offs are for drawing; `cover_band`, computed from the
 published percentage, stays authoritative. At the exact boundary the two
 comparisons can disagree: 378.52 ha is below `green_max_ha` but publishes
 as 30.00 %, so its `cover_band` is YELLOW (and 630.87 ha publishes as
 50.00 %, RED).
+
+### Same month, every year
+
+`same_month` backs a year-over-year block that matches the homepage
+figure: its month is the calendar month (UTC date) of the latest `FULL`
+scene of the run. `latest.json`'s own scene is unchanged (the last `ok`
+scene, which may be `LOWER_BOUND` or `HIDDEN`). Years run from the year
+of the first scene in `series.json` (POOR scenes included) to the year of
+that `FULL` scene, so every year of the series appears and the consumer
+chooses which to show.
+
+For each year, the month's `FULL` and `LOWER_BOUND` scenes are ordered by
+`hyacinth_corrected_ha` (exact published decimals), ties broken by date
+then item id, and the ⌈n/2⌉-th is the representative (the lower median),
+so the figure always belongs to a real scene with a real photo. A year
+with no such scene carries `n_scenes: 0`, `scene: null` and
+`image: null`. Each representative has a clipped photo (see
+"True-colour image"); place it with `map.bounds`, since every photo is on
+the `map.png` grid.
 
 ## `series.json`
 
@@ -300,11 +333,14 @@ not applied, no pixel is class 5.
 ## True-colour image
 
 `image.path` is a natural-colour photo of the `latest.json` scene, for a
-map/photo toggle on a web map:
+map/photo toggle on a web map; each `same_month.years[].image.path` is
+one of a same-month scene, clipped to the reservoir. All of them:
 
 - **Grid:** exactly the `map.png` grid (same width, height and EPSG:3857
   transform), so `image.bounds` equals `map.bounds` and the two never
-  misalign. It is not clipped to the reservoir.
+  misalign. The `latest.json` photo is not clipped; each clipped photo is
+  transparent (alpha 0) outside the reservoir polygon, rasterised on the
+  same grid by pixel centre (nearest), and opaque inside it.
 - **Source:** bands B04, B03, B02 read at publish time straight from the
   scene's STAC item (exact `item_id`, Earth Search unless the run used
   another backend), not from smolf's scene cache, warped bilinearly onto
@@ -316,8 +352,17 @@ map/photo toggle on a web map:
   gamma (`TRUE_COLOUR_MIN`, `TRUE_COLOUR_MAX` in `config.py`), the same
   for every image, so dates and years compare visually. Brighter pixels
   (clouds, roofs) saturate; no-data pixels are black.
-- **Encoding:** RGB WebP at quality 90, not georeferenced; 88–166 KB on
-  the control scenes.
+- **Encoding:** WebP at quality 90 (RGB for the `latest.json` photo,
+  RGBA for clipped ones, alpha lossless), not georeferenced; 88–166 KB
+  for the unclipped photo on the control scenes. The colour under a
+  transparent pixel is the encoder's and carries no meaning.
+- **Cost:** every photo is read over the network at publish time, up to
+  roughly 30 s each. A series spanning ten years publishes up to eleven
+  photos; a scene that is both the `latest.json` scene and a same-month
+  representative is read once. Measured on 2026-11-18: the 2017–2026
+  series (10 reads) published in 84 s, with clipped photos of 16–23 KB.
+  Publishing therefore needs network access even when every scene is
+  cached.
 - **Integrity:** the image is an illustration bound to `item_id`. Its
   bytes are listed with their sha256 in `publish.json`, but unlike the
   map it is not verified against the run (the run never saw these
@@ -335,8 +380,8 @@ map/photo toggle on a web map:
   publish of the same run changes only `current_level` (and `publish.json`).
 - `publish.json` lists the sha256 of every other file; verify them after
   any transfer.
-- The image is deterministic for the same item bytes: rerunning publish
-  with an unchanged STAC item rewrites it byte for byte.
+- Every image is deterministic for the same item bytes: rerunning publish
+  with unchanged STAC items rewrites them byte for byte.
 - Before replacing the output directory, smolf validates every JSON file
   against its schema; the whole contract is assembled in a sibling
   temporary directory (`.<name>.staging-*`) and swapped in by rename, the
@@ -395,9 +440,9 @@ map/photo toggle on a web map:
 - the exposed-bed margin recomputed from the row's `level_m` with the
   committed stage–area curve does not round to the row's margin, or the
   class-5 area differs from `removed_ha` at the hundredth;
-- the latest scene's true-colour image cannot be read (STAC item missing,
-  catalog or COG unreachable): a contract without its photo would be
-  partial.
+- the true-colour image of the latest scene or of any `same_month`
+  scene cannot be read (STAC item missing, catalog or COG unreachable): a
+  contract without its photos would be partial.
 
 ## Versioning
 
@@ -432,6 +477,9 @@ map/photo toggle on a web map:
     `constants` gains the required `green_max_ha` and `red_min_ha`;
     `series.json` gains the required `monthly` (per-month median of
     corrected hectares, with `n_scenes`);
+    `latest.json` gains the required, nullable `same_month` (`month`,
+    `years[]` of `year`, `n_scenes`, `scene`, `image`), one lower-median
+    scene and a reservoir-clipped RGBA WebP per year;
     `latest.json` gains the required `image` (`path`, `bounds`,
     `attribution`), a Sentinel-2 true-colour WebP on the `map.png` grid,
     and `publish.json`'s `files[].path` pattern admits

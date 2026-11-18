@@ -201,6 +201,27 @@ def test_publish_regression_image_on_the_png_grid(
     assert offline_true_colour == [("earth-search", SCENE_2026_10_12, png[1:])]
 
 
+def test_publish_regression_same_month_clipped_to_the_reservoir(
+    tmp_path: Path,
+) -> None:
+    latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
+    [year] = latest["same_month"]["years"]
+    assert latest["same_month"]["month"] == 10
+    assert (year["year"], year["n_scenes"]) == (2026, 1)
+    assert year["scene"]["item_id"] == SCENE_2026_10_12
+    png = _image_shape(out_dir, latest["map"]["png"])
+    assert _image_shape(out_dir, year["image"]["path"]) == (4, *png[1:])
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(out_dir / year["image"]["path"]) as src:
+            alpha = src.read(4)
+    # opaque inside the reservoir only: the photo's frame is the scene grid,
+    #   so a margin around the polygon is transparent
+    opaque = np.count_nonzero(alpha == 255) / alpha.size
+    assert set(np.unique(alpha)) == {0, 255}
+    assert 0.2 < opaque < 0.9
+
+
 @pytest.mark.skipif(
     os.environ.get("SMOLF_LIVE") != "1",
     reason="opt-in live Earth Search test (SMOLF_LIVE=1)",

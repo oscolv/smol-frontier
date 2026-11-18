@@ -31,8 +31,9 @@ The pipeline in order, one line per stage:
   a series is identified by its `series.csv` sha256, not by date)
 - Publish contract — `publish/` (`select`, `documents`, `aggregates`,
   `map`, `truecolour`, `writer`) + `schemas/` (`smolf publish`; neutral,
-  versioned JSON + latest map + its Sentinel-2 true-colour photo, read
-  from the item's COGs at publish time, from one complete run; see
+  versioned JSON + latest map + its Sentinel-2 true-colour photo and
+  reservoir-clipped same-month photos, read from the items' COGs at
+  publish time, from one complete run; see
   `docs/contract.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)

@@ -126,6 +126,11 @@ def test_image_path_and_attribution_follow_the_scene() -> None:
         == "image/2024-06-09_S2A_14QMH_20240609_0_L2A.webp"
     )
     assert truecolour.attribution("2024-06-09") == "Copernicus Sentinel data 2024"
+    scene = {"date": "2024-06-09", "item_id": "S2A_14QMH_20240609_0_L2A"}
+    assert (
+        truecolour.clipped_image_path(scene)
+        == "image/clipped/2024-06-09_S2A_14QMH_20240609_0_L2A.webp"
+    )
 
 
 def _write_band(path: Path, value: int | Callable) -> str:

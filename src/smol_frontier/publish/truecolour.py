@@ -1,4 +1,5 @@
-"""Sentinel-2 true-colour images of published scenes (contract 3.0.0).
+"""Sentinel-2 true-colour images of published scenes (contract 3.0.0):
+the latest scene's photo and the reservoir-clipped same-month photos.
 
 ``read_true_colour`` is the one network boundary of publish besides a
 cache miss: it fetches the scene's STAC item by exact id and reads
@@ -6,8 +7,10 @@ B04/B03/B02 straight from the item's COGs over the ``map.png`` grid (not
 from the scene cache, which is zeroed outside the reservoir), converts DN
 to reflectance through ``sources.radiometry`` and warps bilinearly onto the
 grid. ``stretch`` maps reflectance to uint8 with the fixed window in
-``config.py``; ``write_true_colour_webp`` passes ``guard_true_colour`` and
-writes a WebP. The guard is separate from the class-map guard: it admits
+``config.py``; ``clip_to_reservoir`` adds an alpha band that hides
+everything outside the reservoir (the same-month photos);
+``write_true_colour_webp`` passes ``guard_true_colour`` and writes an RGB
+or RGBA WebP. The guard is separate from the class-map guard: it admits
 Sentinel-2 L2A imagery only, which the Copernicus licence lets us publish
 with attribution (decision 13, ADR 0001); PlanetScope never qualifies.
 """
@@ -40,6 +43,8 @@ __all__ = [
     "TrueColour",
     "attribution",
     "build_true_colour",
+    "clip_to_reservoir",
+    "clipped_image_path",
     "guard_true_colour",
     "image_path",
     "read_true_colour",
@@ -55,6 +60,7 @@ COLLECTION = "sentinel-2-l2a"
 _RGB_BANDS = ("B04", "B03", "B02")
 
 IMAGE_DIR = "image"
+CLIPPED_DIR = f"{IMAGE_DIR}/clipped"
 
 # WHY: WebP quality 90 keeps the fixed-stretch photo free of visible
 #   blocking while staying under the 300 KB homepage budget (spec #44).
@@ -78,6 +84,12 @@ class TrueColour:
 def image_path(record: dict[str, object]) -> str:
     """Relative path of a scene's photo: ``image/<date>_<item_id>.webp``."""
     return f"{IMAGE_DIR}/{record['date']}_{record['item_id_used']}.webp"
+
+
+def clipped_image_path(scene: dict[str, object]) -> str:
+    """Relative path of a same-month photo of a published scene entry:
+    ``image/clipped/<date>_<item_id>.webp``."""
+    return f"{CLIPPED_DIR}/{scene['date']}_{scene['item_id']}.webp"
 
 
 def attribution(day: object) -> str:
@@ -136,6 +148,17 @@ def stretch(reflectance: np.ndarray) -> np.ndarray:
     low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
     scaled = (np.nan_to_num(reflectance, nan=low) - low) / (high - low)
     return np.rint(np.clip(scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
+def clip_to_reservoir(rgb: np.ndarray, transform: rasterio.Affine) -> np.ndarray:
+    """RGBA of a stretched (3, h, w) photo, transparent outside the reservoir.
+
+    The polygon is rasterised on the photo's own grid (pixel centres, i.e.
+    nearest): alpha is 255 inside and 0 outside.
+    """
+    inside = _inside_mask(aoi.utm_geometry(), DISPLAY_CRS, transform, rgb.shape[1:])
+    alpha = np.where(inside, 255, 0).astype(np.uint8)
+    return np.concatenate([rgb, alpha[None]])
 
 
 def guard_true_colour(array: np.ndarray, collection: str | None) -> np.ndarray:

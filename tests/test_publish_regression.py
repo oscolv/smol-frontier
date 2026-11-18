@@ -107,11 +107,12 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["quality_light"] == "GOOD"
     assert latest["regime"] == "CLEAN"
     assert latest["cover_band"] == "RED"
+    assert latest["display_status"] == "FULL"
     assert latest["bed_applied"] is True
     assert latest["removed_ha"] == 0.0
     assert latest["reservoir_area_ha"] == 1261.75
-    assert latest["smolf_version"] == "0.4.0"
-    assert latest["schema_version"] == "2.1.0"
+    assert latest["smolf_version"] == "0.5.0"
+    assert latest["schema_version"] == "3.0.0"
     assert _class5_ha(out_dir, latest) == 0.0
 
 
@@ -128,6 +129,7 @@ def test_publish_regression_2024_06_09(tmp_path: Path) -> None:
     assert latest["bed_applied"] is True
     assert latest["pct_reservoir_corrected"] == 1.09
     assert latest["cover_band"] == "GREEN"
+    assert latest["display_status"] == "FULL"
     assert _class5_ha(out_dir, latest) == 418.51
 
 

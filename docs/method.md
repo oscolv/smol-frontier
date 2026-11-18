@@ -262,11 +262,14 @@ RFC 7946 MultiPolygon and the current SIH level),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "2.1.0"`, written exactly; each schema accepts any
-`2.x.y`, and only a new optional field is a minor change — see the
+(`SCHEMA_VERSION = "3.0.0"`, written exactly; each schema accepts any
+`3.x.y`, and only a new optional field is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded
-like `series.csv` (2 decimals; fractions 4); nothing is filtered.
+like `series.csv` (2 decimals; fractions 4); nothing is filtered. Each
+scene also carries `display_status` (`publish.aggregates.display_status()`
+on the rounded entry): `HIDDEN` when not GOOD or without a corrected
+figure, `LOWER_BOUND` when `valid_frac` < `FRAC_PUBLISHABLE`, else `FULL`.
 `cover_band` is `settings.traffic_light()` (`GREEN_MAX_PCT = 30.0`,
 `RED_MIN_PCT = 50.0`) on the 2-decimal `pct_reservoir_corrected`, and
 `null` with every corrected figure when the bed correction was not

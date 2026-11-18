@@ -14,11 +14,12 @@ from shapely.geometry.polygon import orient
 from smol_frontier import __version__, aoi, paths, series
 from smol_frontier.config import settings
 from smol_frontier.hydro import levels
+from smol_frontier.publish.aggregates import display_status
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
 from smol_frontier.publish.map import map_path, png_path
 
 # WHY: contract version written into every document. Each schema accepts any
-#   version with this major (pattern ^2\.[0-9]+\.[0-9]+$ plus "not" a
+#   version with this major (pattern ^3\.[0-9]+\.[0-9]+$ plus "not" a
 #   pattern \n: a bare $ lets a trailing newline through in Python's re,
 #   and a lookahead would not compile in RE2-based validators), so a
 #   consumer validating with the schemas of the tag it pinned keeps
@@ -28,7 +29,9 @@ from smol_frontier.publish.map import map_path, png_path
 #   2.0.0: removed_ha is null whenever bed_applied is false, and the
 #   schema_version pattern rejects a trailing newline (issue #38).
 #   2.1.0: latest.json gains the optional reservoir_outline (issue #42).
-SCHEMA_VERSION = "2.1.0"
+#   3.0.0: every scene carries display_status, and reservoir_outline is
+#   required (issue #45, spec #44).
+SCHEMA_VERSION = "3.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
@@ -180,8 +183,8 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
     """Per-scene contract fields (C11) of an ``ok`` or ``skipped`` record.
 
     Shared by ``latest.json`` and ``series.json``. A skipped (POOR) scene has
-    no row: it carries date, item_id, quality_light, valid_frac and null for
-    every other field.
+    no row: it carries date, item_id, quality_light, valid_frac,
+    display_status (HIDDEN) and null for every other field.
     """
     if record["status"] == "skipped":
         entry: dict[str, object] = {
@@ -194,6 +197,7 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
         for field, decimals in _SCENE_FIELDS:
             entry[field] = None
         entry["valid_frac"] = _round(record["valid_frac"], _DECIMALS_FRACTION)
+        entry["display_status"] = display_status(entry, settings.FRAC_PUBLISHABLE)
         return entry
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     entry = {
@@ -208,6 +212,7 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
         for field in _CORRECTED_FIELDS:
             entry[field] = None
     entry["cover_band"] = _cover_band(entry["pct_reservoir_corrected"])
+    entry["display_status"] = display_status(entry, settings.FRAC_PUBLISHABLE)
     return entry
 
 

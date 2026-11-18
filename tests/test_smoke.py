@@ -7,7 +7,7 @@ import smol_frontier
 
 
 def test_import() -> None:
-    assert smol_frontier.__version__ == "0.4.0"
+    assert smol_frontier.__version__ == "0.5.0"
 
 
 def test_smolf_version() -> None:

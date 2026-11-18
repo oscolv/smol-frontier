@@ -392,7 +392,8 @@ def test_publish_latest_golden_values(
         # 49.996 publishes as 50.00, so the band is RED, not YELLOW.
         "pct_reservoir_corrected": 50.0,
         "cover_band": "RED",
-        "schema_version": "2.1.0",
+        "display_status": "FULL",
+        "schema_version": "3.0.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -785,13 +786,14 @@ def test_publish_latest_schema_tolerates_extra_fields(
     publish.validate("latest", doc)
 
 
-def test_publish_latest_schema_accepts_doc_without_outline(
-    series_root: Path, tmp_path: Path
+@pytest.mark.parametrize("field", ["reservoir_outline", "display_status"])
+def test_publish_latest_schema_requires_3_0_0_fields(
+    series_root: Path, tmp_path: Path, field: str
 ) -> None:
-    # reservoir_outline is additive (2.1.0): a 2.0.0-shaped document still validates.
     doc = _valid_latest(series_root, tmp_path)
-    del doc["reservoir_outline"]
-    publish.validate("latest", doc)
+    del doc[field]
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("latest", doc)
 
 
 def test_reservoir_outline_is_rfc7946_multipolygon_of_the_aoi() -> None:
@@ -962,15 +964,35 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "2.1.0"
+    assert doc["schema_version"] == "3.0.0"
     assert doc["smolf_version"] == __version__
-    assert [s["quality_light"] for s in scenes] == [
-        "GOOD",
-        "DOUBTFUL",
-        "GOOD",
-        "POOR",
-        "GOOD",
+    assert [
+        (s["quality_light"], s["bed_applied"], s["display_status"]) for s in scenes
+    ] == [
+        ("GOOD", True, "FULL"),
+        ("DOUBTFUL", True, "HIDDEN"),
+        ("GOOD", True, "FULL"),
+        ("POOR", None, "HIDDEN"),
+        ("GOOD", False, "HIDDEN"),
     ]
+
+
+def test_publish_series_lower_bound_on_published_valid_frac(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [
+        _record("2024-01-01", "S2A_14QMH_20240101_0_L2A", "ok", valid_frac=0.94996),
+        _record("2024-01-02", "S2B_14QMH_20240102_0_L2A", "ok", valid_frac=0.94994),
+    ]
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    scenes = _series(out)["scenes"]
+    assert [(s["valid_frac"], s["display_status"]) for s in scenes] == [
+        (0.95, "FULL"),
+        (0.9499, "LOWER_BOUND"),
+    ]
+    assert _latest(out)["display_status"] == "LOWER_BOUND"
 
 
 def test_publish_series_sorted_ascending_for_unsorted_records(
@@ -991,7 +1013,14 @@ def test_publish_series_poor_entry_is_all_null(
     assert poor["item_id"] == "S2A_14QMH_20240105_0_L2A"
     assert poor["valid_frac"] == 0.4322
     nulls = {k for k, v in poor.items() if v is None}
-    assert nulls == set(poor) - {"date", "item_id", "quality_light", "valid_frac"}
+    assert nulls == set(poor) - {
+        "date",
+        "item_id",
+        "quality_light",
+        "valid_frac",
+        "display_status",
+    }
+    assert poor["display_status"] == "HIDDEN"
     assert poor["hyacinth_raw_ha"] is None
     assert poor["bed_applied"] is None
     assert poor["regime"] is None
@@ -1072,6 +1101,9 @@ def _mutate_scene(doc: dict, index: int, key: str, value: object) -> None:
         (0, "valid_frac", 1.5),
         (0, "date", "2024-01-01T00:00:00Z"),
         (4, "hyacinth_corrected_ha", 5.0),  # bed not applied
+        (3, "display_status", "FULL"),  # POOR is always HIDDEN
+        (0, "display_status", "SHOWN"),
+        (0, "display_status", None),
     ],
 )
 def test_publish_series_schema_rejects_bad_entries(
@@ -1079,6 +1111,16 @@ def test_publish_series_schema_rejects_bad_entries(
 ) -> None:
     doc = copy.deepcopy(_series_run(series_root, tmp_path))
     _mutate_scene(doc, index, key, value)
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)
+
+
+@pytest.mark.parametrize("index", [0, 3])
+def test_publish_series_schema_requires_display_status(
+    series_root: Path, tmp_path: Path, index: int
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    del doc["scenes"][index]["display_status"]
     with pytest.raises(publish.ContractInvalid):
         publish.validate("series", doc)
 
@@ -1593,9 +1635,9 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "2.1.0",
+        "schema_version": "3.0.0",
         "series_sha256": "cd" * 32,
-        "smolf_version": "0.4.0",
+        "smolf_version": "0.5.0",
     }
 
 
@@ -2160,17 +2202,17 @@ def test_publish_schema_accepts_later_minor_rejects_other_major(
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
     doc = json.loads((out / f"{name}.json").read_text(encoding="utf-8"))
-    for later in ("2.0.1", "2.7.0", "2.12.3"):
+    for later in ("3.0.1", "3.7.0", "3.12.3"):
         publish.validate(name, {**doc, "schema_version": later})
     for other in (
-        "1.0.0",
-        "3.0.0",
-        "2.0",
-        "v2.0.0",
-        "2.0.0-rc1",
-        "2.0.0\n",
-        "2.0.0\n\n",
-        " 2.0.0",
+        "2.1.0",
+        "4.0.0",
+        "3.0",
+        "v3.0.0",
+        "3.0.0-rc1",
+        "3.0.0\n",
+        "3.0.0\n\n",
+        " 3.0.0",
         1,
     ):
         with pytest.raises(publish.ContractInvalid):

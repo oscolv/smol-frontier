@@ -117,14 +117,18 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 | `pct_reservoir_corrected` | number 0–100 | % | POOR scene, or `bed_applied` false | `hyacinth_corrected_ha` over `reservoir_area_ha`; the public percentage. |
 | `cover_band` | enum `GREEN`, `YELLOW`, `RED` | — | POOR scene, or `bed_applied` false | Management band of the published (2-decimal) `pct_reservoir_corrected`: GREEN below `green_max_pct` (30), YELLOW from 30 to below `red_min_pct` (50), RED at or above 50. Never "50.00 % YELLOW". |
 | `display_status` | enum `FULL`, `LOWER_BOUND`, `HIDDEN` | — | never | Display gate of the scene (see below). |
+| `display_ha` | object | ha | POOR scene, or `bed_applied` false | Whole-hectare figures for display, whose parts sum to the total (see below). |
+| `display_ha.total` | integer ≥ 0 | ha | no | `hyacinth_corrected_ha` rounded half up. |
+| `display_ha.dense` | integer ≥ 0 | ha | no | `dense_corrected_ha` apportioned to whole hectares. |
+| `display_ha.interface` | integer ≥ 0 | ha | no | `interface_corrected_ha` apportioned to whole hectares; `dense + interface == total`. |
 
-When `bed_applied` is false, `removed_ha`, every `*_corrected` field and
-`cover_band` are `null` and `bed_reason` says why; smolf never substitutes the raw
+When `bed_applied` is false, `removed_ha`, every `*_corrected` field,
+`cover_band` and `display_ha` are `null` and `bed_reason` says why; smolf never substitutes the raw
 figure. When it is true, they are all non-null. Both schemas define every
 non-POOR scene identically (`tests/test_publish.py` keeps them in step). A
 POOR entry in `series.json` carries `date`, `item_id`, `quality_light`
 (POOR), `valid_frac` and `display_status` (`HIDDEN`), and `null` for every
-other field.
+other field (`display_ha` included).
 
 ### `display_status`
 
@@ -145,6 +149,25 @@ against the documents. It covers the quality gate only: editorial
 decisions a consumer takes on its own (holding a scene after a large jump,
 withdrawing one by hand) are not known to smolf and are not reflected.
 Every figure is still published as computed (see Principles).
+
+### `display_ha`
+
+Since 3.0.0 every scene with corrected figures also carries them as whole
+hectares, so a consumer can print "N ha: D dense and I interface" with no
+arithmetic and the sentence always adds up. smolf computes them from the
+published (2-decimal) figures:
+
+- `total` is `hyacinth_corrected_ha` rounded half up (818.50 → 819, never
+  to even).
+- `dense` and `interface` start as the floors of `dense_corrected_ha` and
+  `interface_corrected_ha`. The units still missing to reach `total` go
+  one each to the part with the larger fractional remainder; on equal
+  remainders dense takes it.
+
+Example: 630.56 = 399.88 + 230.68 gives `total` 631; the floors 399 + 230
+leave 2 units, one to each part: 400 + 231. The 2-decimal fields are
+unchanged and remain the open-data figures; `display_ha` is for display
+only.
 
 ## `latest.json`
 
@@ -174,6 +197,8 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `constants.frac_publishable` | number 0–1 | fraction | no | Minimum `valid_frac` for a percentage to be fully trustworthy (0.95). smolf still publishes the percentage below it; the consumer decides (e.g. show hectares only, as a lower bound). |
 | `constants.green_max_pct` | number 0–100 | % | no | Upper bound (exclusive) of GREEN (30.0). |
 | `constants.red_min_pct` | number 0–100 | % | no | Lower bound (inclusive) of RED (50.0). |
+| `constants.green_max_ha` | number ≥ 0 | ha | no | `green_max_pct` of `reservoir_area_ha`, rounded half up to 2 decimals (378.53), for drawing the level line on a hectare chart. Derived from the published area, never hard-coded. |
+| `constants.red_min_ha` | number ≥ 0 | ha | no | `red_min_pct` of `reservoir_area_ha`, rounded half up to 2 decimals (630.88). Derived like `green_max_ha`. |
 | `current_level` | object or `null` | — | yes | Last day with a level in the local SIH level record at publish time (the refreshed copy under `SMOLF_DATA_DIR` when it exists, else the committed one), independent of the scene and of the wall clock; `null` when the record has no level. |
 | `current_level.date` | string `YYYY-MM-DD` | — | no | That day. |
 | `current_level.level_m` | number | m a.s.l. | no | Its water level. |
@@ -182,6 +207,12 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | `map.geotiff` | string | — | no | Relative path `map/<date>_<item_id>.tif`. |
 | `map.png` | string | — | no | Relative path `map/<date>_<item_id>.png`. |
 | `map.bounds` | `[[south, west], [north, east]]` | degrees, EPSG:4326 | no | Extent of the PNG, 6 decimals, for a web-map image overlay. |
+
+The hectare cut-offs are for drawing; `cover_band`, computed from the
+published percentage, stays authoritative. At the exact boundary the two
+comparisons can disagree: 378.52 ha is below `green_max_ha` but publishes
+as 30.00 %, so its `cover_band` is YELLOW (and 630.87 ha publishes as
+50.00 %, RED).
 
 ## `series.json`
 
@@ -334,7 +365,10 @@ not applied, no pixel is class 5.
   - `schema_version` 3.0.0 — smolf `v0.5.0` (breaking; spec #44,
     `docs/decisions.md` entry 13 amended): every scene of `latest.json`
     and `series.json` carries the required `display_status` (`HIDDEN` for
-    every POOR entry); `reservoir_outline` is required; the version pattern
+    every POOR entry) and the required `display_ha` (integer
+    `{total, dense, interface}`, `null` when the corrected figures are);
+    `constants` gains the required `green_max_ha` and `red_min_ha`;
+    `reservoir_outline` is required; the version pattern
     of all three schemas is `^3\.[0-9]+\.[0-9]+$`, so 2.x consumers reject
     3.x files until they move to `v0.5.0`.
 - **Breaking (major `schema_version`):** removing or renaming a field,

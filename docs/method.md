@@ -273,7 +273,12 @@ figure, `LOWER_BOUND` when `valid_frac` < `FRAC_PUBLISHABLE`, else `FULL`.
 `cover_band` is `settings.traffic_light()` (`GREEN_MAX_PCT = 30.0`,
 `RED_MIN_PCT = 50.0`) on the 2-decimal `pct_reservoir_corrected`, and
 `null` with every corrected figure when the bed correction was not
-applied.
+applied. `display_ha` (`publish.aggregates.display_ha()`) gives the
+corrected figures as whole hectares: the total rounded half up, the dense
+and interface parts apportioned by largest remainder (ties to dense) so
+they sum to it. `constants.green_max_ha` and `red_min_ha` are the two
+bands in hectares of the published reservoir area, rounded half up
+(`publish.aggregates.hectare_cutoff()`).
 
 Runs do not persist class maps, so the latest scene is re-classified from
 the scene cache after its sha256 matches the record's `cache_sha256` (a

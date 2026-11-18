@@ -393,6 +393,7 @@ def test_publish_latest_golden_values(
         "pct_reservoir_corrected": 50.0,
         "cover_band": "RED",
         "display_status": "FULL",
+        "display_ha": {"total": 631, "dense": 400, "interface": 231},
         "schema_version": "3.0.0",
         "smolf_version": __version__,
         "newest_acquisition": {
@@ -410,6 +411,8 @@ def test_publish_latest_golden_values(
             "frac_publishable": 0.95,
             "green_max_pct": 30.0,
             "red_min_pct": 50.0,
+            "green_max_ha": 378.53,
+            "red_min_ha": 630.88,
         },
         "current_level": {
             "date": "2024-01-09",
@@ -702,6 +705,8 @@ def test_publish_latest_constants_and_area_from_settings(
         "frac_publishable": publish.settings.FRAC_PUBLISHABLE,
         "green_max_pct": publish.settings.GREEN_MAX_PCT,
         "red_min_pct": publish.settings.RED_MIN_PCT,
+        "green_max_ha": 300.04,
+        "red_min_ha": 500.07,
     }
 
 
@@ -786,7 +791,7 @@ def test_publish_latest_schema_tolerates_extra_fields(
     publish.validate("latest", doc)
 
 
-@pytest.mark.parametrize("field", ["reservoir_outline", "display_status"])
+@pytest.mark.parametrize("field", ["reservoir_outline", "display_status", "display_ha"])
 def test_publish_latest_schema_requires_3_0_0_fields(
     series_root: Path, tmp_path: Path, field: str
 ) -> None:
@@ -917,6 +922,7 @@ def test_publish_schema_removed_ha_follows_bed_applied(
         "hyacinth_corrected_ha",
         "pct_reservoir_corrected",
         "cover_band",
+        "display_ha",
     ):
         scene[key] = None
     publish.validate(name, doc)
@@ -993,6 +999,24 @@ def test_publish_series_lower_bound_on_published_valid_frac(
         (0.9499, "LOWER_BOUND"),
     ]
     assert _latest(out)["display_status"] == "LOWER_BOUND"
+
+
+def test_publish_display_ha_parts_sum_to_total_on_every_scene(
+    series_root: Path, tmp_path: Path
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out).exit_code == 0
+    scenes = [*_series(out)["scenes"], _latest(out)]
+    with_figures = [s for s in scenes if s["hyacinth_corrected_ha"] is not None]
+    assert len(with_figures) >= 3
+    for scene in scenes:
+        shown = scene["display_ha"]
+        if scene["hyacinth_corrected_ha"] is None:
+            assert shown is None, scene["date"]
+            continue
+        assert shown["dense"] + shown["interface"] == shown["total"], scene["date"]
+        assert abs(shown["total"] - scene["hyacinth_corrected_ha"]) <= 0.5
 
 
 def test_publish_series_sorted_ascending_for_unsorted_records(
@@ -1104,6 +1128,12 @@ def _mutate_scene(doc: dict, index: int, key: str, value: object) -> None:
         (3, "display_status", "FULL"),  # POOR is always HIDDEN
         (0, "display_status", "SHOWN"),
         (0, "display_status", None),
+        (3, "display_ha", {"total": 0, "dense": 0, "interface": 0}),
+        (4, "display_ha", {"total": 0, "dense": 0, "interface": 0}),
+        (0, "display_ha", None),
+        (0, "display_ha", {"total": 631.5, "dense": 400, "interface": 231}),
+        (0, "display_ha", {"total": 631, "dense": 400}),
+        (0, "display_ha", {"total": -1, "dense": 0, "interface": -1}),
     ],
 )
 def test_publish_series_schema_rejects_bad_entries(
@@ -1115,12 +1145,13 @@ def test_publish_series_schema_rejects_bad_entries(
         publish.validate("series", doc)
 
 
+@pytest.mark.parametrize("field", ["display_status", "display_ha"])
 @pytest.mark.parametrize("index", [0, 3])
-def test_publish_series_schema_requires_display_status(
-    series_root: Path, tmp_path: Path, index: int
+def test_publish_series_schema_requires_display_fields(
+    series_root: Path, tmp_path: Path, index: int, field: str
 ) -> None:
     doc = copy.deepcopy(_series_run(series_root, tmp_path))
-    del doc["scenes"][index]["display_status"]
+    del doc["scenes"][index][field]
     with pytest.raises(publish.ContractInvalid):
         publish.validate("series", doc)
 

@@ -27,6 +27,7 @@
     "pct_reservoir_corrected",
     "cover_band",
     "display_status",
+    "display_ha",
     "newest_acquisition",
     "run_counts",
     "run_id",
@@ -75,6 +76,10 @@
     "display_status": {
       "description": "Display gate of the scene, the deterministic part of a consumer's quality gate: HIDDEN when quality_light is not GOOD or hyacinth_corrected_ha is null; LOWER_BOUND when valid_frac is below constants.frac_publishable (figures read 'at least'); FULL otherwise. A consumer's editorial holds and withdrawals are not reflected.",
       "enum": ["FULL", "LOWER_BOUND", "HIDDEN"]
+    },
+    "display_ha": {
+      "description": "Integer display hectares whose parts sum to the total: total is hyacinth_corrected_ha rounded half up; dense and interface start as floors of their corrected figures and the missing units go by largest fractional remainder, ties to dense. Null whenever the corrected figures are null.",
+      "anyOf": [{"$ref": "#/$defs/display_ha"}, {"type": "null"}]
     },
     "newest_acquisition": {
       "description": "Newest scene of the run of any quality (ok or skipped, never error); may be POOR and newer than the scene above.",
@@ -132,11 +137,25 @@
     "constants": {
       "description": "Thresholds a consumer needs for its own gates.",
       "type": "object",
-      "required": ["frac_publishable", "green_max_pct", "red_min_pct"],
+      "required": [
+        "frac_publishable",
+        "green_max_pct",
+        "red_min_pct",
+        "green_max_ha",
+        "red_min_ha"
+      ],
       "properties": {
         "frac_publishable": {"$ref": "#/$defs/fraction"},
         "green_max_pct": {"$ref": "#/$defs/percent"},
-        "red_min_pct": {"$ref": "#/$defs/percent"}
+        "red_min_pct": {"$ref": "#/$defs/percent"},
+        "green_max_ha": {
+          "description": "green_max_pct of reservoir_area_ha in hectares, rounded half up to 2 decimals. cover_band (from the percentage) stays authoritative at the exact boundary.",
+          "$ref": "#/$defs/area"
+        },
+        "red_min_ha": {
+          "description": "red_min_pct of reservoir_area_ha in hectares, rounded half up to 2 decimals. cover_band (from the percentage) stays authoritative at the exact boundary.",
+          "$ref": "#/$defs/area"
+        }
       }
     },
     "current_level": {
@@ -194,7 +213,8 @@
       "interface_corrected_ha": {"type": "null"},
       "hyacinth_corrected_ha": {"type": "null"},
       "pct_reservoir_corrected": {"type": "null"},
-      "cover_band": {"type": "null"}
+      "cover_band": {"type": "null"},
+      "display_ha": {"type": "null"}
     }
   },
   "else": {
@@ -204,7 +224,8 @@
       "interface_corrected_ha": {"type": "number"},
       "hyacinth_corrected_ha": {"type": "number"},
       "pct_reservoir_corrected": {"type": "number"},
-      "cover_band": {"type": "string"}
+      "cover_band": {"type": "string"},
+      "display_ha": {"type": "object"}
     }
   },
   "$defs": {
@@ -212,6 +233,15 @@
     "fraction": {"type": "number", "minimum": 0, "maximum": 1},
     "percent": {"type": "number", "minimum": 0, "maximum": 100},
     "area": {"type": "number", "minimum": 0},
-    "area_or_null": {"type": ["number", "null"], "minimum": 0}
+    "area_or_null": {"type": ["number", "null"], "minimum": 0},
+    "display_ha": {
+      "type": "object",
+      "required": ["total", "dense", "interface"],
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "dense": {"type": "integer", "minimum": 0},
+        "interface": {"type": "integer", "minimum": 0}
+      }
+    }
   }
 }

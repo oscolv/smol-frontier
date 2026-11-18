@@ -7,7 +7,7 @@ Schema draft 2020-12) are the source of truth; this document explains
 them field by field. `tests/test_contract_doc.py` fails if a schema
 property is missing here.
 
-First release containing this contract: smolf 0.5.0 (tag `v0.5.0`).
+First release containing this contract: smolf 0.6.0 (tag `v0.6.0`).
 Changes from earlier versions are listed under "Versioning".
 
 ## Principles

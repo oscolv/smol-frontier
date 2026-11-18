@@ -18,6 +18,7 @@ from smol_frontier.publish.aggregates import (
     display_ha,
     display_status,
     hectare_cutoff,
+    monthly_medians,
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
 from smol_frontier.publish.map import map_path, png_path
@@ -37,7 +38,8 @@ from smol_frontier.publish.truecolour import attribution, image_path
 #   3.0.0: every scene carries display_status, and reservoir_outline is
 #   required (issue #45, spec #44); every scene carries display_ha and
 #   constants gain green_max_ha / red_min_ha (issue #46); latest.json
-#   carries image, a Sentinel-2 true-colour photo (issue #48).
+#   carries image, a Sentinel-2 true-colour photo (issue #48); series.json
+#   carries monthly, the per-month median of corrected hectares (issue #47).
 SCHEMA_VERSION = "3.0.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
@@ -325,4 +327,5 @@ def series_document(
         "run_id": str(manifest["run_id"]),
         "series_sha256": manifest["series_sha256"],
         "scenes": scenes,
+        "monthly": monthly_medians(scenes),
     }

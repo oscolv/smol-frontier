@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/oscolv/smol-frontier/schemas/series.schema.json",
   "title": "smolf series.json",
-  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). Additional properties are allowed.",
+  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). monthly is the per-month median of hyacinth_corrected_ha over non-HIDDEN scenes. Additional properties are allowed.",
   "type": "object",
   "required": [
     "schema_version",
     "smolf_version",
     "run_id",
     "series_sha256",
-    "scenes"
+    "scenes",
+    "monthly"
   ],
   "properties": {
     "schema_version": {
@@ -35,6 +36,13 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/scene"
+      }
+    },
+    "monthly": {
+      "description": "One entry per calendar month, contiguous and in order, from the first to the last scene month (HIDDEN scenes count toward the span).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/month"
       }
     }
   },
@@ -481,6 +489,57 @@
         "interface": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "month": {
+      "type": "object",
+      "required": [
+        "month",
+        "median_ha",
+        "n_scenes"
+      ],
+      "properties": {
+        "month": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])$"
+        },
+        "median_ha": {
+          "description": "Ordinary median (mean of the two middle values when the count is even) of the month's non-HIDDEN hyacinth_corrected_ha, rounded half up to 2 decimals; null when n_scenes is 0.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/area"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "n_scenes": {
+          "description": "The month's scenes with display_status FULL or LOWER_BOUND.",
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "if": {
+        "properties": {
+          "n_scenes": {
+            "const": 0
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "median_ha": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "median_ha": {
+            "type": "number"
+          }
         }
       }
     }

@@ -456,6 +456,19 @@ def test_agents_md_quotes_the_committed_level_record_sha256() -> None:
     assert actual.startswith(match.group(1))
 
 
+def test_agents_md_quotes_the_committed_level_record_last_day() -> None:
+    """AGENTS.md says through which day the committed ENDHD.csv runs; keep it true."""
+    import re
+
+    agents = (paths.COMMITTED_LEVELS_PATH.parents[2] / "AGENTS.md").read_text(
+        encoding="utf-8"
+    )
+    match = re.search(r"committed refresh through\s+(\d{4}-\d{2}-\d{2});", agents)
+    assert match, "AGENTS.md no longer quotes the ENDHD.csv last day"
+    quoted = date.fromisoformat(match.group(1))
+    assert last_day_with_level(paths.COMMITTED_LEVELS_PATH) == quoted
+
+
 # --- Rule 12 (levels before scenes) for `smolf classify` --------------------
 
 

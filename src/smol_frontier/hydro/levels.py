@@ -380,8 +380,15 @@ def level_on(day: date, path: Path | str | None = None) -> float | None:
 
 
 def last_day_with_level(path: Path | str | None = None) -> date | None:
-    """Latest day with a non-NaN level in the local SIH copy, or None."""
-    return _last_day_with_level(load_levels(path))
+    """Latest day with a non-NaN level in the local SIH copy, or None.
+
+    None also when there is no local copy, so callers refuse every day
+    through `check_days_covered` instead of failing on the missing file.
+    """
+    target = paths.levels_read_path() if path is None else Path(path)
+    if not target.exists():
+        return None
+    return _last_day_with_level(load_levels(target))
 
 
 def check_days_covered(days: Iterable[date], last_level_day: date | None) -> None:

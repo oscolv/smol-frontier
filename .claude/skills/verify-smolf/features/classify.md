@@ -34,4 +34,4 @@ Preconditions:
 - `boa_offset_applied looks wrong … using 0.0` on stderr is a known radiometry guard message, not a failure.
 - A `note:` line means the other catalog served the scene because the first product was anomalous. An anomalous product with no usable fallback prints `error: …` on stderr and exits 1.
 - `PERCENT NOT PUBLISHABLE` and `NO CORRECTION: <reason>` (instead of the `bed_*` lines) are valid outputs on other days. On the two control days the bed correction is applied.
-- A day newer than the run's level record (or any day with no local record) exits 2 before any catalog search, with one `error: SIH level record ends <day|none>; no level for <date>. …` line on stderr that names `smolf levels update`, and nothing written. A NaN level inside the record still exits 0 with `NO CORRECTION`.
+- A day newer than the local level record (or any day with no local record) exits 2 before any catalog search, with one `error: SIH level record ends <day|none>; no level for <date>. …` line on stderr that names `smolf levels update`, and nothing written. A NaN level inside the record still exits 0 with `NO CORRECTION`.

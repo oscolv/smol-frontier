@@ -141,11 +141,8 @@ def classify(
     local record: run `smolf levels update` first. A missing or NaN level
     inside the record still classifies, with NO CORRECTION.
     """
-    record = paths.levels_read_path()
     try:
-        check_days_covered(
-            [day.date()], last_day_with_level(record) if record.exists() else None
-        )
+        check_days_covered([day.date()], last_day_with_level())
     except StaleLevelsError as exc:
         # Precondition refusal: nothing written, retry later (exit 2).
         typer.echo(f"error: {exc}", err=True)

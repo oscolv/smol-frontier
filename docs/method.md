@@ -217,7 +217,7 @@ manifest's `inputs`, so moving the checkout does not block `--resume`.
 - 0: the run completed.
 - 2: precondition refusal, nothing written, retry later. One `error: …` line
   on stderr. Today: stale SIH level record (a target day is newer than the
-  last level day) and new-scene catalog unavailable (`--extend` and Earth
+  last level day, or there is no local record: last day `none`) and new-scene catalog unavailable (`--extend` and Earth
   Search is unreachable). Its own argument checks (`--workers < 1`,
   `--extend` with `--resume`) and Click/Typer usage errors also exit 2.
 - 1: anything else, including a resume fingerprint mismatch (the code,

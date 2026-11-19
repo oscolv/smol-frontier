@@ -112,10 +112,10 @@ enforced in this repo. Anything not implemented yet says **planned**.
 ## 12. Levels before scenes; hashed inputs are not "dirty"
 
 - **Rule:** a fresh series build refuses any scene newer than the last day in
-  the local SIH level record and asks for `smolf levels update` first;
-  `smolf classify` refuses such a day (or any day when there is no local
-  record) the same way, with the same check and message, before it searches
-  the catalog. A day inside the record whose level is missing or NaN is a
+  the local SIH level record (or every scene when there is no local record)
+  and asks for `smolf levels update` first; `smolf classify` refuses such a
+  day the same way, with the same check and message, before it searches the
+  catalog. A day inside the record whose level is missing or NaN is a
   real SIH gap, not a stale copy: it still classifies, with
   `NO CORRECTION: <reason>`. Edits
   to the hydrology inputs already pinned by sha256 in the manifest

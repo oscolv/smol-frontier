@@ -112,7 +112,12 @@ enforced in this repo. Anything not implemented yet says **planned**.
 ## 12. Levels before scenes; hashed inputs are not "dirty"
 
 - **Rule:** a fresh series build refuses any scene newer than the last day in
-  the local SIH level record and asks for `smolf levels update` first. Edits
+  the local SIH level record (or every scene when there is no local record)
+  and asks for `smolf levels update` first; `smolf classify` refuses such a
+  day the same way, with the same check and message, before it searches the
+  catalog. A day inside the record whose level is missing or NaN is a
+  real SIH gap, not a stale copy: it still classifies, with
+  `NO CORRECTION: <reason>`. Edits
   to the hydrology inputs already pinned by sha256 in the manifest
   (`ENDHD.csv`, the stage–area curve, the flood-stage map, and their
   sidecars) do not set the `dirty` flag; any other change does. The refusal
@@ -120,17 +125,21 @@ enforced in this repo. Anything not implemented yet says **planned**.
   refuses a precondition that a later run can meet (stale level record,
   unreachable new-scene catalog; nothing is written), and 1 for anything
   else, including a resume fingerprint mismatch, which no retry can fix.
-  The full list is in `docs/method.md` §9.
+  `classify` uses the same codes (2 for the stale or missing record and for
+  an unreachable catalog). The full list is in `docs/method.md` §9.
 - **Why:** a scene without its day's level gets no exposed-bed correction and
   would enter `series.csv` with empty corrected columns (2026-11-01 did, with
-  the SIH copy ending 2026-10-27). The level record is refreshed
+  the SIH copy ending 2026-10-27); `classify` reported 2026-11-08 raw
+  (730.99 ha) with the copy ending 2026-11-05. The level record is refreshed
   operationally, and its hash already identifies the exact bytes a run used,
   so flagging those edits as dirty would mark every operational run without
   adding provenance.
-- **Where in this repo:** `series.py` (`check_levels_cover()`,
-  `HASHED_INPUT_PATHS`, `is_dirty()`), `hydro/levels.py`
-  (`last_day_with_level()`), `cli.py` (exit 2 on `StaleLevelsError`),
-  `tests/test_series.py`.
+- **Where in this repo:** `hydro/levels.py` (`check_days_covered()`, the one
+  coverage rule and message; `StaleLevelsError`; `last_day_with_level()`),
+  `series.py` (`check_levels_cover()` delegates to it; `HASHED_INPUT_PATHS`,
+  `is_dirty()`), `cli.py` (`classify` checks before `_search_day`; exit 2 on
+  `StaleLevelsError` in `classify` and `series build`),
+  `tests/test_series.py`, `tests/test_levels.py`.
 
 ## 13. Neutral, versioned publish contract
 

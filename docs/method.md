@@ -184,7 +184,8 @@ class map itself is never changed — only the reported figures.
   (`BED_CUSHION_MODEL_HA`: 29/41/25/66 ha at 2005/2010/2015/2018 m) and the
   bootstrap half-width, so shoreline hyacinth survives curve error. Missing
   level, missing files, or a grid mismatch leave the raw figures standing
-  with a recorded reason.
+  with a recorded reason. A day after the record's last level is not a
+  missing level: `classify` and `series build` refuse it (exit 2, §9).
 
 Sources: config.py; `hydro/flood_map.py` (`PIXEL_HA = 0.01`);
 `tests/test_levels.py`, `tests/test_curve.py`, `tests/test_flood_map.py`,
@@ -216,7 +217,7 @@ manifest's `inputs`, so moving the checkout does not block `--resume`.
 - 0: the run completed.
 - 2: precondition refusal, nothing written, retry later. One `error: …` line
   on stderr. Today: stale SIH level record (a target day is newer than the
-  last level day) and new-scene catalog unavailable (`--extend` and Earth
+  last level day, or there is no local record: last day `none`) and new-scene catalog unavailable (`--extend` and Earth
   Search is unreachable). Its own argument checks (`--workers < 1`,
   `--extend` with `--resume`) and Click/Typer usage errors also exit 2.
 - 1: anything else, including a resume fingerprint mismatch (the code,
@@ -224,6 +225,18 @@ manifest's `inputs`, so moving the checkout does not block `--resume`.
   succeed) and an unknown or existing run id.
 - 130: interrupted. Once the run directory exists, stderr names the
   `--resume` command; before that, nothing was written.
+
+`smolf classify` uses the same codes:
+
+- 0: the day was classified (with or without the exposed-bed correction; a
+  missing or NaN level inside the record prints `NO CORRECTION: <reason>`).
+- 2: precondition refusal, nothing searched or written, retry later. One
+  `error: …` line on stderr. Checked first: stale SIH level record (the day
+  is newer than the last level day, or there is no local record: last day
+  `none`), with the same check and message as `series build`. Then every
+  STAC catalog unavailable (§1). Click/Typer usage errors also exit 2.
+- 1: anything else, including no scene for the day and an anomalous product
+  with no usable fallback.
 
 Errors and refusals go to stderr; stdout carries only results. The run id
 (`run: <id> (new|resume)`) is printed once its directory exists, so a

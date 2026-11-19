@@ -520,6 +520,26 @@ def test_classify_refuses_when_no_level_record_is_readable(
     assert "Traceback" not in result.output
 
 
+def test_series_build_refuses_when_no_level_record_is_readable(
+    data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same refusal as classify: exit 2, `ends none`, no run dir."""
+    data_dir.committed.unlink()
+    targets = [series.SeriesTarget(day=date(2024, 1, 1), item_id="S2A_x")]
+    monkeypatch.setattr(series, "list_reference_targets", lambda: targets)
+    result = CliRunner().invoke(app, ["series", "build"])
+    assert result.exit_code == 2, result.output
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert "ends none; no level for 2024-01-01" in lines[0]
+    assert "smolf levels update" in lines[0]
+    assert not (data_dir.root / "outputs").exists()
+
+
+def test_last_day_with_level_without_a_record_is_none(tmp_path: Path) -> None:
+    assert last_day_with_level(tmp_path / "missing.csv") is None
+
+
 @pytest.mark.parametrize("day", ["2024-01-01", "2024-01-02", "2024-01-03"])
 def test_classify_on_a_covered_day_reaches_the_catalog_search(
     data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, day: str

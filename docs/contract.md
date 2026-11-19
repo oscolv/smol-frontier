@@ -184,7 +184,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
 | `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
-| `smolf_version` | string | — | no | smolf version that wrote the file (`0.7.0` for this release). |
+| `smolf_version` | string | — | no | smolf version that wrote the file (`0.7.1` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
 | `newest_acquisition.item_id` | string | — | no | Its STAC item id. |

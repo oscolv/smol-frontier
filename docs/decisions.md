@@ -38,8 +38,8 @@ enforced in this repo. Anything not implemented yet says **planned**.
   experimental goes to `experiments/`.
 - **Why:** the package stays the trusted pipeline, never a notebook graveyard.
 - **Where in this repo:** `src/smol_frontier/classify/`, `quality.py`,
-  `hydro/` hold only the validated pipeline; `experiments/` — **planned**
-  (the directory does not exist yet).
+  `hydro/` hold only the validated pipeline; `experiments/` holds one
+  script plus a note per experiment (`sensitivity`, `truecolour_gamma`).
 
 ## 5. One BOA-offset application point, baseline-gated
 

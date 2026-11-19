@@ -41,7 +41,9 @@ band is > −0.15. It is rendered once per gamma.
 `--backend` must be the run's STAC backend (Earth Search by default), the
 one `smolf publish` read the contract's photos from.
 
-The rebuilt grid and read are checked on every run: at gamma 1 the render
+The rebuilt grid and read are checked on every run: at the gamma the
+contract was published with (`--published-gamma`, default
+`TRUE_COLOUR_GAMMA`; pass `1.0` for a contract before 3.2.0) the render
 must reproduce the contract's own clipped photos. On the contract below the
 alpha agrees on 99.996 % of pixels (a few edge pixels) and the mean RGB
 difference is 0.86–1.34 / 255, the size of the WebP quality-90 loss.
@@ -83,4 +85,5 @@ Visual reading of the montage:
 
 `TRUE_COLOUR_GAMMA = 1.6`, chosen by the maintainer on 2026-11-18 from the
 montage above. It is applied to true colour only, never to a NIR/SWIR
-composite. The `config.py` comment should cite this note as its HOW.
+composite. Implemented in contract 3.2.0 (smolf 0.7.0); the `config.py`
+comment cites this note as its HOW.

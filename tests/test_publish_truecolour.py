@@ -26,7 +26,7 @@ S2 = "sentinel-2-l2a"
 LIVE_ITEM = "S2B_14QMH_20261012_0_L2A"
 
 
-def _rgb(shape: tuple[int, int] = (4, 5), bands: int = 3) -> np.ndarray:
+def _rgb(shape: tuple[int, int] = (4, 5), bands: int = 4) -> np.ndarray:
     return np.full((bands, *shape), 7, dtype=np.uint8)
 
 
@@ -52,13 +52,39 @@ def _read(path: Path) -> tuple[np.ndarray, str]:
             return src.read(), src.driver
 
 
-def test_stretch_is_fixed_linear_window_without_gamma() -> None:
-    reflectance = np.array([[[0.0, 0.15, 0.30, 0.45, -0.05, np.nan]]])
+def test_stretch_is_fixed_window_then_gamma() -> None:
+    reflectance = np.array([[[0.0, 0.15, 0.30, 0.45, -0.05, np.nan, 0.03]]])
     assert settings.TRUE_COLOUR_MIN == 0.0
     assert settings.TRUE_COLOUR_MAX == 0.30
+    assert settings.TRUE_COLOUR_GAMMA == 1.6
     stretched = truecolour.stretch(reflectance)
     assert stretched.dtype == np.uint8
-    assert stretched.tolist() == [[[0, 128, 255, 255, 0, 0]]]
+    # 0.5 ** (1/1.6) = 0.648 -> 165; dark water 0.1 ** (1/1.6) = 0.237 -> 60
+    assert stretched.tolist() == [[[0, 165, 255, 255, 0, 0, 60]]]
+
+
+def test_to_rgba_is_opaque_only_on_valid_pixels_inside_the_reservoir() -> None:
+    transform, shape = _aoi_grid(100.0)
+    inside = _reservoir(transform, shape)
+    reflectance = np.full((3, *shape), 0.05)
+    no_data = np.argwhere(inside)[:2]
+    reflectance[:, no_data[0][0], no_data[0][1]] = np.nan
+    reflectance[:, no_data[1][0], no_data[1][1]] = -0.2
+    rgba = truecolour.to_rgba(reflectance, transform)
+    assert rgba.dtype == np.uint8
+    assert rgba.shape == (4, *shape)
+    np.testing.assert_array_equal(rgba[:3], truecolour.stretch(reflectance))
+    expected = inside.copy()
+    expected[tuple(no_data.T)] = False
+    np.testing.assert_array_equal(rgba[3], np.where(expected, 255, 0))
+
+
+def test_to_rgba_keeps_a_pixel_with_any_band_above_the_floor() -> None:
+    transform, shape = _aoi_grid(100.0)
+    row, col = np.argwhere(_reservoir(transform, shape))[0]
+    reflectance = np.full((3, *shape), 0.05)
+    reflectance[:, row, col] = [-0.2, -0.2, -0.1]
+    assert truecolour.to_rgba(reflectance, transform)[3, row, col] == 255
 
 
 @pytest.mark.parametrize("collection", ["planetscope", "landsat-c2-l2", None])
@@ -72,20 +98,19 @@ def test_guard_refuses_float_array() -> None:
         truecolour.guard_true_colour(_rgb().astype(np.float32) / 255, S2)
 
 
-@pytest.mark.parametrize("bands", [1, 2, 5])
+@pytest.mark.parametrize("bands", [1, 2, 3, 5])
 def test_guard_refuses_wrong_band_count(bands: int) -> None:
-    with pytest.raises(ValueError, match="3 or 4 bands"):
+    with pytest.raises(ValueError, match="RGBA"):
         truecolour.guard_true_colour(_rgb(bands=bands), S2)
 
 
 def test_guard_refuses_a_2d_class_map() -> None:
-    with pytest.raises(ValueError, match="3 or 4 bands"):
+    with pytest.raises(ValueError, match="RGBA"):
         truecolour.guard_true_colour(np.zeros((4, 5), dtype=np.uint8), S2)
 
 
-@pytest.mark.parametrize("bands", [3, 4])
-def test_guard_accepts_rgb_and_rgba(bands: int) -> None:
-    array = _rgb(bands=bands)
+def test_guard_accepts_rgba() -> None:
+    array = _rgb()
     assert truecolour.guard_true_colour(array, S2) is array
 
 
@@ -96,24 +121,21 @@ def test_writer_refuses_before_writing(tmp_path: Path) -> None:
     assert not path.exists()
 
 
-@pytest.mark.parametrize("bands", [3, 4])
-def test_writer_writes_webp_with_its_band_count(tmp_path: Path, bands: int) -> None:
-    array = np.random.default_rng(0).integers(0, 256, (bands, 30, 40), dtype=np.uint8)
-    if bands == 4:
-        array[3] = 255
-        array[3, :10] = 0
+def test_writer_writes_rgba_webp_with_lossless_alpha(tmp_path: Path) -> None:
+    array = np.random.default_rng(0).integers(0, 256, (4, 30, 40), dtype=np.uint8)
+    array[3] = 255
+    array[3, :10] = 0
     path = truecolour.write_true_colour_webp(tmp_path / "x.webp", array, S2)
     decoded, driver = _read(path)
     assert driver == "WEBP"
-    assert decoded.shape == (bands, 30, 40)
+    assert decoded.shape == (4, 30, 40)
     assert path.read_bytes()[:4] == b"RIFF"
     assert sorted(p.name for p in tmp_path.iterdir()) == ["x.webp"]
-    if bands == 4:
-        assert (decoded[3, :10] == 0).all()
+    np.testing.assert_array_equal(decoded[3], array[3])
 
 
 def test_writer_is_byte_identical_across_runs(tmp_path: Path) -> None:
-    array = np.random.default_rng(1).integers(0, 256, (3, 30, 40), dtype=np.uint8)
+    array = np.random.default_rng(1).integers(0, 256, (4, 30, 40), dtype=np.uint8)
     first = truecolour.write_true_colour_webp(tmp_path / "a.webp", array, S2)
     second = truecolour.write_true_colour_webp(tmp_path / "b.webp", array, S2)
     assert first.read_bytes() == second.read_bytes()

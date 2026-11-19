@@ -262,8 +262,9 @@ RFC 7946 MultiPolygon and the current SIH level),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "3.1.0"`, written exactly; each schema accepts any
-`3.x.y`, and only a new optional field is a minor change — see the
+(`SCHEMA_VERSION = "3.2.0"`, written exactly; each schema accepts any
+`3.x.y`, and only a new optional field or a change in how a photo is
+rendered is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded
 like `series.csv` (2 decimals; fractions 4); nothing is filtered. Each

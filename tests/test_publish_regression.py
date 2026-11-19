@@ -134,8 +134,8 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["reservoir_area_ha"] == 1261.75
     assert latest["constants"]["green_max_ha"] == 378.53
     assert latest["constants"]["red_min_ha"] == 630.88
-    assert latest["smolf_version"] == "0.6.0"
-    assert latest["schema_version"] == "3.1.0"
+    assert latest["smolf_version"] == "0.7.0"
+    assert latest["schema_version"] == "3.2.0"
     assert _class5_ha(out_dir, latest) == 0.0
 
 
@@ -195,7 +195,7 @@ def test_publish_regression_image_on_the_png_grid(
 ) -> None:
     latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
     png = _image_shape(out_dir, latest["map"]["png"])
-    assert _image_shape(out_dir, latest["image"]["path"]) == (3, *png[1:])
+    assert _image_shape(out_dir, latest["image"]["path"]) == (4, *png[1:])
     assert latest["image"]["bounds"] == latest["map"]["bounds"]
     assert latest["image"]["attribution"] == "Copernicus Sentinel data 2026"
     assert offline_true_colour == [("earth-search", SCENE_2026_10_12, png[1:])]

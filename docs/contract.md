@@ -1,4 +1,4 @@
-# Publish contract (`schema_version` 3.1.0)
+# Publish contract (`schema_version` 3.2.0)
 
 What `smolf publish` writes and what a downstream consumer may rely on.
 The JSON Schemas packaged with smolf (`src/smol_frontier/schemas/`:
@@ -7,7 +7,7 @@ Schema draft 2020-12) are the source of truth; this document explains
 them field by field. `tests/test_contract_doc.py` fails if a schema
 property is missing here.
 
-First release containing this contract: smolf 0.6.0 (tag `v0.6.0`).
+First release containing this contract: smolf 0.7.0 (tag `v0.7.0`).
 Changes from earlier versions are listed under "Versioning".
 
 ## Principles
@@ -34,7 +34,7 @@ Changes from earlier versions are listed under "Versioning".
   (GeoTIFF and PNG) accept a uint8 class array with values 0–5 and nothing
   else (the PNG writer colours the classes itself), and only allowlisted
   files are ever written. The one exception is a separate, guarded
-  true-colour writer that accepts only uint8 RGB/RGBA from STAC collection
+  true-colour writer that accepts only uint8 RGBA from STAC collection
   `sentinel-2-l2a`, published under the Copernicus licence with
   attribution (see "True-colour image"). PlanetScope imagery and raw
   reflectance of any sensor cannot be published.
@@ -183,8 +183,8 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
-| `smolf_version` | string | — | no | smolf version that wrote the file (`0.6.0` for this release). |
+| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `smolf_version` | string | — | no | smolf version that wrote the file (`0.7.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
 | `newest_acquisition.item_id` | string | — | no | Its STAC item id. |
@@ -290,7 +290,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -314,7 +314,7 @@ instead of inventing a value. `LOWER_BOUND` scenes enter the median at
 face value; a consumer that wants to flag such months can count them in
 `scenes`.
 
-Quality flags (degrading/informational) are not part of 3.1.0.
+Quality flags (degrading/informational) are not part of 3.2.0.
 
 ## `publish.json`
 
@@ -323,7 +323,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.1.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -363,13 +363,18 @@ not applied, no pixel is class 5.
 
 `image.path` is a natural-colour photo of the `latest.json` scene, for a
 map/photo toggle on a web map; each `same_month.years[].image.path` is
-one of a same-month scene, clipped to the reservoir. All of them:
+one of a same-month scene. All of them:
 
 - **Grid:** exactly the `map.png` grid (same width, height and EPSG:3857
   transform), so `image.bounds` equals `map.bounds` and the two never
-  misalign. The `latest.json` photo is not clipped; each clipped photo is
-  transparent (alpha 0) outside the reservoir polygon, rasterised on the
-  same grid by pixel centre (nearest), and opaque inside it.
+  misalign.
+- **Clipping:** every photo is clipped to the reservoir (since 3.2.0; the
+  `latest.json` photo was an unclipped rectangle before). A pixel is
+  opaque (alpha 255) when it lies inside the reservoir polygon, rasterised
+  on the same grid by pixel centre (nearest), and any band's reflectance
+  is above −0.15 (`TRUE_COLOUR_VALID_MIN`); every other pixel is
+  transparent (alpha 0), so the consumer's basemap shows around the
+  reservoir and through no-data pixels.
 - **Source:** bands B04, B03, B02 read at publish time straight from the
   scene's STAC item (exact `item_id`, Earth Search unless the run used
   another backend), not from smolf's scene cache, warped bilinearly onto
@@ -377,14 +382,16 @@ one of a same-month scene, clipped to the reservoir. All of them:
   module, with the scene's BOA offset derived once from B02 over the
   reservoir by the same rule and guard as the figures, so post-2022
   scenes are not washed out.
-- **Stretch:** one fixed linear window, reflectance 0–0.30 → 0–255 with no
-  gamma (`TRUE_COLOUR_MIN`, `TRUE_COLOUR_MAX` in `config.py`), the same
-  for every image, so dates and years compare visually. Brighter pixels
-  (clouds, roofs) saturate; no-data pixels are black.
-- **Encoding:** WebP at quality 90 (RGB for the `latest.json` photo,
-  RGBA for clipped ones, alpha lossless), not georeferenced; 88–166 KB
-  for the unclipped photo on the control scenes. The colour under a
-  transparent pixel is the encoder's and carries no meaning.
+- **Stretch:** one fixed window, reflectance 0–0.30 → 0–1, then gamma
+  `x ** (1/1.6)`, then 0–255 (`TRUE_COLOUR_MIN`, `TRUE_COLOUR_MAX`,
+  `TRUE_COLOUR_GAMMA` in `config.py`), the same for every image, so dates
+  and years compare visually. Brighter pixels (clouds, roofs) saturate.
+  The gamma (since 3.2.0) lifts the reservoir from 6–9 % to 18–21 % mean
+  brightness; it was chosen in `experiments/truecolour_gamma.md`.
+- **Encoding:** RGBA WebP at quality 90, alpha lossless, not
+  georeferenced; 17–25 KB per photo on the eleven November photos
+  of the 2017–2026 series. The colour under a transparent pixel is the
+  encoder's and carries no meaning.
 - **Cost:** every photo is read over the network at publish time, up to
   roughly 30 s each. A series spanning ten years publishes up to eleven
   photos; a scene that is both the `latest.json` scene and a same-month
@@ -523,12 +530,19 @@ one of a same-month scene, clipped to the reservoir. All of them:
     years (see "Featured years"); the schema rejects `featured: true`
     with a null `scene` or `image`. Every year keeps its hectares and its
     clipped photo, so 3.0.0 consumers are unaffected.
+  - `schema_version` 3.2.0 — smolf `v0.7.0` (minor; issue #60): no field
+    changes. Every photo, the `latest.json` one included, is an RGBA WebP
+    clipped to the reservoir and transparent on no-data pixels, rendered
+    with gamma 1.6 after the fixed window (see "True-colour image"). A
+    consumer that drew the `latest.json` photo as an opaque rectangle now
+    sees its basemap around the reservoir.
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a
   required field optional, or adding a required field.
-- **Additive (minor `schema_version`):** adding an optional field. Nothing
-  else is minor.
+- **Additive (minor `schema_version`):** adding an optional field, or
+  changing how a published photo is rendered (stretch, gamma, clipping)
+  while every field, type and path stays the same. Nothing else is minor.
 - Each schema's `$id` is a stable, unversioned identifier ending in
   `<name>.schema.json`; the version lives only in `schema_version`.
   Schemas are not copied into the output directory.

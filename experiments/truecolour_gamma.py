@@ -4,14 +4,16 @@ Renders the featured same-month photos of a published contract under the
 fixed reflectance window (``TRUE_COLOUR_MIN``..``TRUE_COLOUR_MAX``) and
 several gamma values, so they can be compared side by side before a value
 goes into ``config.py``. The photos are clipped to the reservoir with the
-validity alpha proposed in #60 (inside the polygon and any band > -0.15).
+validity alpha of contract 3.2.0 (inside the polygon and any band above
+``TRUE_COLOUR_VALID_MIN``).
 
 The bands are read again from each item's COGs through
 ``publish.truecolour.read_true_colour`` (same radiometry and BOA-offset
 guard as ``smolf publish``). The grid is rebuilt from the ``latest.json``
-photo's ``bounds`` and pixel size. Every run checks that rebuild: at gamma 1
-the render must reproduce the contract's own clipped photo (alpha and RGB
-agreement are printed per year). No production code path gains a parameter
+photo's ``bounds`` and pixel size. Every run checks that rebuild: at the
+gamma the contract was published with (``--published-gamma``) the render
+must reproduce the contract's own clipped photo (alpha and RGB agreement
+are printed per year). No production code path gains a parameter
 or changes behaviour; the gamma is applied here only.
 
 Writes, under the output folder (git-ignored):
@@ -45,9 +47,6 @@ from smol_frontier.publish import truecolour as tc
 
 # WHY: the site's page background, so transparent pixels look as on the web.
 BACKGROUND = np.array([234, 237, 231], dtype=np.uint8)
-# WHY: the alpha threshold proposed in #60 (smol's exporter): a pixel with
-#   every band <= -0.15 is no data, not dark water.
-VALID_MIN = -0.15
 GUTTER = 16
 
 
@@ -71,14 +70,14 @@ def render(reflectance: np.ndarray, valid: np.ndarray, gamma: float) -> np.ndarr
 
 
 def check_against_published(
-    contract: Path, year: dict, reflectance: np.ndarray, valid: np.ndarray
+    contract: Path, year: dict, reflectance: np.ndarray, valid: np.ndarray, gamma: float
 ) -> str:
-    """Agreement of the gamma-1 render with the contract's clipped photo."""
+    """Agreement of the render at ``gamma`` with the contract's clipped photo."""
     with rasterio.open(contract / year["image"]["path"]) as src:
         published = src.read()
     opaque = published[3] > 0
     both = opaque & valid
-    rgb = render(reflectance, valid, 1.0).transpose(2, 0, 1)
+    rgb = render(reflectance, valid, gamma).transpose(2, 0, 1)
     diff = np.abs(rgb[:, both].astype(int) - published[:3, both].astype(int))
     return (
         f"alpha agrees on {(opaque == valid).mean():.3%} of pixels, "
@@ -99,6 +98,12 @@ def main() -> None:
         default="earth-search",
         help="STAC backend of the contract's run (smolf publish reads the same).",
     )
+    parser.add_argument(
+        "--published-gamma",
+        type=float,
+        default=settings.TRUE_COLOUR_GAMMA,
+        help="Gamma the contract was published with (1.0 before contract 3.2.0).",
+    )
     parser.add_argument("--gammas", type=float, nargs="+", default=[1.0, 1.4, 1.6, 2.2])
     parser.add_argument(
         "--output-dir",
@@ -113,7 +118,8 @@ def main() -> None:
 
     latest = json.loads((contract / "latest.json").read_text())
     transform, shape = display_grid(contract, latest)
-    inside = tc.clip_to_reservoir(np.zeros((3, *shape), np.uint8), transform)[3] > 0
+    # zero reflectance is valid everywhere, so this alpha is the polygon alone
+    inside = tc.to_rgba(np.zeros((3, *shape)), transform)[3] > 0
     years = [y for y in latest["same_month"]["years"] if y["featured"]]
 
     tiles: dict[tuple[float, int], np.ndarray] = {}
@@ -123,8 +129,12 @@ def main() -> None:
             args.backend, year["scene"]["item_id"], transform, shape
         )
         refl = photo.reflectance
-        valid = inside & (np.nan_to_num(refl, nan=-np.inf) > VALID_MIN).any(axis=0)
-        check = check_against_published(contract, year, refl, valid)
+        valid = inside & (
+            np.nan_to_num(refl, nan=-np.inf) > settings.TRUE_COLOUR_VALID_MIN
+        ).any(axis=0)
+        check = check_against_published(
+            contract, year, refl, valid, args.published_gamma
+        )
         print(f"{year['year']} vs published photo: {check}")
         for gamma in args.gammas:
             tile = render(refl, valid, gamma)

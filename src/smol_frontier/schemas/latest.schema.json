@@ -196,7 +196,7 @@
       }
     },
     "image": {
-      "description": "Sentinel-2 true-colour photo of the same scene on exactly the map.png grid (same size, EPSG:3857, not clipped to the reservoir): RGB WebP, fixed linear stretch of reflectance 0-0.30. An illustration bound to item_id, not sha256-verified against the run.",
+      "description": "Sentinel-2 true-colour photo of the same scene on exactly the map.png grid (same size, EPSG:3857), clipped to the reservoir: RGBA WebP, transparent outside reservoir_outline and on no-data pixels; fixed window of reflectance 0-0.30, then gamma 1.6 (since 3.2.0; RGB and unclipped before). An illustration bound to item_id, not sha256-verified against the run.",
       "type": "object",
       "required": ["path", "bounds", "attribution"],
       "properties": {
@@ -304,7 +304,7 @@
           ]
         },
         "image": {
-          "description": "Sentinel-2 true-colour photo of that scene on the map.png grid (place it with map.bounds), clipped to the reservoir: RGBA WebP, transparent outside reservoir_outline. Null when scene is null.",
+          "description": "Sentinel-2 true-colour photo of that scene on the map.png grid (place it with map.bounds), clipped to the reservoir: RGBA WebP, transparent outside reservoir_outline and on no-data pixels. Null when scene is null.",
           "anyOf": [
             {
               "type": "object",

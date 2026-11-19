@@ -1,6 +1,7 @@
 # 0001. Publish Sentinel-2 true colour, never PlanetScope
 
-- **Status:** accepted (contract 3.0.0, smolf 0.5.0; spec #44, issue #48)
+- **Status:** accepted (contract 3.0.0, smolf 0.5.0; spec #44, issue #48);
+  amended in contract 3.2.0 (issue #60, see the end)
 - **Amends:** `docs/decisions.md` entry 13 ("leaking source imagery
   impossible by construction")
 
@@ -24,7 +25,7 @@ source is attributed ("Copernicus Sentinel data <year>").
 - A separate writer (`publish.truecolour.write_true_colour_webp()`) is the
   only way an image reaches the contract. Its guard
   (`guard_true_colour()`) refuses any array that is not uint8, does not
-  have 3 (RGB) or 4 (RGBA, clipped) bands, or does not come from STAC
+  have 4 (RGBA) bands, or does not come from STAC
   collection `sentinel-2-l2a`. The class-map guard is unchanged, so the
   map writers still accept classes 0–5 only.
 - The allowlist grows by exactly two patterns,
@@ -50,3 +51,15 @@ source is attributed ("Copernicus Sentinel data <year>").
   scene; a catalog outage is a refusal that keeps the previous contract.
 - A backend that reprocesses an item can change its photo between two
   publishes of the same run; no published figure changes with it.
+
+## Amendment (contract 3.2.0, smolf 0.7.0, issue #60)
+
+- Every photo, the `latest.json` one included, is RGBA and clipped to
+  the reservoir: opaque inside the polygon where any band is above
+  `TRUE_COLOUR_VALID_MIN` (−0.15), transparent elsewhere. The guard
+  admits 4 bands only (it admitted 3 or 4 before).
+- The stretch keeps the fixed window and adds gamma 1.6
+  (`TRUE_COLOUR_GAMMA`). The per-image p2/p98 stretch of smol's exporter
+  was rejected: it would make a clear and a hazy scene look alike and
+  break the cross-date comparison. The value was chosen in
+  `experiments/truecolour_gamma.md`.

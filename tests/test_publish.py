@@ -29,7 +29,7 @@ from rasterio.warp import (
     transform_bounds,
     transform_geom,
 )
-from shapely.geometry import LinearRing, box, mapping, shape
+from shapely.geometry import LinearRing, Polygon, box, mapping, shape
 from typer.testing import CliRunner
 
 from smol_frontier import __version__, aoi, paths, publish, series
@@ -419,7 +419,7 @@ def test_publish_latest_golden_values(
         "cover_band": "RED",
         "display_status": "FULL",
         "display_ha": {"total": 631, "dense": 400, "interface": 231},
-        "schema_version": "3.1.0",
+        "schema_version": "3.2.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -1023,7 +1023,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "3.1.0"
+    assert doc["schema_version"] == "3.2.0"
     assert doc["smolf_version"] == __version__
     assert [
         (s["quality_light"], s["bed_applied"], s["display_status"]) for s in scenes
@@ -1791,9 +1791,33 @@ def _webp(path: Path) -> tuple[np.ndarray, str]:
             return src.read(), src.driver
 
 
-def test_publish_image_is_rgb_webp_on_the_map_png_grid(
-    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+def _photo_byte(reflectance: float) -> int:
+    """The published byte of a reflectance: fixed window, then gamma."""
+    low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
+    scaled = (reflectance - low) / (high - low)
+    return round(scaled ** (1 / settings.TRUE_COLOUR_GAMMA) * 255)
+
+
+def _reservoir_on_png(reservoir: Polygon, png_shape: tuple[int, int]) -> np.ndarray:
+    display = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
+    geom = transform_geom(GRID_CRS, "EPSG:3857", mapping(reservoir))
+    return rasterize(
+        [(geom, 1)], out_shape=png_shape, transform=display.transform, fill=0
+    ).astype(bool)
+
+
+# WHY a stand-in polygon: the fixture grid lies outside the real reservoir;
+#   this one covers the grid's top half.
+STAND_IN_RESERVOIR = box(460_000.0, 2_249_900.0, 460_200.0, 2_250_000.0)
+
+
+def test_publish_image_is_rgba_webp_clipped_on_the_map_png_grid(
+    series_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scene_env: SimpleNamespace,
 ) -> None:
+    monkeypatch.setattr(aoi, "utm_geometry", lambda: STAND_IN_RESERVOIR)
     _write_run(series_root)
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
@@ -1807,17 +1831,22 @@ def test_publish_image_is_rgb_webp_on_the_map_png_grid(
     png, png_meta = _png(out)
     assert driver == "WEBP"
     assert pixels.dtype == np.uint8
-    assert pixels.shape == (3, *png_meta["shape"])
+    assert pixels.shape == (4, *png_meta["shape"])
     assert (out / IMAGE_REL).stat().st_size < 300_000
+    inside = _reservoir_on_png(STAND_IN_RESERVOIR, png_meta["shape"])
+    assert 0 < inside.sum() < inside.size
+    # the fake photo's no-data pixel (0, 0) is transparent, not black
+    opaque = inside.copy()
+    opaque[0, 0] = False
+    assert inside[0, 0]
+    np.testing.assert_array_equal(pixels[3], np.where(opaque, 255, 0))
     [(backend, item_id, transform, shape)] = [
         call for call in scene_env.photo_calls if call[1] == LATEST_ITEM
     ]
     assert (backend, item_id, shape) == ("earth-search", LATEST_ITEM, png.shape[1:])
     expected = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
     assert transform == expected.transform
-    low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
-    blue = round((0.05 - low) / (high - low) * 255)
-    assert abs(int(np.median(pixels[2])) - blue) <= 2
+    assert abs(int(np.median(pixels[2][inside])) - _photo_byte(0.05)) <= 2
 
 
 def test_publish_image_listed_with_sha256_and_byte_identical(
@@ -2043,10 +2072,7 @@ def test_publish_same_month_clipped_images_are_rgba_transparent_outside(
 ) -> None:
     blue = {"S2B_B_20230213": 0.10, "S2B_D_20250210": 0.25}
     scene_env.photo_blue.update(blue)
-    # WHY a stand-in polygon: the fixture grid lies outside the real
-    #   reservoir; this one covers the grid's top half.
-    reservoir = box(460_000.0, 2_249_900.0, 460_200.0, 2_250_000.0)
-    monkeypatch.setattr(aoi, "utm_geometry", lambda: reservoir)
+    monkeypatch.setattr(aoi, "utm_geometry", lambda: STAND_IN_RESERVOIR)
     _write_run(series_root, records=_same_month_records())
     out = tmp_path / "pub"
     assert _publish(out, "--run", RUN_ID).exit_code == 0
@@ -2055,11 +2081,7 @@ def test_publish_same_month_clipped_images_are_rgba_transparent_outside(
         warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
         with rasterio.open(png_path) as src:
             png_shape = src.shape
-    display = render_display_image(_class_map(), GRID_TRANSFORM, GRID_CRS)
-    geom = transform_geom(GRID_CRS, "EPSG:3857", mapping(reservoir))
-    inside = rasterize(
-        [(geom, 1)], out_shape=png_shape, transform=display.transform, fill=0
-    ).astype(bool)
+    inside = _reservoir_on_png(STAND_IN_RESERVOIR, png_shape)
     assert 0 < inside.sum() < inside.size
     for year in _latest(out)["same_month"]["years"]:
         if year["image"] is None:
@@ -2068,12 +2090,12 @@ def test_publish_same_month_clipped_images_are_rgba_transparent_outside(
         assert driver == "WEBP"
         assert pixels.dtype == np.uint8
         assert pixels.shape == (4, *png_shape)
-        assert (pixels[3][~inside] == 0).all()
-        assert (pixels[3][inside] == 255).all()
+        opaque = inside.copy()
+        opaque[0, 0] = False  # the fake photo's no-data pixel
+        np.testing.assert_array_equal(pixels[3], np.where(opaque, 255, 0))
         # the photo under each path is that year's scene's
-        low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
-        expected = (blue[year["scene"]["item_id"]] - low) / (high - low) * 255
-        assert abs(int(np.median(pixels[2][inside])) - round(expected)) <= 2
+        expected = _photo_byte(blue[year["scene"]["item_id"]])
+        assert abs(int(np.median(pixels[2][inside])) - expected) <= 2
 
 
 def test_publish_same_month_images_listed_with_sha256_and_byte_identical(
@@ -2184,7 +2206,7 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "3.1.0",
+        "schema_version": "3.2.0",
         "series_sha256": "cd" * 32,
         "smolf_version": "0.5.0",
     }

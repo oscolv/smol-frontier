@@ -175,7 +175,7 @@ enforced in this repo. Anything not implemented yet says **planned**.
   attribution. `latest.json` therefore carries a Sentinel-2 true-colour
   photo of its scene, written only through a separate guard
   (`publish.truecolour.guard_true_colour()`: collection `sentinel-2-l2a`,
-  uint8, 3 or 4 bands); the class-map guard is unchanged. See
+  uint8, RGBA since contract 3.2.0); the class-map guard is unchanged. See
   `docs/adr/0001-publish-sentinel-2-true-colour.md`.
 
 ## 14. A catalog outage on the new-scene search is a retryable refusal

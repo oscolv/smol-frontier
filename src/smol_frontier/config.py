@@ -315,15 +315,28 @@ class Settings:
     COLOR_BED_REMOVED: str = "#d0573a"
 
     # WHY: the published Sentinel-2 true-colour images share one fixed
-    #   linear stretch, reflectance TRUE_COLOUR_MIN..TRUE_COLOUR_MAX to
-    #   0..255 with no gamma, so images of different dates and years are
-    #   visually comparable (a per-image stretch would make a clear and a
-    #   hazy scene look alike).
+    #   window, reflectance TRUE_COLOUR_MIN..TRUE_COLOUR_MAX to 0..1, so
+    #   images of different dates and years are visually comparable (a
+    #   per-image stretch would make a clear and a hazy scene look alike).
     # HOW: 0.30 sits above the red/green/blue reflectance of the reservoir's
     #   water, hyacinth, crops and bare soil, so only clouds and bright
     #   roofs saturate; 0 keeps dark water dark instead of lifting it grey.
     TRUE_COLOUR_MIN: float = 0.0
     TRUE_COLOUR_MAX: float = 0.30
+    # WHY: the reservoir's reflectance is low (0.015-0.045 median), so the
+    #   linear window alone renders it at 6-9 % brightness: water near black,
+    #   hyacinth dark green. x ** (1/gamma) after the window lifts it.
+    #   True colour only; never applied to a NIR/SWIR composite.
+    # HOW: 1, 1/1.4, 1/1.6 and 1/2.2 compared on the four featured November
+    #   photos (experiments/truecolour_gamma.md): 1.6 shows the mat and its
+    #   edges at 18-21 % while water stays dark; 2.2 (smol's value) turns
+    #   clean-water years milky grey.
+    TRUE_COLOUR_GAMMA: float = 1.6
+    # WHY: a photo pixel is no data, not dark water, when every band is at or
+    #   below this reflectance; it is published transparent, not black.
+    # HOW: smol's export_rgb alpha rule (issue #60); valid reflectance after
+    #   the BOA offset sits above -0.1, so real pixels never reach it.
+    TRUE_COLOUR_VALID_MIN: float = -0.15
 
     def traffic_light(self, pct: float) -> str:
         """Classify reservoir-area percent into green/yellow/red bands."""

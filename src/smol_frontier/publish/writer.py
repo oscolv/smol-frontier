@@ -34,9 +34,8 @@ from smol_frontier.publish.truecolour import (
     IMAGE_DIR,
     TrueColour,
     build_true_colour,
-    clip_to_reservoir,
     image_path,
-    stretch,
+    to_rgba,
     write_true_colour_webp,
 )
 
@@ -396,7 +395,8 @@ def publish_run(
     photo = _photo(photos, record, layer.display)
     latest_image = _require_dict(latest["image"], "latest.json image")
     latest_image["bounds"] = layer.display.bounds
-    images = [(image_path(record), stretch(photo.reflectance), photo.collection)]
+    rgba = to_rgba(photo.reflectance, layer.display.transform)
+    images = [(image_path(record), rgba, photo.collection)]
     images += _clipped_images(latest, records, layer.display, photos)
     validate("latest", latest)
     validate("series", series_doc)
@@ -444,6 +444,6 @@ def _clipped_images(
         if year["scene"] is None:
             continue
         photo = _photo(photos, by_item[year["scene"]["item_id"]], display)
-        rgba = clip_to_reservoir(stretch(photo.reflectance), display.transform)
+        rgba = to_rgba(photo.reflectance, display.transform)
         images.append((year["image"]["path"], rgba, photo.collection))
     return images

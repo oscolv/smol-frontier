@@ -49,7 +49,9 @@ from smol_frontier.publish.truecolour import (
 #   reservoir-clipped photo per year (issue #49).
 #   3.1.0: every same_month year carries featured, true for the current
 #   year and up to three earlier ones (issue #57, spec #56).
-SCHEMA_VERSION = "3.1.0"
+#   3.2.0: every photo is an RGBA WebP with gamma 1.6, transparent outside
+#   the reservoir and on no-data pixels; no field changes (issue #60).
+SCHEMA_VERSION = "3.2.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.

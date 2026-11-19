@@ -6,11 +6,11 @@ cache miss: it fetches the scene's STAC item by exact id and reads
 B04/B03/B02 straight from the item's COGs over the ``map.png`` grid (not
 from the scene cache, which is zeroed outside the reservoir), converts DN
 to reflectance through ``sources.radiometry`` and warps bilinearly onto the
-grid. ``stretch`` maps reflectance to uint8 with the fixed window in
-``config.py``; ``clip_to_reservoir`` adds an alpha band that hides
-everything outside the reservoir (the same-month photos);
-``write_true_colour_webp`` passes ``guard_true_colour`` and writes an RGB
-or RGBA WebP. The guard is separate from the class-map guard: it admits
+grid. ``stretch`` maps reflectance to uint8 with the fixed window and gamma in
+``config.py``; ``to_rgba`` adds the alpha band that hides everything
+outside the reservoir and every no-data pixel (every published photo);
+``write_true_colour_webp`` passes ``guard_true_colour`` and writes an RGBA
+WebP. The guard is separate from the class-map guard: it admits
 Sentinel-2 L2A imagery only, which the Copernicus licence lets us publish
 with attribution (decision 13, ADR 0001); PlanetScope never qualifies.
 """
@@ -43,12 +43,12 @@ __all__ = [
     "TrueColour",
     "attribution",
     "build_true_colour",
-    "clip_to_reservoir",
     "clipped_image_path",
     "guard_true_colour",
     "image_path",
     "read_true_colour",
     "stretch",
+    "to_rgba",
     "write_true_colour_webp",
 ]
 
@@ -62,15 +62,12 @@ _RGB_BANDS = ("B04", "B03", "B02")
 IMAGE_DIR = "image"
 CLIPPED_DIR = f"{IMAGE_DIR}/clipped"
 
-# WHY: WebP quality 90 keeps the fixed-stretch photo free of visible
-#   blocking while staying under the 300 KB homepage budget (spec #44).
-# HOW: measured on the map.png grid of the control scenes: 88 KB for
-#   2026-10-12 and 166 KB for the textured dry-season 2024-06-09.
+# WHY: WebP quality 90 keeps the photo free of visible blocking while
+#   staying under the 300 KB homepage budget (spec #44).
+# HOW: measured on the map.png grid: 88-166 KB for the unclipped RGB photo
+#   of the control scenes (contract 3.0.0); 17-25 KB for the clipped RGBA
+#   gamma-1.6 photos of the 2017-2026 November scenes (3.2.0).
 WEBP_QUALITY = 90
-
-# WHY: band counts the guard admits — RGB for the unclipped photo, RGBA for
-#   a photo clipped to the reservoir (transparent outside).
-_BAND_COUNTS = (3, 4)
 
 
 @dataclass(frozen=True, eq=False)
@@ -144,25 +141,30 @@ def read_true_colour(
 
 
 def stretch(reflectance: np.ndarray) -> np.ndarray:
-    """Fixed linear stretch to uint8, no gamma; NaN (no data) becomes 0."""
+    """Fixed window, then gamma, to uint8; NaN (no data) becomes 0."""
     low, high = settings.TRUE_COLOUR_MIN, settings.TRUE_COLOUR_MAX
-    scaled = (np.nan_to_num(reflectance, nan=low) - low) / (high - low)
-    return np.rint(np.clip(scaled, 0.0, 1.0) * 255.0).astype(np.uint8)
+    scaled = np.clip((np.nan_to_num(reflectance, nan=low) - low) / (high - low), 0, 1)
+    lifted = scaled ** (1.0 / settings.TRUE_COLOUR_GAMMA)
+    return np.rint(lifted * 255.0).astype(np.uint8)
 
 
-def clip_to_reservoir(rgb: np.ndarray, transform: rasterio.Affine) -> np.ndarray:
-    """RGBA of a stretched (3, h, w) photo, transparent outside the reservoir.
+def to_rgba(reflectance: np.ndarray, transform: rasterio.Affine) -> np.ndarray:
+    """The published RGBA of a (3, h, w) reflectance photo.
 
-    The polygon is rasterised on the photo's own grid (pixel centres, i.e.
-    nearest): alpha is 255 inside and 0 outside.
+    Opaque (255) where the pixel is inside the reservoir and any band is
+    above ``TRUE_COLOUR_VALID_MIN``; transparent (0) elsewhere. The polygon
+    is rasterised on the photo's own grid (pixel centres, i.e. nearest).
     """
-    inside = _inside_mask(aoi.utm_geometry(), DISPLAY_CRS, transform, rgb.shape[1:])
-    alpha = np.where(inside, 255, 0).astype(np.uint8)
-    return np.concatenate([rgb, alpha[None]])
+    inside = _inside_mask(
+        aoi.utm_geometry(), DISPLAY_CRS, transform, reflectance.shape[1:]
+    )
+    valid = np.nan_to_num(reflectance, nan=-np.inf) > settings.TRUE_COLOUR_VALID_MIN
+    alpha = np.where(inside & valid.any(axis=0), 255, 0).astype(np.uint8)
+    return np.concatenate([stretch(reflectance), alpha[None]])
 
 
 def guard_true_colour(array: np.ndarray, collection: str | None) -> np.ndarray:
-    """The guard every published photo passes: S2 L2A, uint8, 3 or 4 bands.
+    """The guard every published photo passes: S2 L2A, uint8, RGBA.
 
     Refuses (ValueError) anything else, so PlanetScope imagery or raw
     reflectance can never be written by construction.
@@ -174,8 +176,8 @@ def guard_true_colour(array: np.ndarray, collection: str | None) -> np.ndarray:
     if array.dtype != np.uint8:
         msg = f"published true colour must be uint8, got {array.dtype}"
         raise ValueError(msg)
-    if array.ndim != 3 or array.shape[0] not in _BAND_COUNTS:
-        msg = f"published true colour must have 3 or 4 bands, got shape {array.shape}"
+    if array.ndim != 3 or array.shape[0] != 4:
+        msg = f"published true colour must be RGBA (4 bands), got shape {array.shape}"
         raise ValueError(msg)
     return array
 
@@ -183,10 +185,10 @@ def guard_true_colour(array: np.ndarray, collection: str | None) -> np.ndarray:
 def write_true_colour_webp(
     path: str | Path, array: np.ndarray, collection: str | None
 ) -> Path:
-    """Write a guarded (bands, height, width) uint8 array as a WebP."""
+    """Write a guarded (4, height, width) uint8 RGBA array as a WebP."""
     path = Path(path)
     image = guard_true_colour(array, collection)
-    count, height, width = image.shape
+    _, height, width = image.shape
     # WHY: the WEBP driver only supports CreateCopy, so stage in memory; PAM
     #   is disabled so GDAL never writes a .aux.xml beside the image, and the
     #   staging copy is deliberately not georeferenced (bounds live in
@@ -200,10 +202,10 @@ def write_true_colour_webp(
                 driver="GTiff",
                 height=height,
                 width=width,
-                count=count,
+                count=4,
                 dtype="uint8",
                 photometric="RGB",
-                **({"alpha": "YES"} if count == 4 else {}),
+                alpha="YES",
             ) as src,
         ):
             src.write(image)

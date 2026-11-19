@@ -32,7 +32,7 @@ Preconditions:
 ## Gotchas
 
 - Without `--log-level INFO` the removal still happens but stderr stays empty. The CLI configures no logging, so an operator sees no trace of it by default.
-- The SIH sits behind bot protection. The CLI retries 4 times (up to about 4.5 min) and then exits 1 with `error: SIH download failed after 4 attempts: <reason>` on stderr. Report that as unverified, not as a bug.
+- The SIH sits behind bot protection. The CLI makes 4 attempts (up to about 4.5 min) and then exits 1 with `error: SIH download failed after 4 attempts: <reason>` on stderr. Report that as unverified, not as a bug.
 - The SIH sometimes publishes the same day and sometimes days late. Don't hard-code an expected last day.
 - `levels-show-fallback` relies on the committed record ending 2026-11-05. A later committed refresh moves that date, so update the expected value then.
 - A rejected refresh (fewer days, an earlier end, a missing day, or a level revision over 0.05 m without `--force`) prints `error: …` on stderr, exits 1 and leaves the old copy. In an empty data dir the baseline is the committed copy.

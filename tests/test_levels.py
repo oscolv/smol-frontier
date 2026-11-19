@@ -22,6 +22,8 @@ from smol_frontier.hydro.levels import (
     LevelsDownloadError,
     LevelsParseError,
     LevelsValidationError,
+    StaleLevelsError,
+    check_days_covered,
     check_regression,
     download_levels,
     last_day_with_level,
@@ -452,3 +454,92 @@ def test_agents_md_quotes_the_committed_level_record_sha256() -> None:
     assert match, "AGENTS.md no longer quotes the ENDHD.csv sha256"
     actual = hashlib.sha256(paths.COMMITTED_LEVELS_PATH.read_bytes()).hexdigest()
     assert actual.startswith(match.group(1))
+
+
+# --- Rule 12 (levels before scenes) for `smolf classify` --------------------
+
+
+def test_check_days_covered_accepts_days_up_to_the_last_level_day() -> None:
+    check_days_covered([date(2024, 1, 1), date(2024, 1, 2)], date(2024, 1, 2))
+
+
+def test_check_days_covered_names_last_day_uncovered_days_and_the_fix() -> None:
+    days = [date(2024, 1, 4), date(2024, 1, 1), date(2024, 1, 3), date(2024, 1, 4)]
+    with pytest.raises(StaleLevelsError) as info:
+        check_days_covered(days, date(2024, 1, 2))
+    message = str(info.value)
+    assert "ends 2024-01-02; no level for 2024-01-03, 2024-01-04." in message
+    assert "2024-01-01" not in message
+    assert "smolf levels update" in message
+
+
+def test_check_days_covered_without_a_record_refuses_with_none() -> None:
+    with pytest.raises(StaleLevelsError, match="ends none; no level for 2024-01-01"):
+        check_days_covered([date(2024, 1, 1)], None)
+
+
+def test_series_and_levels_share_one_stale_levels_error() -> None:
+    assert series.StaleLevelsError is StaleLevelsError
+
+
+def _search_must_not_run(*args, **kwargs):
+    raise AssertionError("classify searched the catalog before checking levels")
+
+
+def _ingest_must_not_run(*args, **kwargs):
+    raise AssertionError("classify ingested a scene before checking levels")
+
+
+def test_classify_refuses_a_day_after_the_level_record(
+    data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("smol_frontier.cli.search_scenes", _search_must_not_run)
+    monkeypatch.setattr("smol_frontier.cli.ingest_with_fallback", _ingest_must_not_run)
+    result = CliRunner().invoke(app, ["classify", "2024-01-03"])
+    assert result.exit_code == 2, result.output
+    assert result.stdout == ""
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert "ends 2024-01-02; no level for 2024-01-03" in lines[0]
+    assert "smolf levels update" in lines[0]
+    assert not (data_dir.root / "outputs").exists()
+
+
+def test_classify_refuses_when_no_level_record_is_readable(
+    data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    data_dir.committed.unlink()
+    monkeypatch.setattr("smol_frontier.cli.search_scenes", _search_must_not_run)
+    monkeypatch.setattr("smol_frontier.cli.ingest_with_fallback", _ingest_must_not_run)
+    result = CliRunner().invoke(app, ["classify", "2024-01-01"])
+    assert result.exit_code == 2, result.output
+    lines = result.stderr.splitlines()
+    assert len(lines) == 1
+    assert "ends none; no level for 2024-01-01" in lines[0]
+    assert "smolf levels update" in lines[0]
+    assert "Traceback" not in result.output
+
+
+@pytest.mark.parametrize("day", ["2024-01-01", "2024-01-02", "2024-01-03"])
+def test_classify_on_a_covered_day_reaches_the_catalog_search(
+    data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, day: str
+) -> None:
+    """Covered days pass the gate, including a NaN gap inside the record."""
+    data_dir.committed.write_bytes(
+        _csv(
+            [
+                _row("2024-01-01", "100.00"),
+                _row("2024-01-02", "101.00"),
+                _row("2024-01-03", ""),  # real SIH gap: NaN level
+                _row("2024-01-04", "101.50"),
+            ]
+        )
+    )
+    searched: list[object] = []
+    monkeypatch.setattr(
+        "smol_frontier.cli.search_scenes", lambda *a, **k: searched.append(a) or []
+    )
+    result = CliRunner().invoke(app, ["classify", day])
+    assert result.exit_code == 1, result.output
+    assert searched
+    assert f"no scenes found for {day}" in result.stderr

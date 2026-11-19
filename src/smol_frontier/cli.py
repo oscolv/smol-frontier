@@ -36,6 +36,9 @@ from smol_frontier.hydro.curve import build_curve
 from smol_frontier.hydro.flood_map import FloodMapError, build_flood_map
 from smol_frontier.hydro.levels import (
     LevelsError,
+    StaleLevelsError,
+    check_days_covered,
+    last_day_with_level,
     load_levels,
     update_levels,
 )
@@ -44,7 +47,6 @@ from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     CatalogUnavailable,
     FingerprintMismatch,
-    StaleLevelsError,
     build_run,
     new_run_id,
 )
@@ -132,7 +134,22 @@ def classify(
         datetime, typer.Argument(..., formats=["%Y-%m-%d"], help="Day (YYYY-MM-DD).")
     ],
 ) -> None:
-    """Classify one day's scene, print the summary, write a GeoTIFF."""
+    """Classify one day's scene, print the summary, write a GeoTIFF.
+
+    Refuses (exit 2, nothing searched or written) a day newer than the last
+    day with a level in the local SIH record, or any day when there is no
+    local record: run `smolf levels update` first. A missing or NaN level
+    inside the record still classifies, with NO CORRECTION.
+    """
+    record = paths.levels_read_path()
+    try:
+        check_days_covered(
+            [day.date()], last_day_with_level(record) if record.exists() else None
+        )
+    except StaleLevelsError as exc:
+        # Precondition refusal: nothing written, retry later (exit 2).
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
     scenes = _search_day(day, 100.0)
     if not scenes:
         typer.echo(f"no scenes found for {day.date()}", err=True)

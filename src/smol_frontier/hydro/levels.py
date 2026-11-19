@@ -18,6 +18,7 @@ import math
 import os
 import tempfile
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -39,6 +40,8 @@ __all__ = [
     "LevelsUpdate",
     "LevelsValidationError",
     "RevisionCounts",
+    "StaleLevelsError",
+    "check_days_covered",
     "check_regression",
     "download_levels",
     "last_day_with_level",
@@ -92,6 +95,13 @@ class LevelsParseError(LevelsError):
 
 class LevelsValidationError(LevelsError):
     """New bytes fail validation against the local copy."""
+
+
+class StaleLevelsError(Exception):
+    """Refused: some day is newer than the last day in the SIH level record.
+
+    Deliberately not a LevelsError/RuntimeError so the CLI maps it to exit 2.
+    """
 
 
 @dataclass(frozen=True)
@@ -372,6 +382,32 @@ def level_on(day: date, path: Path | str | None = None) -> float | None:
 def last_day_with_level(path: Path | str | None = None) -> date | None:
     """Latest day with a non-NaN level in the local SIH copy, or None."""
     return _last_day_with_level(load_levels(path))
+
+
+def check_days_covered(days: Iterable[date], last_level_day: date | None) -> None:
+    """Refuse days newer than the SIH level record (pure check; rule 12).
+
+    WHY: a scene without its day's level cannot get the exposed-bed
+    correction, so it would be reported raw (seen 2026-11-01 in a series run,
+    SIH copy ended 2026-10-27; 2026-11-08 in `smolf classify`, copy ended
+    2026-11-05). Refreshing first keeps every scene corrected; a day the SIH
+    has not published yet simply waits for a later run. `last_level_day` is
+    None when there is no local record. A NaN day inside the record is a
+    real SIH gap, not staleness, and is not refused here. Raises
+    StaleLevelsError naming the last covered day and the uncovered days.
+    """
+    uncovered = sorted(
+        {day for day in days if last_level_day is None or day > last_level_day}
+    )
+    if uncovered:
+        last = last_level_day.isoformat() if last_level_day else "none"
+        listed = ", ".join(day.isoformat() for day in uncovered)
+        msg = (
+            f"SIH level record ends {last}; no level for {listed}. "
+            "Run `smolf levels update` first; days the SIH has not published "
+            "yet must wait for a later run."
+        )
+        raise StaleLevelsError(msg)
 
 
 def update_levels(

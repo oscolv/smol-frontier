@@ -43,7 +43,11 @@ from smol_frontier.gate import (
 from smol_frontier.hydro.bed import correct_bed
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
-from smol_frontier.hydro.levels import last_day_with_level
+from smol_frontier.hydro.levels import (
+    StaleLevelsError,
+    check_days_covered,
+    last_day_with_level,
+)
 from smol_frontier.ingest import cache_path
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.stac import (
@@ -125,10 +129,6 @@ class CatalogUnavailable(Exception):
 
 class FingerprintMismatch(Exception):
     """Resume refused: the run's code fingerprint differs from the current one."""
-
-
-class StaleLevelsError(Exception):
-    """Build refused: some scene is newer than the last day in the SIH level record."""
 
 
 # WHY: these input files are refreshed operationally (`smolf levels update`
@@ -249,24 +249,10 @@ def check_levels_cover(
 ) -> None:
     """Refuse targets newer than the SIH level record (pure check).
 
-    WHY: a scene without its day's level cannot get the exposed-bed
-    correction, so it would enter series.csv with empty corrected columns
-    (seen 2026-11-01: SIH copy ended 2026-10-27). Refreshing first keeps every
-    scene corrected; a scene the SIH has not published yet simply waits for
-    the next run. Raises StaleLevelsError naming the uncovered dates.
+    Rule 12, shared with `smolf classify`: see `levels.check_days_covered`.
+    Raises StaleLevelsError naming the uncovered dates.
     """
-    uncovered = sorted(
-        {t.day for t in targets if last_level_day is None or t.day > last_level_day}
-    )
-    if uncovered:
-        last = last_level_day.isoformat() if last_level_day else "none"
-        days = ", ".join(day.isoformat() for day in uncovered)
-        msg = (
-            f"SIH level record ends {last}; no level for {days}. "
-            "Run `smolf levels update` first; days the SIH has not published "
-            "yet must wait for a later run."
-        )
-        raise StaleLevelsError(msg)
+    check_days_covered((t.day for t in targets), last_level_day)
 
 
 def check_fingerprint(

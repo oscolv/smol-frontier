@@ -61,6 +61,7 @@ def _fake_row(target: SeriesTarget, index: int) -> dict:
         "dense_ha": dense,
         "interface_ha": interface,
         "hyacinth_raw_ha": dense + interface,
+        "hyacinth_under_haze_ha": 0.0,
         "water_ha": 900.0,
         "soil_ha": 10.0,
         "pct_reservoir_raw": 12.345,
@@ -346,6 +347,15 @@ def _scene_result(valid_fraction: float) -> SceneResult:
     )
 
 
+_INSIDE = np.zeros((2, 2), dtype=bool)
+
+
+@pytest.fixture(autouse=True)
+def _no_day_mirror(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scene processing tests never read the flood map or the level record."""
+    monkeypatch.setattr(series, "load_day_mirror", lambda *args: None)
+
+
 def _fake_scene(item_id: str) -> SimpleNamespace:
     return SimpleNamespace(id=item_id, source="earth-search", cloud_cover=7.5)
 
@@ -362,11 +372,13 @@ def test_process_scene_records_fallback_note(
         series,
         "ingest_with_fallback",
         lambda scene: (
-            SimpleNamespace(scene=scene, transform="t", crs="c"),
+            SimpleNamespace(scene=scene, transform="t", crs="c", inside=_INSIDE),
             "used earth-search: pc anomalous",
         ),
     )
-    monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.98))
+    monkeypatch.setattr(
+        series, "classify_scene", lambda ing, mirror=None: _scene_result(0.98)
+    )
     bed = BedCorrection(
         applied=False,
         reason="no level",
@@ -399,9 +411,14 @@ def test_process_scene_skips_poor_before_bed(
     monkeypatch.setattr(
         series,
         "ingest_with_fallback",
-        lambda scene: (SimpleNamespace(scene=scene), ""),
+        lambda scene: (
+            SimpleNamespace(scene=scene, transform="t", crs="c", inside=_INSIDE),
+            "",
+        ),
     )
-    monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.5))
+    monkeypatch.setattr(
+        series, "classify_scene", lambda ing, mirror=None: _scene_result(0.5)
+    )
 
     def _forbidden(*args, **kwargs):
         msg = "bed correction must not run for a skipped scene"
@@ -425,9 +442,14 @@ def test_process_scene_ok_applies_real_quality_and_bed(
     monkeypatch.setattr(
         series,
         "ingest_with_fallback",
-        lambda scene: (SimpleNamespace(scene=scene, transform="t", crs="c"), ""),
+        lambda scene: (
+            SimpleNamespace(scene=scene, transform="t", crs="c", inside=_INSIDE),
+            "",
+        ),
     )
-    monkeypatch.setattr(series, "classify_scene", lambda ing: _scene_result(0.98))
+    monkeypatch.setattr(
+        series, "classify_scene", lambda ing, mirror=None: _scene_result(0.98)
+    )
     bed = BedCorrection(
         applied=True,
         reason="",
@@ -693,3 +715,60 @@ def test_config_hash_changes_with_a_threshold(
         series, "settings", replace(settings, TAU_WATER=settings.TAU_WATER + 0.01)
     )
     assert series.config_hash() != before
+
+
+def test_process_scene_passes_the_day_mirror_and_records_haze_ha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row carries the raw rescued hectares; classify gets the day mirror."""
+    target = SeriesTarget(day=date(2026, 10, 27), item_id="S2C_14QMH_20261027_0_L2A")
+    mirror = np.ones((2, 2), dtype=bool)
+    loads: list[tuple] = []
+
+    def fake_mirror(day, transform, crs, shape):
+        loads.append((day, transform, crs, shape))
+        return mirror
+
+    seen: list[object] = []
+
+    def fake_classify(ing, m=None):
+        seen.append(m)
+        return replace(_scene_result(0.98), hyacinth_under_haze_ha=12.345)
+
+    ing = SimpleNamespace(
+        scene=_fake_scene(target.item_id),
+        transform="t",
+        crs="c",
+        inside=np.zeros((2, 2), dtype=bool),
+    )
+    monkeypatch.setattr(
+        series, "resolve_scene", lambda day, item_id: (_fake_scene(item_id), "")
+    )
+    monkeypatch.setattr(series, "ingest_with_fallback", lambda scene: (ing, ""))
+    monkeypatch.setattr(series, "load_day_mirror", fake_mirror)
+    monkeypatch.setattr(series, "classify_scene", fake_classify)
+    bed = BedCorrection(
+        applied=False,
+        reason="no level",
+        level_m=math.nan,
+        margin_m=math.nan,
+        expected_bed_ha=0.0,
+        removed_ha=0.0,
+        hyacinth_corrected_ha=150.0,
+        dense_corrected_ha=100.0,
+        interface_corrected_ha=50.0,
+        pct_corrected=11.9,
+    )
+    monkeypatch.setattr(series, "correct_bed", lambda *args: bed)
+    record = series.process_scene(target)
+    assert loads == [(target.day, "t", "c", (2, 2))]
+    assert seen == [mirror]
+    assert record["row"]["hyacinth_under_haze_ha"] == 12.345
+
+
+def test_series_fields_put_haze_ha_after_raw_total() -> None:
+    fields = list(series.SERIES_FIELDS)
+    assert fields.index("hyacinth_under_haze_ha") == (
+        fields.index("hyacinth_raw_ha") + 1
+    )
+    assert series._cell("hyacinth_under_haze_ha", 12.345) == "12.35"

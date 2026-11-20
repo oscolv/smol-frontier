@@ -576,3 +576,76 @@ def test_classify_on_a_covered_day_reaches_the_catalog_search(
     assert result.exit_code == 1, result.output
     assert searched
     assert f"no scenes found for {day}" in result.stderr
+
+
+def test_classify_prints_haze_ha_and_passes_the_day_mirror(
+    data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`smolf classify` loads the day mirror and prints the rescued hectares."""
+    import numpy as np
+
+    from smol_frontier import cli
+
+    ing = SimpleNamespace(
+        scene=SimpleNamespace(id="S2X"),
+        transform="t",
+        crs="c",
+        inside=np.zeros((3, 4), dtype=bool),
+    )
+    loads: list[tuple] = []
+    mirror = np.ones((3, 4), dtype=bool)
+    monkeypatch.setattr(cli, "search_scenes", lambda *a, **k: [object()])
+    monkeypatch.setattr(cli, "_search_day", lambda *a, **k: [object()])
+    monkeypatch.setattr(cli, "ingest_with_fallback", lambda scene: (ing, ""))
+
+    def fake_load(day, transform, crs, shape):
+        loads.append((day, transform, crs, shape))
+        return mirror
+
+    monkeypatch.setattr(cli, "load_day_mirror", fake_load)
+    seen: list[object] = []
+    fake_result = SimpleNamespace(
+        scene_id="S2X",
+        class_map=np.zeros((3, 4), dtype=np.uint8),
+        ha_per_class=dict.fromkeys(range(5), 1.0),
+        hyacinth_total_ha=3.0,
+        hyacinth_under_haze_ha=1.2345,
+        pct_reservoir=1.0,
+        reservoir_area_ha=10.0,
+        valid_fraction=0.9,
+        cloud_fraction=0.1,
+        gmm1_sep=1.0,
+        gmm2_sep=1.0,
+        nir_thr_used=None,
+        nir_water_frac=0.1,
+        n_rescued=0,
+        n_substrate=0,
+    )
+
+    def fake_classify(i, m=None):
+        seen.append(m)
+        return fake_result
+
+    monkeypatch.setattr(cli.pipeline, "classify", fake_classify)
+    monkeypatch.setattr(
+        cli,
+        "correct_bed",
+        lambda *a: SimpleNamespace(applied=False, reason="no level"),
+    )
+    monkeypatch.setattr(cli, "write_classified_geotiff", lambda *a, **k: None)
+    monkeypatch.setattr(
+        cli,
+        "assess_quality",
+        lambda r: SimpleNamespace(
+            light="GOOD",
+            degrading_flags=(),
+            info_flags=(),
+            regime="",
+            publishable_pct=True,
+        ),
+    )
+    result = CliRunner().invoke(app, ["classify", "2024-01-02"])
+    assert result.exit_code == 0, result.output
+    assert seen == [mirror]
+    assert loads[0][1:] == ("t", "c", (3, 4))
+    assert "hyacinth_under_haze_ha: 1.23" in result.stdout.splitlines()

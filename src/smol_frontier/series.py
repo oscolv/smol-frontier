@@ -31,6 +31,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import numpy as np
+
 from smol_frontier import __version__, paths
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import PROJECT_ROOT, settings
@@ -40,7 +42,7 @@ from smol_frontier.gate import (
     load_reference,
     resolve_scene,
 )
-from smol_frontier.hydro.bed import correct_bed
+from smol_frontier.hydro.bed import correct_bed, load_day_mirror
 from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH
 from smol_frontier.hydro.flood_map import DEFAULT_FLOOD_PATH
 from smol_frontier.hydro.levels import (
@@ -102,6 +104,7 @@ SERIES_FIELDS = (
     "dense_ha",
     "interface_ha",
     "hyacinth_raw_ha",
+    "hyacinth_under_haze_ha",
     "water_ha",
     "soil_ha",
     "pct_reservoir_raw",
@@ -406,7 +409,8 @@ def process_scene(target: SeriesTarget) -> dict[str, object]:
     used = ing.scene
     note = "; ".join(part for part in (resolve_note, ingest_note) if part)
     try:
-        result = classify_scene(ing)
+        mirror = load_day_mirror(day, ing.transform, ing.crs, np.shape(ing.inside))
+        result = classify_scene(ing, mirror)
         quality = assess_quality(result)
     except Exception as exc:  # noqa: BLE001 — failed scene, not a fatal error
         logger.warning("series scene %s failed to classify: %r", target.item_id, exc)
@@ -445,6 +449,7 @@ def process_scene(target: SeriesTarget) -> dict[str, object]:
         "dense_ha": ha[settings.CLASS_DENSE_HYACINTH],
         "interface_ha": ha[settings.CLASS_INTERFACE],
         "hyacinth_raw_ha": result.hyacinth_total_ha,
+        "hyacinth_under_haze_ha": result.hyacinth_under_haze_ha,
         "water_ha": ha[settings.CLASS_WATER],
         "soil_ha": ha[settings.CLASS_BARE_SOIL],
         "pct_reservoir_raw": result.pct_reservoir,

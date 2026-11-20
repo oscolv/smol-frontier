@@ -84,6 +84,7 @@
         "dense_ha",
         "interface_ha",
         "hyacinth_raw_ha",
+        "hyacinth_under_haze_ha",
         "pct_reservoir_raw",
         "bed_applied",
         "bed_reason",
@@ -154,6 +155,16 @@
           ]
         },
         "hyacinth_raw_ha": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/area"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "hyacinth_under_haze_ha": {
           "anyOf": [
             {
               "$ref": "#/$defs/area"
@@ -263,6 +274,9 @@
           "hyacinth_raw_ha": {
             "type": "null"
           },
+          "hyacinth_under_haze_ha": {
+            "type": "null"
+          },
           "pct_reservoir_raw": {
             "type": "null"
           },
@@ -340,6 +354,10 @@
             "$ref": "#/$defs/area"
           },
           "hyacinth_raw_ha": {
+            "$ref": "#/$defs/area"
+          },
+          "hyacinth_under_haze_ha": {
+            "description": "Raw hyacinth (dense + interface) rescued under thin haze; included in hyacinth_raw_ha. Since 3.3.0.",
             "$ref": "#/$defs/area"
           },
           "pct_reservoir_raw": {

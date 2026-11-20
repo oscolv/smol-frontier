@@ -43,7 +43,7 @@ from smol_frontier.classify.geotiff import PUBLISHED_COLORMAP, hex_to_rgba
 from smol_frontier.cli import app
 from smol_frontier.config import PROJECT_ROOT, settings
 from smol_frontier.hydro import curve, flood_map, levels
-from smol_frontier.hydro.bed import bed_margin
+from smol_frontier.hydro.bed import bed_margin, day_mirror
 from smol_frontier.publish import truecolour
 from smol_frontier.sources.stac import SceneMeta
 
@@ -117,6 +117,8 @@ FAKE_HA = {
     INTERFACE: 230.987654,
     SOIL: 3.25,
 }
+# WHY: the default row's unrounded hectares rescued under haze (6.29 at 2 dp).
+FAKE_UNDER_HAZE_HA = 6.28777
 
 
 def _fake_reflectance(shape: tuple, blue: float = 0.05) -> np.ndarray:
@@ -170,6 +172,8 @@ def scene_env(
         ingest_calls=[],
         download=_cache_bytes,
         ha=dict(FAKE_HA),
+        under_haze_ha=FAKE_UNDER_HAZE_HA,
+        classify_mirrors=[],
         photo_calls=[],
         photo_collection="sentinel-2-l2a",
         photo_blue={},  # item id -> blue reflectance of its fake photo
@@ -193,11 +197,19 @@ def scene_env(
         if not path.exists():  # a cache miss "downloads" the scene
             path.write_bytes(env.download(scene.id))
         return SimpleNamespace(
-            scene=scene, transform=GRID_TRANSFORM, crs=GRID_CRS, inside=None
+            scene=scene,
+            transform=GRID_TRANSFORM,
+            crs=GRID_CRS,
+            inside=np.ones((20, 20), dtype=bool),
         )
 
-    def fake_classify(ing: object) -> SimpleNamespace:
-        return SimpleNamespace(class_map=_class_map(), ha_per_class=dict(env.ha))
+    def fake_classify(ing: object, mirror: np.ndarray | None = None):
+        env.classify_mirrors.append(mirror)
+        return SimpleNamespace(
+            class_map=_class_map(),
+            ha_per_class=dict(env.ha),
+            hyacinth_under_haze_ha=env.under_haze_ha,
+        )
 
     def fake_read_true_colour(
         backend: str, item_id: str, transform: rasterio.Affine, shape: tuple
@@ -231,6 +243,7 @@ def _row(day: str, item_id: str, **overrides: object) -> dict:
         "dense_ha": 400.123456,
         "interface_ha": 230.987654,
         "hyacinth_raw_ha": 631.11111,
+        "hyacinth_under_haze_ha": FAKE_UNDER_HAZE_HA,
         "water_ha": 600.5,
         "soil_ha": 3.25,
         "pct_reservoir_raw": 50.019871234,
@@ -406,6 +419,7 @@ def test_publish_latest_golden_values(
         "dense_ha": 400.12,
         "interface_ha": 230.99,
         "hyacinth_raw_ha": 631.11,
+        "hyacinth_under_haze_ha": 6.29,
         "pct_reservoir_raw": 50.02,
         "bed_applied": True,
         "bed_reason": "",
@@ -419,7 +433,7 @@ def test_publish_latest_golden_values(
         "cover_band": "RED",
         "display_status": "FULL",
         "display_ha": {"total": 631, "dense": 400, "interface": 231},
-        "schema_version": "3.2.0",
+        "schema_version": "3.3.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -843,9 +857,16 @@ def test_publish_latest_schema_tolerates_extra_fields(
 
 
 @pytest.mark.parametrize(
-    "field", ["reservoir_outline", "display_status", "display_ha", "image"]
+    "field",
+    [
+        "reservoir_outline",
+        "display_status",
+        "display_ha",
+        "image",
+        "hyacinth_under_haze_ha",
+    ],
 )
-def test_publish_latest_schema_requires_3_0_0_fields(
+def test_publish_latest_schema_requires_3_x_fields(
     series_root: Path, tmp_path: Path, field: str
 ) -> None:
     doc = _valid_latest(series_root, tmp_path)
@@ -928,6 +949,8 @@ def test_reservoir_outline_is_rfc7946_multipolygon_of_the_aoi() -> None:
         ),
         ("constants", {"frac_publishable": 0.95, "green_max_pct": 30.0}),
         ("current_level", {"date": "2024-01-09", "level_m": 2010.1}),
+        ("hyacinth_under_haze_ha", -0.01),
+        ("hyacinth_under_haze_ha", None),
         (
             "current_level",
             {"date": "2024-01-09", "level_m": "x", "levels_sha256": "ab" * 32},
@@ -1023,7 +1046,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "3.2.0"
+    assert doc["schema_version"] == "3.3.0"
     assert doc["smolf_version"] == __version__
     assert [
         (s["quality_light"], s["bed_applied"], s["display_status"]) for s in scenes
@@ -1099,6 +1122,7 @@ def test_publish_series_poor_entry_is_all_null(
     }
     assert poor["display_status"] == "HIDDEN"
     assert poor["hyacinth_raw_ha"] is None
+    assert poor["hyacinth_under_haze_ha"] is None
     assert poor["bed_applied"] is None
     assert poor["regime"] is None
 
@@ -1124,6 +1148,7 @@ def test_publish_series_bed_not_applied_nulls(
     assert entry["hyacinth_corrected_ha"] is None
     assert entry["cover_band"] is None
     assert entry["hyacinth_raw_ha"] == 631.11
+    assert entry["hyacinth_under_haze_ha"] == 6.29
 
 
 def test_publish_series_byte_identical_and_canonical(
@@ -1169,6 +1194,9 @@ def _mutate_scene(doc: dict, index: int, key: str, value: object) -> None:
     ("index", "key", "value"),
     [
         (3, "hyacinth_raw_ha", 10.0),  # POOR with figures
+        (3, "hyacinth_under_haze_ha", 1.0),
+        (0, "hyacinth_under_haze_ha", None),
+        (0, "hyacinth_under_haze_ha", -0.01),
         (3, "dense_ha", 1.0),
         (3, "regime", "CLEAN"),
         (3, "bed_applied", True),
@@ -1199,9 +1227,11 @@ def test_publish_series_schema_rejects_bad_entries(
         publish.validate("series", doc)
 
 
-@pytest.mark.parametrize("field", ["display_status", "display_ha"])
+@pytest.mark.parametrize(
+    "field", ["display_status", "display_ha", "hyacinth_under_haze_ha"]
+)
 @pytest.mark.parametrize("index", [0, 3])
-def test_publish_series_schema_requires_display_fields(
+def test_publish_series_schema_requires_per_scene_fields(
     series_root: Path, tmp_path: Path, index: int, field: str
 ) -> None:
     doc = copy.deepcopy(_series_run(series_root, tmp_path))
@@ -1507,6 +1537,74 @@ def test_publish_map_hectares_compared_to_the_hundredth(
     scene_env.ha[DENSE] = 400.1249  # still 400.12 at 2 dp
     _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
     assert _publish(tmp_path / "pub").exit_code == 0
+
+
+def test_publish_map_reclassifies_with_the_run_row_mirror(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    # bed applied: the mirror the run used, from the row level's full margin
+    _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
+    assert _publish(tmp_path / "pub").exit_code == 0
+    (mirror,) = scene_env.classify_mirrors
+    expected = day_mirror(_flood_stage(), FULL_MARGIN_M)
+    assert mirror.dtype == bool
+    assert np.array_equal(mirror, expected)
+    # the full-precision margin, not the row's 2-dp one (pixel at 2010.548)
+    assert not mirror[2, 15]
+
+
+def test_publish_map_no_mirror_when_bed_not_applied(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    record = _record(
+        "2024-01-04",
+        LATEST_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-01-04",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    _write_run(series_root, records=[record])
+    assert _publish(tmp_path / "pub").exit_code == 0
+    assert scene_env.classify_mirrors == [None]
+
+
+def test_publish_map_under_haze_mismatch_exit_2(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    scene_env.under_haze_ha = FAKE_UNDER_HAZE_HA + 0.01
+    _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "hyacinth_under_haze_ha" in lines[0]
+    assert not out.exists()
+
+
+@pytest.mark.parametrize("missing", ["absent", "null"])
+def test_publish_run_without_under_haze_column_refused(
+    series_root: Path, tmp_path: Path, missing: str
+) -> None:
+    records = _default_records()
+    row = records[0]["row"]
+    if missing == "absent":
+        del row["hyacinth_under_haze_ha"]
+    else:
+        row["hyacinth_under_haze_ha"] = None
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "hyacinth_under_haze_ha" in lines[0]
+    assert "S2A_14QMH_20240101_0_L2A" in lines[0]
+    assert not out.exists()
 
 
 def test_publish_map_removed_ha_mismatch_exit_2(
@@ -2206,7 +2304,7 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "3.2.0",
+        "schema_version": "3.3.0",
         "series_sha256": "cd" * 32,
         "smolf_version": "0.5.0",
     }

@@ -1,4 +1,4 @@
-# Publish contract (`schema_version` 3.2.0)
+# Publish contract (`schema_version` 3.3.0)
 
 What `smolf publish` writes and what a downstream consumer may rely on.
 The JSON Schemas packaged with smolf (`src/smol_frontier/schemas/`:
@@ -7,7 +7,7 @@ Schema draft 2020-12) are the source of truth; this document explains
 them field by field. `tests/test_contract_doc.py` fails if a schema
 property is missing here.
 
-First release containing this contract: smolf 0.7.0 (tag `v0.7.0`).
+First release containing this contract: smolf 0.8.0 (tag `v0.8.0`).
 Changes from earlier versions are listed under "Versioning".
 
 ## Principles
@@ -89,6 +89,7 @@ these English names.
 | "ajustado por nivel" (adjusted for water level) | `*_corrected` |
 | régimen limpio / LECHO / TURBIDEZ | `regime` CLEAN / EXPOSED_BED / TURBIDITY |
 | lirio denso / interfase | `dense_*` / `interface_*` |
+| `lirio_bajo_neblina_ha` (hyacinth under haze) | `hyacinth_under_haze_ha` |
 | cota (water-surface stage) | `level_m` |
 | vaso (reservoir basin polygon) | `reservoir_outline` (its area: `reservoir_area_ha`) |
 
@@ -113,6 +114,7 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 | `dense_ha` | number ≥ 0 | ha | POOR scene | Dense hyacinth, raw. |
 | `interface_ha` | number ≥ 0 | ha | POOR scene | Interface hyacinth (mat edge / sparse cover), raw. |
 | `hyacinth_raw_ha` | number ≥ 0 | ha | POOR scene | Dense + interface, before the exposed-bed correction. |
+| `hyacinth_under_haze_ha` | number ≥ 0 | ha | POOR scene | Part of `hyacinth_raw_ha` (dense + interface) seen through thin haze inside the day's water mirror and rescued by the classifier's frozen second pass; raw, not exposed-bed corrected. `0` when nothing was rescued, including a day with no SIH level (no mirror). Since 3.3.0. |
 | `pct_reservoir_raw` | number 0–100 | % | POOR scene | `hyacinth_raw_ha` over `reservoir_area_ha`. |
 | `bed_applied` | boolean | — | POOR scene | Whether the exposed-bed correction was applied. |
 | `bed_reason` | string | — | POOR scene | Empty when applied; otherwise why not (e.g. no SIH level for the day). |
@@ -183,7 +185,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | — | no | smolf version that wrote the file (`0.7.1` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
@@ -290,7 +292,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -314,7 +316,7 @@ instead of inventing a value. `LOWER_BOUND` scenes enter the median at
 face value; a consumer that wants to flag such months can count them in
 `scenes`.
 
-Quality flags (degrading/informational) are not part of 3.2.0.
+Quality flags (degrading/informational) are not part of 3.3.0.
 
 ## `publish.json`
 
@@ -323,7 +325,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.2.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -466,8 +468,14 @@ one of a same-month scene. All of them:
 - the latest scene's cached file does not hash to the run's record (a
   missing scene is re-ingested by its exact item id, and the hash must
   still match), or the re-ingest fails;
-- the re-classified scene's hectares per class differ from the run row at
-  the hundredth;
+- a scene with figures has no `hyacinth_under_haze_ha` in its run row
+  (a run built before 3.3.0): it is never published with a guessed 0;
+  rebuild the run with `smolf series build`;
+- the re-classified scene's hectares per class, or its hectares rescued
+  under haze, differ from the run row at the hundredth (the scene is
+  re-classified with the run's water mirror, rebuilt from the row's
+  `level_m` when the exposed-bed correction applied, and without one
+  otherwise);
 - the exposed-bed correction was applied to the latest scene and the
   flood-stage map or the stage–area curve differs (sha256) from the one
   the run's manifest recorded. These two hashes are checked only in that
@@ -536,10 +544,21 @@ one of a same-month scene. All of them:
     with gamma 1.6 after the fixed window (see "True-colour image"). A
     consumer that drew the `latest.json` photo as an opaque rectangle now
     sees its basemap around the reservoir.
+  - `schema_version` 3.3.0 — smolf `v0.8.0` (minor; issue #69, spec
+    #70): every scene of `latest.json` and `series.json` carries
+    `hyacinth_under_haze_ha`, the raw hyacinth rescued under thin haze
+    (already included in `hyacinth_raw_ha` and every figure derived from
+    it). The field is required in the 3.3.0 schemas although the bump is
+    minor (ruling of spec #70): the `^3\.` pattern of a 3.2 schema
+    accepts 3.3.0 files and ignores the unknown field, so consumers
+    pinned to 3.2 keep validating. The raw hectares of a 3.3.0 run exceed
+    those of a 3.2.0 run of the same scene by `hyacinth_under_haze_ha`.
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a
-  required field optional, or adding a required field.
+  required field optional, or adding a required field (one exception,
+  3.3.0: a new required field that older minor schemas ignore as an
+  additional property).
 - **Additive (minor `schema_version`):** adding an optional field, or
   changing how a published photo is rendered (stretch, gamma, clipping)
   while every field, type and path stays the same. Nothing else is minor.

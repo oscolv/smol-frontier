@@ -80,6 +80,15 @@ disqualifying, and it is not spectral cloud:
   0.4538, `tests/test_regression_scenes.py`).
 - The cloud fraction counts SCL classes 3/8/9/10 (shadow counts as cloud)
   plus spectral cloud.
+- Haze over vegetation (`haze_vegetation()`): the spectral test also
+  catches water hyacinth seen through thin haze (haze lifts B02 just past
+  0.07, the mat reflects in B11, vegetation has B02 ≈ B04). A pixel is
+  haze over vegetation when its bands pass the same range check as the
+  valid mask, its SCL is valid, `spectral_cloud` flags it, and its NDVI
+  (raw B08/B04) is above `CLOUD_NDVI_MAX = 0.5` (strictly). The mask is
+  disjoint from the valid mask by construction; these pixels are never
+  valid and keep counting as cloud, so `valid_fraction`, `cloud_fraction`,
+  rejection and the quality light do not move. §5 classifies them.
 
 Indices (safe division, NaN-propagating): NDVI, NDRE, MNDWI, BSI,
 NSD = B08 − B11 (canopy-over-water annihilates SWIR, so high NSD means
@@ -123,9 +132,28 @@ Sources: `classify/masks.py` constants; `tests/test_masks.py`;
   nothing changes.
 - Class codes `CLASS_NODATA/WATER/DENSE_HYACINTH/INTERFACE/BARE_SOIL` =
   0/1/2/3/4 (config.py).
+- Haze second pass (`haze_pass()`), after the first-pass map is final:
+  haze-over-vegetation pixels (§4) inside the reservoir and inside the
+  day's water mirror (§8) are classified with everything from the first
+  pass frozen — nothing is refitted. In order: soil pre-mask (border strip
+  only); fixed NIR water rule; the NIR threshold the scene used, with the
+  guards of the widening that produced it (pre-screen: FAI below
+  `FAI_FLOAT_MIN` and NSD below `NSD_VEG_MIN`; adaptive: FAI only); the
+  fitted Stage 1 model at `TAU_WATER`; FAI rescue of the ambiguous NIR band
+  when widened; the fitted Stage 2 model at `TAU_HYACINTH` (interface when
+  Stage 2 had no model); water → interface rescue; NSD substrate test
+  anchored on the first-pass map's bare sediment only, so rescued pixels
+  never extend the anchor. Every other pixel keeps its class bit-for-bit,
+  and `gmm1_sep`, `gmm2_sep`, `nir_thr_used`, `nir_water_frac`,
+  `n_rescued` and `n_substrate` stay first-pass values. On the early exits
+  (no mat, fewer than `GMM_MIN_PIXELS`) rescued pixels stay nodata. The
+  dense/interface split of rescued pixels is not interpreted: haze lowers
+  NDVI and NDRE. Mirrors the author's `classifier._asignar_neblina`
+  (smol PR #45; PRIOR_WORK.md).
 
 Sources: config.py; `classify/gmm.py` budget constants (seed 42, 50 000
-pixel cap); `tests/test_gmm_stage1.py`; `tests/test_classify_stage2.py`.
+pixel cap); `tests/test_gmm_stage1.py`; `tests/test_classify_stage2.py`;
+`tests/test_haze_pass.py`, `tests/test_classify_haze.py`.
 
 ## 6. `classify()` (`classify/pipeline.py`, `smolf classify`)
 
@@ -135,6 +163,16 @@ the reservoir area computed from the polygon in `aoi.py` — 1261.75 ha,
 checked by `tests/test_aoi.py` and `tests/test_regression_scenes.py` — and
 is the only percentage with that denominator. A classified GeoTIFF is
 written with the fixed `COLOR_*` palette (config.py).
+
+`classify(scene, mirror=None)` takes the day's water mirror (§8) as a
+boolean mask; it does no file I/O, so callers (`smolf classify`, the
+series builder, the gate, the publish map) load it with
+`hydro.bed.load_day_mirror()`. `None` or an all-false mask turns the haze
+second pass off and the result is identical to the first pass alone.
+`hyacinth_under_haze_ha` is the rescued area whose final class is dense
+or interface (raw, not bed-corrected); it is included in `ha_per_class`,
+`hyacinth_total_ha` and `pct_reservoir`, and the map carries the rescued
+pixels with their class.
 
 ## 7. Quality light and regime (`quality.py`)
 
@@ -186,15 +224,23 @@ class map itself is never changed — only the reported figures.
   level, missing files, or a grid mismatch leave the raw figures standing
   with a recorded reason. A day after the record's last level is not a
   missing level: `classify` and `series build` refuse it (exit 2, §9).
+- Day mirror (`day_mirror()`, `load_day_mirror()`): staged pixels (flood
+  stage not nodata) whose flood stage is at or below the margin stage —
+  the same full-precision `bed_margin()` the correction applies, through
+  the same input checks, so the two cannot disagree about where the water
+  ends. It is the haze second pass's only spatial limit (§5). Missing or
+  NaN level, missing flood map or curve, or a grid mismatch → `None`, and
+  nothing is rescued.
 
 Sources: config.py; `hydro/flood_map.py` (`PIXEL_HA = 0.01`);
 `tests/test_levels.py`, `tests/test_curve.py`, `tests/test_flood_map.py`,
 `tests/test_bed.py`; `tests/test_regression_scenes.py` (2024-06-09: raw
-432.25 ha → 13.74 ha).
+434.21 ha → 15.70 ha with the haze rescue; 432.25 → 13.74 without).
 
 ## 9. Series builder and manifest (`series.py`, `smolf series build`)
 
-Runs §6–§8 per scene over the 465 reference rows by exact item id
+Runs §6–§8 per scene over the 468 reference rows (v2026-11-19) by exact
+item id
 (Planetary Computer fallback per scene, shared with the gate), or
 additionally past the last reference date with `--extend`. POOR scenes are
 recorded as skipped and never enter `series.csv`; failed scenes are
@@ -242,7 +288,13 @@ Errors and refusals go to stderr; stdout carries only results. The run id
 (`run: <id> (new|resume)`) is printed once its directory exists, so a
 refusal never names a run.
 
-Measured: run `20261028T221314` — 465 requested, 465 ok, 0 skipped,
+Each scene row and `series.csv` carry `hyacinth_under_haze_ha`, so the
+pre-rescue series is the raw total minus that column. `CLOUD_NDVI_MAX` is a
+setting, so a run started before the rescue has another config hash and
+refuses to resume.
+
+Measured (before the haze rescue, v2026-10-22): run `20261028T221314` —
+465 requested, 465 ok, 0 skipped,
 0 errors, wall 1:35, `series.csv` sha256
 `87514b60…` (full hash in the run manifest).
 
@@ -255,7 +307,23 @@ correction) against the author's prior series. Pass needs median |Δ total|
 at most `PASS_MEDIAN_HA = 10.0` ha and p95 at most `PASS_P95_HA = 25.0` ha
 on same-item scenes, with zero failures.
 
-Measured (`outputs/identity_gate/gate_20261028T212616.md`, `.csv`): 465
+By default the gate passes the day's mirror (haze rescue on) and compares
+against v2026-11-19 (`REFERENCE_CSV`, 468 scenes); `--baseline` passes no
+mirror and compares against v2026-10-22 (`BASELINE_REFERENCE_CSV`, 465
+scenes), proving the rescue only adds. The report names the reference and
+the mode.
+
+Measured with the rescue, `--all`
+(`outputs/identity_gate/gate_20261119T183458.md`, `.csv`): 468 scenes,
+median |Δ| 0.01 ha, p95 0.11 ha, max 0.43 ha (2023-10-28
+`S2B_14QMH_20231028_0_L2A`), light and regime agreement 468/468, 0
+fallback, 0 errors — PASS. `--all --baseline`
+(`gate_20261119T183717`): 465 scenes, the same statistics, 465/465 — PASS.
+The fixed 30-scene sample passes in both modes (median 0.01, p95 0.14, max
+0.32 ha, 30/30).
+
+Measured before the rescue
+(`outputs/identity_gate/gate_20261028T212616.md`, `.csv`): 465
 scenes, median |Δ| 0.01 ha, p95 0.11 ha, max 0.43 ha (2023-10-28
 `S2B_14QMH_20231028_0_L2A`), light and regime agreement 465/465, 0
 fallback, 0 errors — verdict PASS. 206 scenes sit at Δ 0.00 ha. The series

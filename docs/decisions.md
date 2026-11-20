@@ -107,7 +107,8 @@ enforced in this repo. Anything not implemented yet says **planned**.
 - **Where in this repo:** `classify/masks.py` (`spectral_cloud()`),
   `tests/test_masks.py`, `tests/test_regression_scenes.py`
   (`test_haze_scene_2025_07_29_is_poor`); the visual veto — **planned**
-  (the agent layer is not built yet).
+  (the agent layer is not built yet). The test also hides hyacinth under thin
+  haze; entry 17 rescues it without changing the test.
 
 ## 12. Levels before scenes; hashed inputs are not "dirty"
 
@@ -242,3 +243,39 @@ enforced in this repo. Anything not implemented yet says **planned**.
 - **Where in this repo:** `src/smol_frontier/publish/documents.py`
   (`SCHEMA_VERSION`, `_CORRECTED_FIELDS`), `src/smol_frontier/schemas/`,
   `docs/contract.md` ("Versioning"), `tests/test_publish.py`.
+
+## 17. Haze rescue: two passes, NDVI, 0.5, the SIH level as the only limit
+
+- **Rule:** hyacinth that the spectral cloud test hides under thin haze is
+  rescued by the author's method (smol PR #45, PRIOR_WORK.md): SCL valid,
+  spectral cloud, NDVI above `CLOUD_NDVI_MAX = 0.5`, and inside the day's
+  water mirror; then classified in a frozen second pass. Four decisions,
+  each measured by the author and not re-opened here:
+  1. **Two passes, frozen model.** Putting the NDVI guard inside the
+     valid mask let the freed pixels into the GMM fits: it moved 287 ha of
+     pixels the guard had not freed, lowered 8 scenes and admitted 10
+     rejected ones. The second pass refits nothing, so the rest of the map,
+     `valid_fraction`, rejection, the quality light and the cloud fraction
+     do not move.
+  2. **NDVI, not FAI.** With FAI the 2025-07-29 cloud is rescued almost
+     whole (547 of 548 ha).
+  3. **Threshold 0.5.** The cloud SCL let through on 2025-07-29 has a
+     median NDVI of 0.39; lowering the threshold lets cloud in (on that
+     scene 0.5 rescues 93 ha, 0.45 137 ha, 0.40 251 ha). Sensitivity of
+     the series total: 0.45 → +11 %, 0.55 → −12 %.
+  4. **The SIH level is the only spatial limit.** The day's mirror (flood
+     stage at or below the margin stage, the same mirror as the exposed-bed
+     correction) replaces a fixed 150 m border exclusion; the
+     pre-registered rules for rescuing the border strip all failed
+     validation.
+- **Why:** the rescued pixels counted as "no hyacinth" in the standard
+  percentage, biasing it low exactly when a mat sits under light haze
+  (2026-11-08: 52 ha of visible hyacinth discarded; 2023-01-21: 71 ha
+  between GOOD neighbours of 145–243 ha, now 158.18 ha).
+- **Where in this repo:** `config.py` (`CLOUD_NDVI_MAX`),
+  `classify/masks.py` (`haze_vegetation()`), `hydro/bed.py`
+  (`day_mirror()`, `load_day_mirror()`), `classify/gmm.py`
+  (`haze_pass()`), `classify/pipeline.py` (`classify(..., mirror=)`,
+  `hyacinth_under_haze_ha`); `gate.py` (v2026-11-19 by default,
+  `--baseline` for v2026-10-22); `tests/test_haze_pass.py`,
+  `tests/test_classify_haze.py`, `tests/test_regression_scenes.py`.

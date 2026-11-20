@@ -32,6 +32,7 @@ Each feature file has an H1, one paragraph, then exactly four H2s: `Sub-features
 - [SIH level record](./levels.md): refresh, dry run, show one day, first refresh into an empty data dir.
 - [Series build](./series-build.md): the resumable series run, `--extend`, and the 0/2/1/130 exit codes.
 - [Publish the contract](./publish.md): `latest.json`, `series.json`, `publish.json` and the latest map, with its refusals.
+- [Download bundle](./export.md): `smolf export series-csv` from a finished publish, with its refusals.
 - [Daily job](./daily-job.md): `levels update` then `series build --extend` then `publish`, from a read-only checkout.
 
 Not mapped yet: `smolf fetch`, `smolf gate identity` (needs ~468 scenes and writes a report), `smolf hydro curve` and `smolf hydro flood-map` (maintenance commands that write committed inputs; never run them from a verification run).

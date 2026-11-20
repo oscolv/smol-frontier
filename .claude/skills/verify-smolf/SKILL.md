@@ -1,6 +1,6 @@
 ---
 name: verify-smolf
-description: Drive the real `smolf` CLI (smol-frontier, water-hyacinth series for the Endhó reservoir) end to end and capture proof — classify a day, refresh SIH levels, build the series, publish the contract, or run the whole daily job from a read-only checkout. Use it to verify a change works in the real CLI, not just in pytest.
+description: Drive the real `smolf` CLI (smol-frontier, water-hyacinth series for the Endhó reservoir) end to end and capture proof — classify a day, refresh SIH levels, build the series, publish the contract, export the download bundle, or run the whole daily job from a read-only checkout. Use it to verify a change works in the real CLI, not just in pytest.
 ---
 
 # Verify smolf

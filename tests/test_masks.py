@@ -7,6 +7,7 @@ from smol_frontier.classify import indices
 from smol_frontier.classify.masks import (
     SPECTRAL_BANDS,
     cloud_fraction,
+    haze_vegetation,
     scl_invalid,
     spectral_cloud,
     valid_fraction,
@@ -233,3 +234,66 @@ def test_ndvi_from_clipped_bands_stays_bounded() -> None:
     clipped = indices.ndvi(np.maximum(b08, 0), np.maximum(b04, 0))
     assert -1.0 <= float(clipped[0]) <= 1.0
     assert float(b08[0]) < 0.0  # the clip is a copy; the original is untouched
+
+
+HAZE_BANDS = {
+    "B02": 0.075,
+    "B03": 0.08,
+    "B04": 0.07,
+    "B05": 0.09,
+    "B08": 0.40,
+    "B8A": 0.38,
+    "B11": 0.15,
+}
+
+
+def _haze(scl: int = 4, inside: bool = True, **overrides: float):
+    bands = {k: np.array([v]) for k, v in HAZE_BANDS.items()}
+    for key, value in overrides.items():
+        bands[key] = np.array([value])
+    return haze_vegetation(np.array([scl]), bands, np.array([inside]))
+
+
+def test_haze_over_hyacinth_is_rescued() -> None:
+    assert bool(_haze()[0]) is True
+
+
+def test_moderate_ndvi_cloud_is_not_rescued() -> None:
+    # NDVI = (0.22 - 0.10) / (0.22 + 0.10) ~ 0.375 (2025-07-29-like cloud)
+    assert bool(_haze(B08=0.22, B04=0.10, B02=0.12)[0]) is False
+
+
+def test_ndvi_exactly_at_threshold_is_not_rescued() -> None:
+    # (0.75 - 0.25) / (0.75 + 0.25) == 0.5 exactly in binary floating point
+    assert settings.CLOUD_NDVI_MAX == 0.5
+    assert bool(_haze(B08=0.75, B04=0.25, B02=0.25)[0]) is False
+
+
+@pytest.mark.parametrize("scl", [0, 1, 3, 8, 9, 10])
+def test_haze_invalid_scl_is_not_rescued(scl: int) -> None:
+    assert bool(_haze(scl=scl)[0]) is False
+
+
+def test_not_spectral_cloud_is_not_rescued() -> None:
+    assert bool(_haze(B02=0.03)[0]) is False  # clear vegetation
+
+
+@pytest.mark.parametrize("band", SPECTRAL_BANDS)
+def test_haze_nan_or_subfloor_band_is_not_rescued(band: str) -> None:
+    assert bool(_haze(**{band: np.nan})[0]) is False
+    assert bool(_haze(**{band: settings.REFLECTANCE_MIN_VALID})[0]) is False
+
+
+def test_haze_outside_aoi_is_not_rescued() -> None:
+    assert bool(_haze(inside=False)[0]) is False
+
+
+def test_haze_is_disjoint_from_valid_mask() -> None:
+    cols = [HAZE_BANDS, {**HAZE_BANDS, "B02": 0.03}, {**HAZE_BANDS, "B08": 0.15}]
+    bands = {k: np.array([c[k] for c in cols]) for k in HAZE_BANDS}
+    scl = np.array([4, 4, 4])
+    inside = np.ones(3, dtype=bool)
+    haze = haze_vegetation(scl, bands, inside)
+    valid = valid_mask(scl, bands, inside)
+    assert haze.tolist() == [True, False, False]
+    assert not (haze & valid).any()

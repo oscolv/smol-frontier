@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from smol_frontier.classify.indices import ndvi
 from smol_frontier.config import settings
 from smol_frontier.sources.radiometry import SPECTRAL_BANDS
 
@@ -19,6 +20,7 @@ __all__ = [
     "SCL_INVALID",
     "SPECTRAL_BANDS",
     "cloud_fraction",
+    "haze_vegetation",
     "scl_invalid",
     "spectral_cloud",
     "valid_fraction",
@@ -199,3 +201,26 @@ def cloud_fraction(
     inside = np.asanyarray(inside, dtype=bool)
     cloudy = inside & (np.isin(scl, sorted(SCL_CLOUD)) | spectral_cloud(b02, b11, b04))
     return float(cloudy.sum()) / total
+
+
+def haze_vegetation(
+    scl: np.ndarray, bands: Mapping[str, Any], inside: np.ndarray
+) -> np.ndarray:
+    """Vegetation seen through thin haze: excluded only by the spectral test.
+
+    Inside AND not SCL-invalid AND spectral cloud AND every band in range
+    AND NDVI > CLOUD_NDVI_MAX. Disjoint from valid_mask by construction;
+    NaN NDVI counts as False.
+    """
+    collected = _collect_bands(bands=bands)
+    mask = np.asanyarray(inside, dtype=bool) & ~scl_invalid(scl)
+    mask = mask & spectral_cloud(collected["B02"], collected["B11"], collected["B04"])
+    floor = settings.REFLECTANCE_MIN_VALID
+    for key in SPECTRAL_BANDS:
+        arr = np.asanyarray(collected[key], dtype=np.float64)
+        mask = mask & np.isfinite(arr) & (arr > floor)
+    b08 = np.asanyarray(collected["B08"], dtype=np.float64)
+    b04 = np.asanyarray(collected["B04"], dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        veg = ndvi(b08, b04) > settings.CLOUD_NDVI_MAX
+    return mask & veg

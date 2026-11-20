@@ -16,6 +16,8 @@ from smol_frontier.classify.geotiff import write_classified_geotiff
 from smol_frontier.classify.masks import cloud_fraction, valid_fraction
 from smol_frontier.config import settings
 from smol_frontier.gate import (
+    BASELINE_REFERENCE_CSV,
+    REFERENCE_CSV,
     ComparedScene,
     GateTarget,
     RunMeta,
@@ -31,7 +33,7 @@ from smol_frontier.gate import (
     write_csv,
     write_markdown,
 )
-from smol_frontier.hydro.bed import correct_bed
+from smol_frontier.hydro.bed import correct_bed, load_day_mirror
 from smol_frontier.hydro.curve import build_curve
 from smol_frontier.hydro.flood_map import FloodMapError, build_flood_map
 from smol_frontier.hydro.levels import (
@@ -156,7 +158,8 @@ def classify(
     except AnomalousProduct as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1)
-    result = pipeline.classify(ing)
+    mirror = load_day_mirror(day.date(), ing.transform, ing.crs, np.shape(ing.inside))
+    result = pipeline.classify(ing, mirror)
     ha = result.ha_per_class
     bed = correct_bed(result.class_map, ing.transform, ing.crs, day.date())
     out_dir = paths.outputs_dir()
@@ -170,6 +173,7 @@ def classify(
     typer.echo(f"water_ha: {ha[settings.CLASS_WATER]:.2f}")
     typer.echo(f"dense_ha: {ha[settings.CLASS_DENSE_HYACINTH]:.2f}")
     typer.echo(f"interface_ha: {ha[settings.CLASS_INTERFACE]:.2f}")
+    typer.echo(f"hyacinth_under_haze_ha: {result.hyacinth_under_haze_ha:.2f}")
     typer.echo(f"soil_ha: {ha[settings.CLASS_BARE_SOIL]:.2f}")
     if bed.applied:
         typer.echo(
@@ -308,6 +312,13 @@ def gate_identity(
     workers: Annotated[
         int, typer.Option("--workers", help="Concurrent scene fetches.")
     ] = 4,
+    baseline: Annotated[
+        bool,
+        typer.Option(
+            "--baseline",
+            help="Haze rescue off, against the v2026-10-22 baseline reference.",
+        ),
+    ] = False,
 ) -> None:
     """Compare our raw pipeline against the author's reference series.
 
@@ -317,11 +328,15 @@ def gate_identity(
     one CSV row per scene plus a markdown report under outputs/identity_gate/.
     A failed scene is logged and skipped, never fatal. Exits 1 unless the
     gate passes (median |Δ total| ≤ 10 ha AND p95 ≤ 25 ha, no failures).
+    By default the haze rescue is on and the reference is v2026-11-19;
+    --baseline turns the rescue off and uses the v2026-10-22 reference.
     """
     if workers < 1:
         typer.echo("error: --workers must be >= 1", err=True)
         raise typer.Exit(2)
-    reference = load_reference()
+    reference_path = BASELINE_REFERENCE_CSV if baseline else REFERENCE_CSV
+    rescue = not baseline
+    reference = load_reference(reference_path)
     targets: list[GateTarget]
     early_errors: list[ComparedScene] = []
     if all_:
@@ -332,6 +347,9 @@ def gate_identity(
         targets, early_errors = load_sample_targets(reference)
     total = len(targets) + len(early_errors)
     typer.echo(f"mode: {mode} ({total} scenes, {workers} workers)")
+    typer.echo(
+        f"reference: {reference_path.name}; haze rescue: {'on' if rescue else 'off'}"
+    )
     done = 0
 
     def on_done(row: ComparedScene) -> None:
@@ -349,7 +367,7 @@ def gate_identity(
             )
 
     start = time.perf_counter()
-    rows = run_gate(targets, workers=workers, on_done=on_done)
+    rows = run_gate(targets, workers=workers, on_done=on_done, rescue=rescue)
     wall = time.perf_counter() - start
     rows = sorted([*rows, *early_errors], key=lambda r: (r.date, r.item_id_requested))
     summary = summarize(rows)
@@ -363,6 +381,8 @@ def gate_identity(
         n_requested=total,
         workers=workers,
         wall_seconds=wall,
+        reference=reference_path.name,
+        rescue=rescue,
     )
     report = (
         render_summary(summary, meta)

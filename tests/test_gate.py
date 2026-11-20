@@ -4,10 +4,12 @@ The live gate run is the `smolf gate identity` CLI, never a pytest test.
 """
 
 import csv
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import smol_frontier.gate as gate_mod
@@ -25,6 +27,7 @@ from smol_frontier.gate import (
     load_sample_targets,
     map_light,
     map_regime,
+    render_rows_table,
     render_summary,
     summarize,
     write_csv,
@@ -365,3 +368,163 @@ def test_ingest_with_fallback_also_anomalous_raises(
     monkeypatch.setattr(gate_mod, "search_scenes", lambda *a, **k: [_es_scene()])
     with pytest.raises(AnomalousProduct, match="also anomalous"):
         ingest_with_fallback(_pc_scene())
+
+
+def test_reference_constants_name_both_series() -> None:
+    assert gate_mod.REFERENCE_CSV.name.endswith("v2026-11-19.csv")
+    assert gate_mod.BASELINE_REFERENCE_CSV.name.endswith("v2026-10-22.csv")
+
+
+def test_load_reference_reads_both_committed_files() -> None:
+    new = load_reference(gate_mod.REFERENCE_CSV)
+    old = load_reference(gate_mod.BASELINE_REFERENCE_CSV)
+    assert len(new) == 468
+    assert len(old) == 465
+    assert all(row.under_haze_ha is not None for row in new)
+    assert all(row.under_haze_ha is None for row in old)
+    assert load_reference()[0] == new[0]
+
+
+def test_committed_sample_items_exist_in_new_reference() -> None:
+    targets, errors = load_sample_targets(load_reference())
+    assert len(targets) == 30
+    assert errors == []
+
+
+def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> list:
+    seen: list = []
+    ing = SimpleNamespace(
+        scene=_es_scene(),
+        transform="T",
+        crs="C",
+        inside=np.zeros((4, 5), dtype=bool),
+    )
+    mirror = np.ones((4, 5), dtype=bool)
+    result = SimpleNamespace(
+        ha_per_class={
+            gate_mod.settings.CLASS_DENSE_HYACINTH: 1.0,
+            gate_mod.settings.CLASS_INTERFACE: 2.0,
+            gate_mod.settings.CLASS_WATER: 3.0,
+            gate_mod.settings.CLASS_BARE_SOIL: 4.0,
+        },
+        hyacinth_total_ha=3.0,
+        hyacinth_under_haze_ha=0.5,
+        valid_fraction=0.9,
+    )
+
+    def fake_classify(scene, mirror=None):
+        seen.append(mirror)
+        return result
+
+    def fake_load_mirror(day, transform, crs, shape):
+        assert (day, transform, crs, shape) == (date(2026, 10, 27), "T", "C", (4, 5))
+        return mirror
+
+    monkeypatch.setattr(gate_mod, "ingest_with_fallback", lambda s: (ing, ""))
+    monkeypatch.setattr(gate_mod.pipeline, "classify", fake_classify)
+    monkeypatch.setattr(gate_mod, "load_day_mirror", fake_load_mirror)
+    monkeypatch.setattr(
+        gate_mod,
+        "assess_quality",
+        lambda r: SimpleNamespace(light="GOOD", regime=""),
+    )
+    monkeypatch.setattr(gate_mod, "resolve_scene", lambda d, i: (_es_scene(), ""))
+    return seen
+
+
+def test_measure_scene_passes_mirror_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _stub_pipeline(monkeypatch)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    row = gate_mod.measure_scene(target)
+    assert row.error == ""
+    assert len(seen) == 1
+    assert seen[0] is not None
+    assert row.ours_under_haze_ha == 0.5
+
+
+def test_measure_scene_baseline_passes_no_mirror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _stub_pipeline(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("mirror must not be loaded with rescue off")
+
+    monkeypatch.setattr(gate_mod, "load_day_mirror", boom)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    row = gate_mod.measure_scene(target, rescue=False)
+    assert row.error == ""
+    assert seen == [None]
+
+
+def test_run_gate_threads_rescue_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _stub_pipeline(monkeypatch)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    gate_mod.run_gate([target], workers=1, rescue=False)
+    gate_mod.run_gate([target], workers=1)
+    assert seen[0] is None
+    assert seen[1] is not None
+
+
+def test_render_summary_names_reference_and_mode() -> None:
+    rows = [_row(1.0)]
+    on = RunMeta(
+        timestamp="t",
+        mode="sample",
+        n_requested=1,
+        workers=1,
+        wall_seconds=1.0,
+        reference="serie_x_v2026-11-19.csv",
+        rescue=True,
+    )
+    off = replace(on, reference="serie_x_v2026-10-22.csv", rescue=False)
+    assert "reference: serie_x_v2026-11-19.csv" in render_summary(summarize(rows), on)
+    assert "haze rescue: on" in render_summary(summarize(rows), on)
+    text = render_summary(summarize(rows), off)
+    assert "reference: serie_x_v2026-10-22.csv" in text
+    assert "haze rescue: off" in text
+
+
+def test_compare_carries_under_haze_with_delta() -> None:
+    row = compare(_ref(under_haze_ha=2.0), _measured(under_haze_ha=2.5))
+    assert (row.ref_under_haze_ha, row.ours_under_haze_ha) == (2.0, 2.5)
+    assert row.delta_under_haze_ha == 0.5
+
+
+def test_compare_baseline_reference_has_no_under_haze() -> None:
+    row = compare(_ref(), _measured(under_haze_ha=0.0))
+    assert row.ref_under_haze_ha is None
+    assert row.delta_under_haze_ha is None
+
+
+def test_write_csv_under_haze_columns(tmp_path: Path) -> None:
+    path = tmp_path / "gate.csv"
+    with_ref = compare(_ref(under_haze_ha=1.0), _measured(under_haze_ha=1.25))
+    baseline = compare(_ref(), _measured())
+    write_csv(path, [with_ref, baseline])
+    with path.open(encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[0]["ref_under_haze_ha"] == "1.0000"
+    assert rows[0]["ours_under_haze_ha"] == "1.2500"
+    assert rows[0]["delta_under_haze_ha"] == "0.2500"
+    assert rows[1]["ref_under_haze_ha"] == ""
+    assert rows[1]["ours_under_haze_ha"] == "0.0000"
+    assert rows[1]["delta_under_haze_ha"] == ""
+
+
+def test_rows_table_lists_under_haze() -> None:
+    with_ref = compare(_ref(under_haze_ha=1.0), _measured(under_haze_ha=1.25))
+    baseline = compare(_ref(), _measured())
+    error = compared_error("2020-01-02", "x", "", "boom")
+    lines = render_rows_table([with_ref, baseline, error]).splitlines()
+    assert "haze ref/ours" in lines[2]
+    assert "| 1.00/1.25 |" in lines[4]
+    assert "| —/0.00 |" in lines[5]
+    assert all(line.count("|") == lines[2].count("|") for line in lines[2:])
+
+
+def test_under_haze_is_not_gated() -> None:
+    far = compare(_ref(under_haze_ha=0.0), _measured(under_haze_ha=500.0))
+    assert summarize([far]).passed

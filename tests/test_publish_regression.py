@@ -3,12 +3,13 @@
 Each test builds a one-scene run directory in tmp_path from a committed
 scene record (tests/fixtures/publish_regression/) and publishes it for
 real: hash-verified cache read, re-classification, class-5 mask, schema
-validation, atomic write. Provenance of the two records differs: the
-2026-10-12 one comes from a real series run (copied verbatim from run
-20261030T031055, Earth Search); the 2024-06-09 one was generated once from
-the cached Planetary Computer copy of the dry-season control scene with
-the pipeline's own code (no series run covers it), so its values are the
-AGENTS.md control values.
+validation, atomic write. The 2026-10-12 record comes from a real series
+run (run 20261030T031055, Earth Search); the 2024-06-09 one was generated
+from the cached Planetary Computer copy of the dry-season control scene
+(no series run covers it). Since the haze rescue (issue #69) both rows
+were regenerated with the series builder's own `process_scene` on the
+cached files (identity fields and cache hashes kept), so they carry
+`hyacinth_under_haze_ha` and the rescue-on figures.
 
 Skips with a clear reason when the scene is not cached (CI) or the local
 cache file is not the one the record was built from (a re-fetch): a cache
@@ -116,44 +117,46 @@ def _class5_ha(out_dir: Path, latest: dict) -> float:
 
 
 def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
-    """High-water control: 818.34 ha, 64.86 %, GOOD, CLEAN, RED, nothing removed."""
+    """High-water control: 824.63 ha (6.29 under haze), 65.36 %, nothing removed."""
     latest, out_dir = _publish_fixture(tmp_path, SCENE_2026_10_12)
     assert latest["date"] == "2026-10-12"
-    assert latest["hyacinth_raw_ha"] == 818.34
-    assert latest["hyacinth_corrected_ha"] == 818.34
+    assert latest["hyacinth_raw_ha"] == 824.63
+    assert latest["hyacinth_under_haze_ha"] == 6.29
+    assert latest["hyacinth_corrected_ha"] == 824.63
     assert latest["dense_corrected_ha"] == 350.24
-    assert latest["interface_corrected_ha"] == 468.1
-    assert latest["pct_reservoir_corrected"] == 64.86
+    assert latest["interface_corrected_ha"] == 474.39
+    assert latest["pct_reservoir_corrected"] == 65.36
     assert latest["quality_light"] == "GOOD"
     assert latest["regime"] == "CLEAN"
     assert latest["cover_band"] == "RED"
     assert latest["display_status"] == "FULL"
-    assert latest["display_ha"] == {"total": 818, "dense": 350, "interface": 468}
+    assert latest["display_ha"] == {"total": 825, "dense": 350, "interface": 475}
     assert latest["bed_applied"] is True
     assert latest["removed_ha"] == 0.0
     assert latest["reservoir_area_ha"] == 1261.75
     assert latest["constants"]["green_max_ha"] == 378.53
     assert latest["constants"]["red_min_ha"] == 630.88
-    assert latest["smolf_version"] == "0.7.1"
-    assert latest["schema_version"] == "3.2.0"
+    assert latest["smolf_version"] == "0.8.0"
+    assert latest["schema_version"] == "3.3.0"
     assert _class5_ha(out_dir, latest) == 0.0
 
 
 def test_publish_regression_2024_06_09(tmp_path: Path) -> None:
-    """Dry-season control: raw 432.25 → corrected 13.74, class 5 = 418.51 ha."""
+    """Dry-season control: raw 434.21 → corrected 15.70, class 5 = 418.51 ha."""
     latest, out_dir = _publish_fixture(tmp_path, SCENE_2024_06_09)
     assert latest["date"] == "2024-06-09"
-    assert latest["hyacinth_raw_ha"] == 432.25
-    assert latest["hyacinth_corrected_ha"] == 13.74
+    assert latest["hyacinth_raw_ha"] == 434.21
+    assert latest["hyacinth_under_haze_ha"] == 1.96
+    assert latest["hyacinth_corrected_ha"] == 15.7
     assert latest["removed_ha"] == 418.51
     assert latest["level_m"] == 2004.6
     assert latest["regime"] == "EXPOSED_BED"
     assert latest["quality_light"] == "GOOD"
     assert latest["bed_applied"] is True
-    assert latest["pct_reservoir_corrected"] == 1.09
+    assert latest["pct_reservoir_corrected"] == 1.24
     assert latest["cover_band"] == "GREEN"
     assert latest["display_status"] == "FULL"
-    assert latest["display_ha"] == {"total": 14, "dense": 4, "interface": 10}
+    assert latest["display_ha"] == {"total": 16, "dense": 4, "interface": 12}
     assert _class5_ha(out_dir, latest) == 418.51
 
 
@@ -223,9 +226,10 @@ def test_publish_regression_same_month_clipped_to_the_reservoir(
     assert year["featured"] is True
 
 
-# WHY: the endho-web fixture run (2017-02 to 2026-11, Earth Search); its
-#   November block is the one the homepage shows.
-FIXTURE_RUN = "20261106T154111"
+# WHY: a full run built at smolf 0.8.0 (contract 3.3.0, haze rescue on;
+#   2017-02 to 2026-11, Earth Search); its November block is the one the
+#   homepage shows.
+FIXTURE_RUN = "20261119T184404"
 
 
 def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:

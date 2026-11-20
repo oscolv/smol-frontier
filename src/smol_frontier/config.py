@@ -100,6 +100,20 @@ class Settings:
     #   real measurement and only rejects sub-floor garbage.
     REFLECTANCE_MIN_VALID: float = -0.05
 
+    # WHY: haze-over-vegetation cutoff — opaque cloud suppresses the
+    #   vegetation signal, thin haze over the mat does not. Pixels the
+    #   spectral cloud test excludes but whose NDVI exceeds this are
+    #   hyacinth seen through haze (2026-11-08: NDVI ~ 0.74, SCL vegetation,
+    #   52 ha masked); they are classified in a second pass with the scene's
+    #   frozen model and never enter the valid mask.
+    # HOW: calibrated by the author on the Endho series (see PRIOR_WORK.md,
+    #   smol PR #45): the 2025-07-29 cloud SCL passed has median NDVI 0.39;
+    #   sensitivity 0.45 / 0.55 moves the series total +11 % / -12 %; below
+    #   0.5 cloud gets in (2025-07-29: 93 ha at 0.50, 137 at 0.45, 251 at
+    #   0.40). FAI instead of NDVI rescued 547 of 548 ha of that cloud, so
+    #   NDVI is the discriminating index.
+    CLOUD_NDVI_MAX: float = 0.5
+
     # WHY: DN ceiling for the anomalous-product guard — a genuine Sentinel-2
     #   L2A product always has bright pixels (cloud, soil, mat) in at least
     #   one band, while the corrupt 2026-10-27 MPC product is 8-bit data (DN

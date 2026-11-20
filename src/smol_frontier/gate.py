@@ -21,8 +21,11 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
+import numpy as np
+
 from smol_frontier.classify import pipeline
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro.bed import load_day_mirror
 from smol_frontier.ingest import IngestedScene, ingest_scene
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.radiometry import AnomalousProduct
@@ -37,10 +40,12 @@ from smol_frontier.sources.stac import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "BASELINE_REFERENCE_CSV",
     "CSV_FIELDS",
     "GATE_SAMPLE_CSV",
     "PASS_MEDIAN_HA",
     "PASS_P95_HA",
+    "REFERENCE_CSV",
     "ComparedScene",
     "GateSummary",
     "GateTarget",
@@ -66,9 +71,15 @@ __all__ = [
 ]
 
 # WHY: fixed inputs — the author's reference series and the fixed 30-scene
-#   gate sample. Both were added by hand and are never edited by the gate.
+#   gate sample. All were added by hand and are never edited by the gate.
+#   v2026-11-19 (the series WITH the haze rescue; adds lirio_bajo_neblina_ha)
+#   is the gold standard; v2026-10-22 (no rescue) stays as the baseline that
+#   `smolf gate identity --baseline` must still match with the rescue off.
 # HOW: repo layout anchored at PROJECT_ROOT.
 REFERENCE_CSV = (
+    PROJECT_ROOT / "tests/reference/serie_2017-01-01_2026-12-31_v2026-11-19.csv"
+)
+BASELINE_REFERENCE_CSV = (
     PROJECT_ROOT / "tests/reference/serie_2017-01-01_2026-12-31_v2026-10-22.csv"
 )
 GATE_SAMPLE_CSV = PROJECT_ROOT / "tests/reference/gate_scenes.csv"
@@ -113,6 +124,9 @@ CSV_FIELDS = (
     "ref_valid_frac",
     "ours_valid_frac",
     "delta_valid_frac",
+    "ref_under_haze_ha",
+    "ours_under_haze_ha",
+    "delta_under_haze_ha",
     "ref_light",
     "ours_light",
     "light_match",
@@ -154,6 +168,7 @@ class ReferenceRow:
     valid_frac: float
     light: str
     regime: str
+    under_haze_ha: float | None = None
 
 
 @dataclass(frozen=True)
@@ -180,6 +195,7 @@ class MeasuredScene:
     valid_frac: float
     light: str
     regime: str
+    under_haze_ha: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -210,6 +226,17 @@ class ComparedScene:
     ours_light: str
     ref_regime: str
     ours_regime: str
+    # Reported only, never gated; ref is None when the reference series has
+    #   no under-haze column (the rescue-off baseline).
+    ref_under_haze_ha: float | None = None
+    ours_under_haze_ha: float | None = None
+
+    @property
+    def delta_under_haze_ha(self) -> float | None:
+        """Ours minus reference under-haze hectares (None if either is absent)."""
+        if self.ref_under_haze_ha is None or self.ours_under_haze_ha is None:
+            return None
+        return self.ours_under_haze_ha - self.ref_under_haze_ha
 
     @property
     def delta_dense_ha(self) -> float:
@@ -286,6 +313,8 @@ def compare(
         ours_light=measured.light,
         ref_regime=ref.regime,
         ours_regime=measured.regime or "clean",
+        ref_under_haze_ha=ref.under_haze_ha,
+        ours_under_haze_ha=measured.under_haze_ha,
     )
 
 
@@ -421,6 +450,8 @@ class RunMeta:
     n_requested: int
     workers: int
     wall_seconds: float
+    reference: str = REFERENCE_CSV.name
+    rescue: bool = True
 
 
 def _fmt_ha(value: float) -> str:
@@ -451,7 +482,8 @@ def render_summary(summary: GateSummary, meta: RunMeta) -> str:
         f"# Identity gate — {meta.timestamp}",
         "",
         f"mode: {meta.mode} ({meta.n_requested} scenes requested)",
-        f"reference: {REFERENCE_CSV.name}",
+        f"reference: {meta.reference}",
+        f"haze rescue: {'on' if meta.rescue else 'off'}",
         f"workers: {meta.workers}, wall time: {wall}",
         f"fallback backend scenes: {summary.fallback.n}",
         f"failed scenes: {summary.n_errors}",
@@ -517,23 +549,42 @@ def render_rows_table(rows: list[ComparedScene]) -> str:
     lines = [
         "## Per-scene",
         "",
-        "| date | item requested | backend used | ref | ours | Δ | light | regime |",
-        "|---|---|---|---|---|---|---|---|",
+        (
+            "| date | item requested | backend used | ref | ours | Δ"
+            " | haze ref/ours | light | regime |"
+        ),
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for row in rows:
         if row.error:
             lines.append(
-                f"| {row.date} | {row.item_id_requested} | ERROR | — | — | — | — | — |"
+                f"| {row.date} | {row.item_id_requested} | ERROR"
+                " | — | — | — | — | — | — |"
             )
         else:
             fb = " (fallback)" if row.fallback else ""
             lines.append(
                 f"| {row.date} | {row.item_id_requested} | {row.backend_used}{fb}"
                 f" | {row.ref_total_ha:.2f} | {row.ours_total_ha:.2f}"
-                f" | {row.delta_total_ha:+.2f} | {row.ref_light}/{row.ours_light}"
+                f" | {row.delta_total_ha:+.2f}"
+                f" | {_haze_cell(row.ref_under_haze_ha)}"
+                f"/{_haze_cell(row.ours_under_haze_ha)}"
+                f" | {row.ref_light}/{row.ours_light}"
                 f" | {row.ref_regime}/{row.ours_regime} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def _haze_cell(value: float | None) -> str:
+    """Format an under-haze hectare cell ("—" when the column is absent)."""
+    return "—" if value is None else f"{value:.2f}"
+
+
+def _optional_float(value: str | None) -> float | None:
+    """Parse an optional numeric cell (absent column or blank → None)."""
+    if value is None or not value.strip():
+        return None
+    return float(value)
 
 
 def load_reference(path: Path | None = None) -> list[ReferenceRow]:
@@ -555,6 +606,7 @@ def load_reference(path: Path | None = None) -> list[ReferenceRow]:
                         valid_frac=float(raw["valid_frac"]),
                         light=map_light(raw["quality"] or ""),
                         regime=map_regime(raw["regimen"] or ""),
+                        under_haze_ha=_optional_float(raw.get("lirio_bajo_neblina_ha")),
                     )
                 )
             except (KeyError, ValueError) as exc:
@@ -653,10 +705,15 @@ def ingest_with_fallback(scene: SceneMeta) -> tuple[IngestedScene, str]:
         return ing, note
 
 
-def _measure_scene_meta(scene) -> MeasuredScene:
+def _measure_scene_meta(scene, *, rescue: bool = True) -> MeasuredScene:
     """Classify one ingested scene: raw hectares + light + regime."""
     ing, note = ingest_with_fallback(scene)
-    result = pipeline.classify(ing)
+    mirror: np.ndarray | None = None
+    if rescue:
+        mirror = load_day_mirror(
+            ing.scene.datetime.date(), ing.transform, ing.crs, np.shape(ing.inside)
+        )
+    result = pipeline.classify(ing, mirror)
     quality = assess_quality(result)
     ha = result.ha_per_class
     return MeasuredScene(
@@ -672,6 +729,7 @@ def _measure_scene_meta(scene) -> MeasuredScene:
         valid_frac=result.valid_fraction,
         light=quality.light,
         regime=quality.regime,
+        under_haze_ha=result.hyacinth_under_haze_ha,
     )
 
 
@@ -697,17 +755,18 @@ def resolve_scene(day: date, item_id: str):
         return scene, f"earth-search failed ({exc}); used {scene.id}"
 
 
-def measure_scene(target: GateTarget) -> ComparedScene:
+def measure_scene(target: GateTarget, *, rescue: bool = True) -> ComparedScene:
     """Ingest + classify + compare one gate scene (never raises).
 
     Uses the reference Earth Search item id; when Earth Search fails,
     falls back to the Planetary Computer scene of the same date and tile
     and records the backend change. Any failure becomes an error row.
+    ``rescue`` switches the haze rescue on (default) or off (baseline).
     """
     ref = target.ref
     try:
         scene, note = resolve_scene(ref.date, ref.item_id)
-        measured = _measure_scene_meta(scene)
+        measured = _measure_scene_meta(scene, rescue=rescue)
         full_note = "; ".join(part for part in (note, measured.note) if part)
         return compare(ref, replace(measured, note=full_note), stratum=target.stratum)
     except Exception as exc:  # noqa: BLE001 — a failed scene is skipped, not fatal
@@ -725,6 +784,7 @@ def measure_scene(target: GateTarget) -> ComparedScene:
             ref_valid_frac=ref.valid_frac,
             ref_light=ref.light,
             ref_regime=ref.regime,
+            ref_under_haze_ha=ref.under_haze_ha,
         )
 
 
@@ -732,17 +792,23 @@ def run_gate(
     targets: list[GateTarget],
     workers: int = 4,
     on_done=None,
+    *,
+    rescue: bool = True,
 ) -> list[ComparedScene]:
     """Measure every target concurrently; scenes already cached skip fetch.
 
     ``on_done`` (optional) is called in the caller thread with each finished
-    row, for progress output. Returns rows sorted by (date, item).
+    row, for progress output; ``rescue`` is the haze-rescue mode. Returns
+    rows sorted by (date, item).
     """
     rows: list[ComparedScene] = []
     if not targets:
         return rows
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(measure_scene, target): target for target in targets}
+        futures = {
+            pool.submit(measure_scene, target, rescue=rescue): target
+            for target in targets
+        }
         for future in as_completed(futures):
             row = future.result()
             rows.append(row)
@@ -798,6 +864,9 @@ def write_csv(path: Path, rows: list[ComparedScene]) -> None:
                 "ref_valid_frac": row.ref_valid_frac,
                 "ours_valid_frac": row.ours_valid_frac,
                 "delta_valid_frac": row.delta_valid_frac,
+                "ref_under_haze_ha": row.ref_under_haze_ha,
+                "ours_under_haze_ha": row.ours_under_haze_ha,
+                "delta_under_haze_ha": row.delta_under_haze_ha,
                 "ref_light": row.ref_light,
                 "ours_light": row.ours_light,
                 "light_match": row.light_match if not row.error else "",

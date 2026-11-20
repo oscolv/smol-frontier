@@ -8,6 +8,7 @@ post-process of the report only — the class map is NOT changed. Method
 reproduced from the author's prior research.
 """
 
+import math
 from dataclasses import dataclass, replace
 from datetime import date
 
@@ -17,7 +18,11 @@ from rasterio.crs import CRS
 
 from smol_frontier.aoi import reservoir_area_ha
 from smol_frontier.config import settings
-from smol_frontier.hydro.curve import DEFAULT_CURVE_CSV_PATH, load_curve
+from smol_frontier.hydro.curve import (
+    DEFAULT_CURVE_CSV_PATH,
+    StageAreaCurve,
+    load_curve,
+)
 from smol_frontier.hydro.flood_map import (
     DEFAULT_FLOOD_PATH,
     FLOOD_NODATA,
@@ -32,7 +37,9 @@ __all__ = [
     "compute_bed_correction",
     "correct_bed",
     "cushion_ha",
+    "day_mirror",
     "exposed_bed_mask",
+    "load_day_mirror",
 ]
 
 
@@ -175,6 +182,38 @@ def _not_applied(reason: str, level: float | None) -> BedCorrection:
     )
 
 
+def _load_day_inputs(
+    day: date,
+    transform: rasterio.Affine,
+    crs: str,
+    shape: tuple[int, ...],
+) -> tuple[tuple[np.ndarray, StageAreaCurve] | None, str, float | None]:
+    """Load the day's level, flood map and curve and check the scene grid.
+
+    Returns ((flood, curve), "", level) on success, or (None, reason, level)
+    when an input is missing or the grid (shape, transform, crs) differs
+    from the flood map. Nothing is ever downloaded here.
+    """
+    level = level_on(day)
+    if level is None:
+        return None, f"no SIH level for {day.isoformat()}", None
+    if not DEFAULT_FLOOD_PATH.exists():
+        return None, f"flood map not found: {DEFAULT_FLOOD_PATH}", level
+    if not DEFAULT_CURVE_CSV_PATH.exists():
+        return None, f"stage-area curve not found: {DEFAULT_CURVE_CSV_PATH}", level
+    flood, flood_transform, flood_crs = load_flood_map()
+    problems: list[str] = []
+    if tuple(shape) != tuple(np.shape(flood)):
+        problems.append(f"shape {tuple(shape)} != flood {tuple(np.shape(flood))}")
+    if transform != flood_transform:
+        problems.append("transform differs from flood map")
+    if CRS.from_string(crs) != CRS.from_string(flood_crs):
+        problems.append(f"crs {crs} != flood {flood_crs}")
+    if problems:
+        return None, "grid differs from flood map: " + "; ".join(problems), level
+    return (flood, load_curve()), "", level
+
+
 def correct_bed(
     class_map: np.ndarray,
     transform: rasterio.Affine,
@@ -187,30 +226,12 @@ def correct_bed(
     differs from the flood map → applied=False with the reason. Nothing is
     ever downloaded here.
     """
-    level = level_on(day)
-    if level is None:
-        return _not_applied(f"no SIH level for {day.isoformat()}", None)
-    if not DEFAULT_FLOOD_PATH.exists():
-        return _not_applied(f"flood map not found: {DEFAULT_FLOOD_PATH}", level)
-    if not DEFAULT_CURVE_CSV_PATH.exists():
-        return _not_applied(
-            f"stage-area curve not found: {DEFAULT_CURVE_CSV_PATH}", level
-        )
-    flood, flood_transform, flood_crs = load_flood_map()
-    problems: list[str] = []
-    if tuple(np.shape(class_map)) != tuple(np.shape(flood)):
-        problems.append(
-            f"shape {tuple(np.shape(class_map))} != flood {tuple(np.shape(flood))}"
-        )
-    if transform != flood_transform:
-        problems.append("transform differs from flood map")
-    if CRS.from_string(crs) != CRS.from_string(flood_crs):
-        problems.append(f"crs {crs} != flood {flood_crs}")
-    if problems:
-        return _not_applied(
-            "grid differs from flood map: " + "; ".join(problems), level
-        )
-    curve = load_curve()
+    inputs, reason, level = _load_day_inputs(
+        day, transform, crs, tuple(np.shape(class_map))
+    )
+    if inputs is None:
+        return _not_applied(reason, level)
+    flood, curve = inputs
     numbers = compute_bed_correction(
         class_map,
         flood,
@@ -223,3 +244,32 @@ def correct_bed(
     )
     assert numbers.margin_m is not None  # pure result always carries a margin
     return replace(numbers, margin_m=round(numbers.margin_m, 2))
+
+
+def day_mirror(flood_stage: np.ndarray, margin_m: float) -> np.ndarray:
+    """Pixels the level-plus-margin leaves under water (pure; boolean array)."""
+    flood = np.asanyarray(flood_stage, dtype=np.float64)
+    return (flood != FLOOD_NODATA) & (flood <= margin_m)
+
+
+def load_day_mirror(
+    day: date,
+    transform: rasterio.Affine,
+    crs: str,
+    shape: tuple[int, int],
+) -> np.ndarray | None:
+    """The day's water mirror on the scene grid, or None when unavailable.
+
+    None when the day has no SIH level (or it is NaN), the flood map or
+    curve is missing, or the grid (shape, transform, crs) differs from the
+    flood map: nothing is then rescued. Uses the full-precision margin, the
+    same one correct_bed() applies. Nothing is ever downloaded here.
+    """
+    inputs, _, level = _load_day_inputs(day, transform, crs, shape)
+    if inputs is None or level is None or math.isnan(level):
+        return None
+    flood, curve = inputs
+    margin = bed_margin(
+        level, curve.stage_m, curve.area_km2, curve.area_p2_5, curve.area_p97_5
+    )
+    return day_mirror(flood, margin)

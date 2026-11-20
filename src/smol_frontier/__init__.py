@@ -1,3 +1,3 @@
 """smol-frontier: auditable verification of water-hyacinth coverage change."""
 
-__version__ = "0.7.1"
+__version__ = "0.8.0"

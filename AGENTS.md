@@ -22,7 +22,12 @@ The pipeline in order, one line per stage:
 - Radiometry — `sources/radiometry.py`
 - Validity masks + indices — `classify/masks.py`, `classify/indices.py`
 - Pre-masks + GMM Stage 1/2 + rescue + substrate — `classify/gmm.py`
-- `classify()` — `classify/pipeline.py` (`smolf classify`)
+  (plus `haze_pass`, the frozen second pass over haze-over-vegetation
+  pixels)
+- `classify()` — `classify/pipeline.py` (`smolf classify`; loads the day's
+  water mirror, `hydro.bed.load_day_mirror`, and rescues hyacinth under
+  thin haze inside it with the haze second pass; reports
+  `hyacinth_under_haze_ha`)
 - Quality light + regime — `quality.py`
 - Exposed-bed correction — `hydro/bed.py`, using levels (`hydro/levels.py`,
   `smolf levels`), stage–area curve (`hydro/curve.py`, `smolf hydro curve`)
@@ -56,6 +61,10 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `SMOLF_DATA_DIR` (optional) relocates `data/cache/`, `outputs/` and the
   refreshed level record to a writable folder; it must be an absolute path
   outside the checkout (otherwise every command exits 1).
+- `tests/reference/` — the author's reference series (CC BY 4.0):
+  `…_v2026-11-19.csv` (468 scenes, with the haze rescue; the identity
+  gate's reference) and `…_v2026-10-22.csv` (465 scenes, the rescue-off
+  baseline for `smolf gate identity --baseline`), plus `gate_scenes.csv`.
 - `data/cache/` — ingested scenes (gitignored, regenerable via
   `smolf fetch`).
 - `outputs/` — classified GeoTIFFs (gitignored, regenerable via
@@ -99,13 +108,26 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 Any change that moves these must be flagged, not silently accepted
 (`tests/test_regression_scenes.py` guards them when the scenes are cached):
 
-- 2026-10-12: hyacinth 818.34 ha (dense 350.24, interface 468.10), water
-  415.86, soil 0.11, 64.86 % of 1261.75 ha; light GOOD; regime clean;
-  exposed bed: applied, nothing removed.
-- 2024-06-09 (deep dry season, level 2004.60 m): raw 432.25 ha →
-  corrected 13.74 ha (margin 2005.54 m, expected bed 696.80 ha, removed
-  418.51 ha); light GOOD; regime EXPOSED_BED. (Author's pipeline, Earth
-  Search backend: 432.38 → 13.73; the ~0.1 ha gap is the STAC backend.)
+Moved by #69 (haze rescue, v0.8.0; author's reference v2026-11-19). The
+regression helper passes the day's water mirror, as `smolf classify` does:
+
+- 2026-10-12: hyacinth 824.63 ha (dense 350.24, interface 474.39), of which
+  6.29 under haze; water 415.86, soil 0.11, 65.36 % of 1261.75 ha; light
+  GOOD; regime clean; exposed bed: applied, nothing removed. (Author:
+  824.63 = dense 347.49 + interface 477.14, haze 6.29; same total, the
+  dense/interface split gap predates #69.)
+- 2024-06-09 (deep dry season, level 2004.60 m): raw 434.21 ha (1.96
+  under haze) → corrected 15.70 ha (margin 2005.54 m, expected bed
+  696.80 ha, removed 418.51 ha); light GOOD; regime EXPOSED_BED. (Earth
+  Search copy: 434.35 → 15.66, haze 1.90; author: 434.28 → 15.63, haze
+  1.90; the ~0.1 ha gap is the STAC backend.)
+- 2023-01-21 (Earth Search): 158.18 ha, 86.91 under haze (author 86.88);
+  light GOOD; regime TURBIDITY.
+- 2026-11-08 (Earth Search): 780.95 ha, 61.89 %, 49.96 under haze; light
+  GOOD.
+- With `mirror=None` (rescue off) the v2026-10-22 values still hold:
+  2026-10-12 818.34 ha (dense 350.24, interface 468.10, 64.86 %);
+  2024-06-09 raw 432.25 → corrected 13.74 ha (author 432.38 → 13.73).
 - `data/hydro/ENDHD.csv` sha256 `261180f6…` (committed refresh through
   2026-11-18; `tests/test_levels.py` checks this prefix and day); `stage_area_curve.csv` and
   `flood_stage.tif` are guarded by golden tests.

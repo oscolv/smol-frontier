@@ -28,6 +28,8 @@ uv run smolf levels show 2026-10-12  # level for one exact day (no interpolation
 uv run smolf hydro curve             # build the stage–area curve
 uv run smolf hydro flood-map         # build the per-pixel flood-stage map
 uv run smolf series build            # build or resume the hyacinth time series
+uv run smolf gate identity           # 30-scene sample vs the author's series v2026-11-19 (--all: every scene)
+uv run smolf gate identity --baseline  # haze rescue off, vs the pre-rescue series v2026-10-22
 uv run smolf publish --latest        # publish the newest complete run (or --run <id>)
 uv run pytest                        # tests (no network; live tests need SMOLF_LIVE=1)
 ```
@@ -90,7 +92,7 @@ Read-only checkout notes:
   Information System (SIH).
 - Surface-water occurrence: JRC Global Surface Water v1.4, publicly
   available from the European Commission's Joint Research Centre.
-- Identity-gate reference series: author's data in `tests/reference/`, released under CC BY 4.0 (see `tests/reference/LICENSE`).
+- Identity-gate reference series: author's data in `tests/reference/`, released under CC BY 4.0 (see `tests/reference/LICENSE`): v2026-11-19 (468 scenes, with the haze rescue; the gate's reference) and v2026-10-22 (465 scenes, before it; the `--baseline` reference).
 
 See each provider's terms for reuse conditions. This repository's code is
 MIT-licensed (LICENSE).

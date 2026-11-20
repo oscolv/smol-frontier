@@ -51,7 +51,11 @@ from smol_frontier.publish.truecolour import (
 #   year and up to three earlier ones (issue #57, spec #56).
 #   3.2.0: every photo is an RGBA WebP with gamma 1.6, transparent outside
 #   the reservoir and on no-data pixels; no field changes (issue #60).
-SCHEMA_VERSION = "3.2.0"
+#   3.3.0: every scene carries hyacinth_under_haze_ha, the raw hyacinth
+#   rescued under thin haze (issue #69, spec #70). Required in the schemas
+#   although the bump is minor: the ^3.x pattern accepts it and a consumer
+#   pinned to 3.2 ignores the unknown field (ruling of spec #70).
+SCHEMA_VERSION = "3.3.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
@@ -78,6 +82,7 @@ _SCENE_FIELDS = (
     ("dense_ha", _DECIMALS_DEFAULT),
     ("interface_ha", _DECIMALS_DEFAULT),
     ("hyacinth_raw_ha", _DECIMALS_DEFAULT),
+    ("hyacinth_under_haze_ha", _DECIMALS_DEFAULT),
     ("pct_reservoir_raw", _DECIMALS_DEFAULT),
     ("bed_applied", None),
     ("bed_reason", None),
@@ -221,6 +226,13 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
         entry["display_ha"] = None
         return entry
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
+    if row.get("hyacinth_under_haze_ha") is None:
+        msg = (
+            f"scene {record['item_id_used']} has no hyacinth_under_haze_ha: "
+            "the run predates the haze rescue (contract 3.3.0); rebuild it "
+            "with `smolf series build`"
+        )
+        raise PublishRefused(msg)
     entry = {
         "date": row["date"],
         "item_id": record["item_id_used"],

@@ -2,9 +2,11 @@
 
 Runs the prior pipeline exactly, in order: validity mask → spectral indices →
 Stage 0/0b pre-masks and pre-screen → Stage 1 (water vs. mat) → Stage 2 (dense
-vs. interface) → water rescue → NSD substrate test. An identity gate compares
-this pipeline against the reference series, so the order and cutoffs are
-spec-literal. No I/O except the reservoir area from aoi.py.
+vs. interface) → water rescue → NSD substrate test → haze rescue (a frozen
+second pass over haze-over-vegetation pixels inside the day's water mirror).
+An identity gate compares this pipeline against the reference series, so the
+order and cutoffs are spec-literal. No I/O except the reservoir area from
+aoi.py; callers load the mirror.
 """
 
 from dataclasses import dataclass
@@ -16,12 +18,18 @@ from smol_frontier.classify import indices
 from smol_frontier.classify.gmm import (
     MAT_PENDING,
     border_strip,
+    haze_pass,
     rescue_water,
     stage1,
     stage2,
     substrate_test,
 )
-from smol_frontier.classify.masks import cloud_fraction, valid_fraction, valid_mask
+from smol_frontier.classify.masks import (
+    cloud_fraction,
+    haze_vegetation,
+    valid_fraction,
+    valid_mask,
+)
 from smol_frontier.config import settings
 from smol_frontier.ingest import IngestedScene
 
@@ -52,10 +60,17 @@ class SceneResult:
     nir_water_frac: float
     n_rescued: int
     n_substrate: int
+    hyacinth_under_haze_ha: float = 0.0
 
 
-def classify(scene: IngestedScene) -> SceneResult:
-    """Classify one ingested scene; return the map and its summary."""
+def classify(scene: IngestedScene, mirror: np.ndarray | None = None) -> SceneResult:
+    """Classify one ingested scene; return the map and its summary.
+
+    ``mirror`` is the day's water mirror on the scene grid (bool); None (no
+    level, flood map or curve, or a grid mismatch) rescues nothing. Haze over
+    vegetation inside the mirror gets a frozen second pass: every other pixel
+    and every diagnostic stays as the first pass left it.
+    """
     s = settings
     scl = scene.bands["SCL"]
     inside = np.asanyarray(scene.inside, dtype=bool)
@@ -97,6 +112,32 @@ def classify(scene: IngestedScene) -> SceneResult:
     tested = substrate_test(rescued.classes, rescued.confidence, valid, nsd, ndvi)
     classes = tested.classes
     assert (classes != MAT_PENDING).all(), "MAT_PENDING pixels survived Stage 2"
+
+    under_haze = np.zeros(classes.shape, dtype=bool)
+    if mirror is not None:
+        rescue = haze_vegetation(scl, bands, inside) & np.asanyarray(mirror, bool)
+        # Disjoint from valid by construction; the guard mirrors the reference.
+        rescue &= ~valid
+        if rescue.any():
+            haze_classes = haze_pass(
+                rescue,
+                classes,
+                valid,
+                border,
+                fai=fai,
+                ndvi=ndvi,
+                ndre=ndre,
+                mndwi=mndwi,
+                bsi=bsi,
+                nsd=nsd,
+                b08=b08,
+                first=first,
+                second=second,
+            )
+            classes = np.where(rescue, haze_classes, classes)
+            under_haze = rescue & np.isin(
+                classes, (s.CLASS_DENSE_HYACINTH, s.CLASS_INTERFACE)
+            )
     class_map = classes.astype(np.uint8)
 
     codes = (
@@ -129,4 +170,5 @@ def classify(scene: IngestedScene) -> SceneResult:
         nir_water_frac=first.nir_water_frac,
         n_rescued=rescued.n_changed,
         n_substrate=tested.n_changed,
+        hyacinth_under_haze_ha=float(under_haze.sum()) * PIXEL_AREA_M2 / 10_000.0,
     )

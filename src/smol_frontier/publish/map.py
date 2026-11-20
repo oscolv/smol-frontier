@@ -14,7 +14,7 @@ from smol_frontier.classify.display import DisplayImage, render_display_image
 from smol_frontier.classify.pipeline import classify as classify_scene
 from smol_frontier.config import settings
 from smol_frontier.hydro import curve, flood_map
-from smol_frontier.hydro.bed import bed_margin, exposed_bed_mask
+from smol_frontier.hydro.bed import bed_margin, day_mirror, exposed_bed_mask
 from smol_frontier.ingest import ingest_scene
 from smol_frontier.publish.errors import PublishRefused, _require_dict
 from smol_frontier.sources.stac import SceneMeta, get_scene
@@ -160,28 +160,41 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
 
     Refuses (PublishRefused) when the cache hash, the per-class hectares,
     the flood-stage map hash or the removed hectares disagree with the run.
-    Class 5 uses the run row's level and the margin recomputed from it
-    (never a fresh level lookup), and only when the correction was applied.
+    Class 5 and the haze-rescue mirror use the run row's level and the
+    margin recomputed from it (never a fresh level lookup), and only when
+    the correction was applied.
     """
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     item_id = record["item_id_used"]
     ing = _cached_scene(record)
-    result = classify_scene(ing)
+    # WHY the mirror follows bed_applied: the run loaded a mirror exactly
+    #   when the correction applied (same level, flood map, curve and grid
+    #   checks), so re-classifying needs the same one to match its hectares.
+    flood = margin = mirror = None
+    if row["bed_applied"]:
+        flood = _flood_stage_for(manifest, ing, np.shape(ing.inside))
+        margin = _run_margin(manifest, row)
+        mirror = day_mirror(flood, margin)
+    result = classify_scene(ing, mirror)
     mismatches = [
         f"{field} {round(result.ha_per_class[code], 2)} != run "
         f"{round(float(row[field]), 2)}"
         for code, field in _HECTARE_CHECKS
         if round(result.ha_per_class[code], 2) != round(float(row[field]), 2)
     ]
+    under_haze = round(result.hyacinth_under_haze_ha, 2)
+    if under_haze != round(float(row["hyacinth_under_haze_ha"]), 2):
+        mismatches.append(
+            f"hyacinth_under_haze_ha {under_haze} != run "
+            f"{round(float(row['hyacinth_under_haze_ha']), 2)}"
+        )
     if mismatches:
         msg = f"re-classified {item_id} differs from the run: " + "; ".join(mismatches)
         raise PublishRefused(msg)
     # WHY no dtype cast: the guarded writer must see the classifier's own
     #   dtype, so a non-uint8 map is rejected instead of silently truncated.
     published = np.array(result.class_map, copy=True)
-    if row["bed_applied"]:
-        flood = _flood_stage_for(manifest, ing, published.shape)
-        margin = _run_margin(manifest, row)
+    if flood is not None and margin is not None:
         removed = exposed_bed_mask(published, flood, float(row["level_m"]), margin)
         removed_ha = round(float(removed.sum()) * flood_map.PIXEL_HA, 2)
         if removed_ha != round(float(row["removed_ha"]), 2):

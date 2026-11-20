@@ -39,4 +39,3 @@ Preconditions:
 - The bundle files are not in `publish.json`. Export never changes the publish, so its `sha256sum -c` still passes afterwards.
 - `--out` refusals for symlinked or several-previous dirs reuse publish's wording (`… several previous publishes remain …`).
 - The daily job does not run export (see daily-job.md). A new publish leaves the old bundle in place until export runs again.
-- `smolf export series-csv --help` and AGENTS.md list four bundle files and leave out `LEEME.txt`. `docs/downloads.md` says `--out` may hold only "the four bundle files". The command writes five, and the `--out` check accepts all five.

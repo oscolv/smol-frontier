@@ -18,7 +18,7 @@
 
 Preconditions:
 
-- Shared cache, clean checkout, and doctor 200 for Earth Search. About 470 STAC item lookups: 2.5–4 min with a warm cache.
+- Shared cache, clean checkout, and doctor 200 for Earth Search. 468 STAC item lookups (471 or more with `--extend` since v0.8.1): 2.5–4 min with a warm cache (2:57 with `--extend`, 2:26 for a resume of 364 scenes, 2026-11-19).
 
 - **Stale levels.** In a fresh run, before any `levels update`, run `$V run "$RUN" series-stale-levels -- series build --extend --workers 4`. If a scene exists after the committed record's last day (2026-11-18), `.rc` is `2`, `.err` has one `error: SIH level record ends 2026-11-18; no level for …` line, and `.out` is empty (no `run:` line). `$RUN/data/outputs/series/` does not exist. If `.rc` is `0`, no scene was newer, so record that the precondition is unmet and don't count it as proof.
 - **Extend.** After `levels update` (see levels.md), run `$V run "$RUN" series-extend -- series build --extend --workers 4`. `.rc` `0`, with `counts: requested=N ok=… skipped=… errors=0` and `run_dir: $RUN/data/outputs/series/<run_id>`. Copy `manifest.json` into the evidence. It shows `status: complete`, `code.dirty: false`, and `inputs.ENDHD_csv` equal to `sha256sum $RUN/data/hydro/ENDHD.csv`.
@@ -28,10 +28,10 @@ Preconditions:
 
 ## Gotchas
 
-- Stdout order on success: `run: <id> (new|resume)`, one `[done/total] <date> <item> <status> …` line per scene processed in this invocation (a resume prints only the pending ones, its counter starting at the number already done: 138 before the interrupt plus 327 on resume, 2026-11-18, against the 465-scene v2026-10-22 reference; the v2026-11-19 reference has 468), then `run_dir:`, `series_csv:`, `series_sha256:`, `counts:`, `wall:`. `run:` is printed only once the run directory exists, so a refusal prints nothing on stdout and one `error:` line on stderr. An interrupt before that point prints `interrupted before the run started; nothing written` and offers no `--resume`.
+- Stdout order on success: `run: <id> (new|resume)`, one `[done/total] <date> <item> <status> …` line per scene processed in this invocation (a resume prints only the pending ones, its counter starting at the number already done: 104 before a 40 s interrupt plus 364 on resume, the first resumed line `[105/468]`, 2026-11-19), then `run_dir:`, `series_csv:`, `series_sha256:`, `counts:`, `wall:`. `run:` is printed only once the run directory exists, so a refusal prints nothing on stdout and one `error:` line on stderr. An interrupt before that point prints `interrupted before the run started; nothing written` and offers no `--resume`.
 - Without `--preserve-status`, `timeout` exits 124 and hides smolf's 130.
 - A resume fingerprint mismatch (`refusing resume of run …`) exits 1, not 2: the code, config or dirty flag changed since the run started, so no retry helps. Start a new run instead. `unknown run` and `run exists` also exit 1.
 - Exit 2 also covers `--workers 0` and `--extend` with `--resume` (argument checks) and an unreachable Earth Search on `--extend` (`error: Earth Search is unreachable … Retry later.`). Read the message, not just the code.
 - A dirty checkout doesn't fail the build. It records `code.dirty: true`, which `publish` later refuses.
 - `errors=` counts per-scene failures: network blips, but also a scene whose classification or bed correction raised. The run still completes, so check that `errors=0` before calling it proof.
-- `skipped=` counts POOR-light scenes (valid fraction too low); they stay out of `series.csv`. A reference-only run (the Resume step) gives `skipped=0`. The `--extend` run adds 1 newer scene, skipped, as of 2026-11-19 (`requested=469 ok=468 skipped=1`, run `20261119T184404`); `requested` grows as new scenes appear.
+- `skipped=` counts POOR-light scenes (valid fraction too low); they stay out of `series.csv`. A reference-only run (the Resume step) gives `skipped=0`. The `--extend` run adds 3 scenes from 2026-10-13 on dates the reference lacks (2026-10-19 and 2026-11-11 skipped, 2026-11-06 ok), as of 2026-11-19 at v0.8.1 (`requested=471 ok=469 skipped=2`, run `20261119T200232`); `requested` grows as new scenes appear.

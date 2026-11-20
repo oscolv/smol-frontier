@@ -226,10 +226,10 @@ def test_publish_regression_same_month_clipped_to_the_reservoir(
     assert year["featured"] is True
 
 
-# WHY: a full run built at smolf 0.8.0 (contract 3.3.0, haze rescue on;
+# WHY: a full run built at smolf 0.8.1 (contract 3.3.0, haze rescue on;
 #   2017-02 to 2026-11, Earth Search); its November block is the one the
 #   homepage shows.
-FIXTURE_RUN = "20261119T184404"
+FIXTURE_RUN = "20261119T200232"
 
 
 def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:

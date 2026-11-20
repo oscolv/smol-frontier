@@ -8,6 +8,7 @@
 - `classify-dry-season` reproduces the 2024-06-09 exposed-bed correction.
 - `classify-no-scene` reports a day with no scene and exits 1.
 - `classify-catalog-down` exits 2 (retry later) when every STAC catalog is unreachable.
+- `classify-stale` exits 2 before any search for a day newer than the local level record.
 
 ## How to get to it (user POV)
 
@@ -20,18 +21,19 @@ Preconditions:
 - Doctor shows 200 for Earth Search and Planetary Computer. The scene search hits the network even when the scene is cached.
 - Shared cache, or about 30 s per uncached scene.
 
-- **Control day.** Run `$V run "$RUN" classify-control -- classify 2026-10-12`. `.rc` is `0`. `.out` has `water_ha: 415.86`, `dense_ha: 350.24`, `interface_ha: 474.39`, `hyacinth_under_haze_ha: 6.29`, `soil_ha: 0.11`, `hyacinth_total_ha: 824.63 (raw 824.63)`, `pct_reservoir: 65.36 (raw 65.36)`, `reservoir_area_ha: 1261.75`, `light: GOOD`, `regime: clean`, `bed_removed_ha: 0.00`. The last line is `output: $RUN/data/outputs/<scene>_classified.tif`.
+- **Control day.** Run `$V run "$RUN" classify-control -- classify 2026-10-12`. `.rc` is `0`. `.out` has `water_ha: 415.86`, `dense_ha: 350.24`, `interface_ha: 474.39`, `hyacinth_under_haze_ha: 6.29`, `soil_ha: 0.11`, `hyacinth_total_ha: 824.63 (raw 824.63)`, `pct_reservoir: 65.36 (raw 65.36)`, `reservoir_area_ha: 1261.75`, `light: GOOD`, `regime: clean`, then a bare `EXPOSED BED` header line, then `bed_level_m: 2018.29` and `bed_removed_ha: 0.00` among the `bed_*` lines. The last line is `output: $RUN/data/outputs/<scene>_classified.tif`.
 - **Map matches the figures.** Run `$V hectares "$RUN" <output path>`. You get `water_ha: 415.86`, `dense_hyacinth_ha: 350.24`, `interface_ha: 474.39`, `bare_soil_ha: 0.11`. Save the output next to the evidence (`... | tee "$RUN/evidence/<n>-classify-control.hectares"`).
 - **Dry season.** Run `$V run "$RUN" classify-dry-season -- classify 2024-06-09`. `.rc` is `0`, with `hyacinth_under_haze_ha: 1.96`, `hyacinth_total_ha: 15.70 (raw 434.21)`, `bed_level_m: 2004.60`, `bed_margin_m: 2005.54`, `bed_expected_ha: 696.80`, `bed_removed_ha: 418.51`, `light: GOOD`, `regime: EXPOSED_BED`.
 - **No scene.** Run `$V run "$RUN" classify-no-scene -- classify 2026-10-13`. `.rc` is `1`, `.err` reads `no scenes found for 2026-10-13` and `.out` is empty. Nothing new appears in `$RUN/data/outputs/`.
 - **Catalogs down.** Run `$V run "$RUN" classify-catalog-down --block-host earth-search.aws.element84.com --block-host planetarycomputer.microsoft.com -- classify 2026-10-12`. `.rc` is `2`, `.out` is empty, and the last `.err` line is `error: all STAC backends failed: planetary-computer, earth-search`, after one `blocked by smolf-verify` warning per backend.
+- **Stale record.** Run `$V run "$RUN" classify-stale -- classify 2099-01-01`. `.rc` is `2`, `.out` is empty, and `.err` is one line, `error: SIH level record ends <last day>; no level for 2099-01-01. Run `smolf levels update` first; …`. Nothing new appears in `$RUN/data/outputs/`.
 
 ## Gotchas
 
 - The control values come from AGENTS.md "Control values" (haze rescue on since v0.8.0: `smolf classify` passes the day's water mirror). If they move, the change must be flagged, not accepted. `hyacinth_under_haze_ha` is part of `dense_ha + interface_ha`, not added to it.
-- The 2026-10-12 scene is served by Planetary Computer (`S2B_MSIL2A_…`). The bed correction reads the day's level from the level record, so a refreshed record can change `bed_level_m` but must not change the hectares on 2026-10-12.
+- The 2026-10-12 scene is served by Planetary Computer (`S2B_MSIL2A_…`). The day's level from the level record drives both the bed correction and the haze-rescue mirror. A refreshed record that keeps the 2026-10-12 level (2018.29) keeps every figure; a revised level for that day would move the hectares too, not only `bed_level_m`.
 - Without `SMOLF_DATA_DIR` the map goes to the repo's `outputs/`. Always drive through `smolf-verify` so it lands in the run.
 - `boa_offset_applied looks wrong … using 0.0` on stderr is a known radiometry guard message, not a failure.
 - A `note:` line means the other catalog served the scene because the first product was anomalous. An anomalous product with no usable fallback prints `error: …` on stderr and exits 1.
-- `PERCENT NOT PUBLISHABLE` and `NO CORRECTION: <reason>` (instead of the `bed_*` lines) are valid outputs on other days. On the two control days the bed correction is applied.
+- `PERCENT NOT PUBLISHABLE` and `NO CORRECTION: <reason>` (instead of the `bed_*` lines) are valid outputs on other days. On the two control days the bed correction is applied. The `EXPOSED BED` header prints in both cases. With `NO CORRECTION` there is no water mirror either, so the haze rescue is off and `hyacinth_under_haze_ha` reads `0.00`.
 - A day newer than the local level record (or any day with no local record) exits 2 before any catalog search, with one `error: SIH level record ends <day|none>; no level for <date>. …` line on stderr that names `smolf levels update`, and nothing written. A NaN level inside the record still exits 0 with `NO CORRECTION`.

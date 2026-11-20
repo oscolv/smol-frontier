@@ -84,7 +84,7 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 
 - Every threshold lives in `config.py` (or as a named module constant) with a
   comment explaining WHY it exists and HOW it was calibrated.
-- Provenance from prior research points to `PRIOR_WORK.md`.
+- Provenance from prior research points to `docs/provenance.md`.
 - Never hard-code the reservoir area; it comes from `aoi.py` (computed from
   the polygon).
 
@@ -94,7 +94,7 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
   `paths.py`; no other module derives a write path from the repo root.
 - Radiometry only in `sources/radiometry.py`; the BOA offset is computed once
   per scene from B02 and applied to every band.
-- Re-implement the documented methodology (see PRIOR_WORK.md); correctness
+- Re-implement the documented methodology (see docs/provenance.md); correctness
   is validated by an identity gate against the author's reference series.
   When the brief and your instincts disagree, the brief wins — flag the
   discrepancy instead of "fixing" it.
@@ -169,8 +169,7 @@ The author's prior research and the SIH data are in Spanish:
 
 - Run `ruff check .`, `ruff format --check .`, and `pytest -q`.
 - Commits: create a commit only when the user asks; conventional commit
-  messages; no trailers. All code in this repository is written with Muse
-  Code during the hackathon, as disclosed in README.md and PRIOR_WORK.md.
+  messages; no trailers.
 
 ## Agent skills
 

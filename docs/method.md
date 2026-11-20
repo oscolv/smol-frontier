@@ -5,7 +5,7 @@ time series for Endhó Reservoir. One section per pipeline stage, in order;
 each names the thresholds it uses by config name and value, and why.
 Every number below comes from `config.py`, a test, or a gate/series output
 in this repo (cited in each section). Prior research is referenced through
-`PRIOR_WORK.md` only. The water-level source is the SIH public record.
+`docs/provenance.md` only. The water-level source is the SIH public record.
 
 ## 1. STAC search (`sources/stac.py`)
 
@@ -149,7 +149,7 @@ Sources: `classify/masks.py` constants; `tests/test_masks.py`;
   (no mat, fewer than `GMM_MIN_PIXELS`) rescued pixels stay nodata. The
   dense/interface split of rescued pixels is not interpreted: haze lowers
   NDVI and NDRE. Mirrors the author's `classifier._asignar_neblina`
-  (smol PR #45; PRIOR_WORK.md).
+  (smol PR #45; docs/provenance.md).
 
 Sources: config.py; `classify/gmm.py` budget constants (seed 42, 50 000
 pixel cap); `tests/test_gmm_stage1.py`; `tests/test_classify_stage2.py`;

@@ -7,8 +7,7 @@ an exposed-bed correction) reports coverage figures any reviewer can
 reproduce from public data; a Frontier verification layer and agent will
 plug in on top (not built yet).
 
-Built during the Meta Global AI Developer Hackathon 2026 with Muse Code;
-prior research disclosed in PRIOR_WORK.md.
+Prior research and third-party data are credited in `docs/provenance.md`.
 
 ## Install
 

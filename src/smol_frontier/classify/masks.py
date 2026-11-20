@@ -54,7 +54,7 @@ SCL_CLOUD = frozenset({3, 8, 9, 10})
 # HOW: Re-verified in this repo (see experiments/sensitivity.md): the
 #   2025-07-29 haze scene is POOR via 43.44 % spectral-only pixels while
 #   the 2025-07-24 turbid control stays GOOD/TURBIDITY with 0.0000 flagged.
-#   Values from the author's prior research (see PRIOR_WORK.md): clean
+#   Values from the author's prior research (see docs/provenance.md): clean
 #   water/vegetation B02 p99 = 0.045; clouds B02 0.05–0.19, B11 0.13–0.29;
 #   0.07 (not 0.10) catches thin haze (B02 ≈ 0.06–0.09), 0.06 starts
 #   flagging bright hyacinth.

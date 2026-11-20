@@ -34,4 +34,4 @@ Each feature file has an H1, one paragraph, then exactly four H2s: `Sub-features
 - [Publish the contract](./publish.md): `latest.json`, `series.json`, `publish.json` and the latest map, with its refusals.
 - [Daily job](./daily-job.md): `levels update` then `series build --extend` then `publish`, from a read-only checkout.
 
-Not mapped yet: `smolf fetch`, `smolf gate identity` (needs ~465 scenes and writes a report), `smolf hydro curve` and `smolf hydro flood-map` (maintenance commands that write committed inputs; never run them from a verification run).
+Not mapped yet: `smolf fetch`, `smolf gate identity` (needs ~468 scenes and writes a report), `smolf hydro curve` and `smolf hydro flood-map` (maintenance commands that write committed inputs; never run them from a verification run).

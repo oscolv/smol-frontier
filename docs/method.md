@@ -165,9 +165,12 @@ is the only percentage with that denominator. A classified GeoTIFF is
 written with the fixed `COLOR_*` palette (config.py).
 
 `classify(scene, mirror=None)` takes the day's water mirror (§8) as a
-boolean mask; it does no file I/O, so callers (`smolf classify`, the
-series builder, the gate, the publish map) load it with
-`hydro.bed.load_day_mirror()`. `None` or an all-false mask turns the haze
+boolean mask; it does no file I/O, so callers load it: `smolf classify`,
+the series builder and the gate with `hydro.bed.load_day_mirror()`; the
+publish map rebuilds it with `hydro.bed.day_mirror()` from the run row's
+`level_m` (full-precision margin recomputed from that level, never a fresh
+level lookup), and only when the run applied the correction. `None` or an
+all-false mask turns the haze
 second pass off and the result is identical to the first pass alone.
 `hyacinth_under_haze_ha` is the rescued area whose final class is dense
 or interface (raw, not bed-corrected); it is included in `ha_per_class`,

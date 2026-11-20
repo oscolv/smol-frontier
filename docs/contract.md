@@ -114,7 +114,7 @@ vegetation on the exposed bed, not floating hyacinth, and are removed.
 | `dense_ha` | number ≥ 0 | ha | POOR scene | Dense hyacinth, raw. |
 | `interface_ha` | number ≥ 0 | ha | POOR scene | Interface hyacinth (mat edge / sparse cover), raw. |
 | `hyacinth_raw_ha` | number ≥ 0 | ha | POOR scene | Dense + interface, before the exposed-bed correction. |
-| `hyacinth_under_haze_ha` | number ≥ 0 | ha | POOR scene | Part of `hyacinth_raw_ha` (dense + interface) seen through thin haze inside the day's water mirror and rescued by the classifier's frozen second pass; raw, not exposed-bed corrected. `0` when nothing was rescued, including a day with no SIH level (no mirror). Since 3.3.0. |
+| `hyacinth_under_haze_ha` | number ≥ 0 | ha | POOR scene | Part of `hyacinth_raw_ha` (dense + interface) seen through thin haze inside the day's water mirror and rescued by the classifier's frozen second pass; raw, not exposed-bed corrected. `0` when nothing was rescued, and whenever the exposed-bed correction was not applied (no mirror: no SIH level for the day, flood-stage map or stage–area curve missing, or grid mismatch). Since 3.3.0. |
 | `pct_reservoir_raw` | number 0–100 | % | POOR scene | `hyacinth_raw_ha` over `reservoir_area_ha`. |
 | `bed_applied` | boolean | — | POOR scene | Whether the exposed-bed correction was applied. |
 | `bed_reason` | string | — | POOR scene | Empty when applied; otherwise why not (e.g. no SIH level for the day). |
@@ -186,7 +186,7 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
 | `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
-| `smolf_version` | string | — | no | smolf version that wrote the file (`0.7.1` for this release). |
+| `smolf_version` | string | — | no | smolf version that wrote the file (`0.8.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
 | `newest_acquisition.item_id` | string | — | no | Its STAC item id. |

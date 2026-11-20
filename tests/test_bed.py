@@ -342,3 +342,16 @@ def test_load_day_mirror_none_on_missing_file(
         )
         is None
     )
+
+
+def test_load_day_mirror_none_on_missing_curve(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _patch_mirror_inputs(monkeypatch, 2000.5)
+    monkeypatch.setattr(bed_module, "DEFAULT_CURVE_CSV_PATH", tmp_path / "nope.csv")
+    assert (
+        load_day_mirror(
+            date(2020, 1, 1), rasterio.Affine.identity(), "EPSG:32614", (1, 4)
+        )
+        is None
+    )

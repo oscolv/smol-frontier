@@ -226,9 +226,10 @@ def test_publish_regression_same_month_clipped_to_the_reservoir(
     assert year["featured"] is True
 
 
-# WHY: the endho-web fixture run (2017-02 to 2026-11, Earth Search); its
-#   November block is the one the homepage shows.
-FIXTURE_RUN = "20261106T154111"
+# WHY: a full run built at smolf 0.8.0 (contract 3.3.0, haze rescue on;
+#   2017-02 to 2026-11, Earth Search); its November block is the one the
+#   homepage shows.
+FIXTURE_RUN = "20261119T184404"
 
 
 def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:
@@ -242,11 +243,6 @@ def test_publish_regression_same_month_featured_years(tmp_path: Path) -> None:
     ]
     for record in records:
         if record["status"] == "ok":
-            if "hyacinth_under_haze_ha" not in record["row"]:
-                pytest.skip(
-                    f"series run {FIXTURE_RUN} predates contract 3.3.0 "
-                    "(no hyacinth_under_haze_ha): rebuild it and update FIXTURE_RUN"
-                )
             item_id = record["item_id_used"]
             cached = cache_path(paths.cache_dir(), item_id)
             if not cached.exists():

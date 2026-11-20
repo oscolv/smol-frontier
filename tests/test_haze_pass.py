@@ -183,7 +183,8 @@ def test_stage1_model_decides_with_tau_water() -> None:
 def test_stage2_model_splits_dense_and_interface() -> None:
     idx = _pixels()
     idx["ndvi"][:, 6:] = 0.7
-    # Component 0 (dense) when NDVI >= 0.5, i.e. NOT below the cut.
+    # Component 1 gets P=1 when NDVI >= 0.5 (not below the cut); dense_comp=1
+    #   makes it the dense component.
     second = _second(model=_CutModel(0.5))
     second.dense_comp = 1
     out = _run(idx, _first(ALL_MAT), second)
@@ -197,7 +198,7 @@ def test_water_to_interface_rescue() -> None:
 
 
 def test_substrate_anchor_comes_from_the_base_map_only() -> None:
-    idx = _pixels(nsd=0.05)  # every mat candidate has substrate-low NSD
+    idx = _pixels()
     idx["nsd"][:] = 0.3
     idx["nsd"][:, 9:] = 0.05
     rescue = np.zeros(SHAPE, dtype=bool)

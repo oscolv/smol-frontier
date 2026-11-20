@@ -22,6 +22,7 @@ __all__ = [
     "Stage1Result",
     "Stage2Result",
     "border_strip",
+    "haze_pass",
     "nir_valley",
     "rescue_water",
     "stage1",
@@ -94,6 +95,9 @@ class Stage1Result:
         no_mat: bool,
         confidence: np.ndarray,
         n_fai_rescued: int,
+        model: GaussianMixture | None = None,
+        water_comp: int = -1,
+        widening: str | None = None,
     ) -> None:
         self.classes = classes
         self.mat_mask = mat_mask
@@ -105,6 +109,14 @@ class Stage1Result:
         # Pixels flipped to mat by the FAI rescue (the author's FAI_RESCATE
         # flag fires when this is > 0).
         self.n_fai_rescued = n_fai_rescued
+        # Frozen for the haze pass: the accepted attempt's fitted FAI x NDVI
+        # model and its water component (None / -1 on every no-mat exit).
+        self.model = model
+        self.water_comp = water_comp
+        # Which widening set nir_thr_used — "prescreen" (FAI + NSD guards),
+        # "adaptive" (FAI guard only) or None — so the haze pass reapplies
+        # the same guards.
+        self.widening = widening
 
 
 def nir_valley(b08: np.ndarray) -> float:
@@ -160,8 +172,8 @@ def _is_no_mat(fai_values: np.ndarray, mat_mean_fai: float) -> bool:
 
 def _fit_water_posterior(
     features: np.ndarray,
-) -> tuple[np.ndarray, int, np.ndarray, np.ndarray]:
-    """Fit the 2-component GMM; return P(water), water comp, means, covs."""
+) -> tuple[np.ndarray, int, np.ndarray, np.ndarray, GaussianMixture]:
+    """Fit the 2-component GMM; return P(water), water comp, means, covs, model."""
     model = GaussianMixture(
         n_components=2,
         covariance_type="full",
@@ -182,6 +194,7 @@ def _fit_water_posterior(
         water_comp,
         model.means_,
         model.covariances_,
+        model,
     )
 
 
@@ -252,6 +265,7 @@ def stage1(
     # Turbidity pre-screen: a GMM set with no dark mode gets valley-widened,
     # but the widening only counts when it moves at least one pixel to water.
     nir_thr_used: float | None = None
+    widening: str | None = None
     pre_water = np.zeros(shape, dtype=bool)
     if int(gmm.sum()) > 0 and float(np.percentile(b08[gmm], 5)) > s.NIR_WATER_MAX:
         valley = nir_valley(b08[gmm])
@@ -265,6 +279,7 @@ def stage1(
                 confidence[pre_water] = 1.0
                 gmm = gmm & ~pre_water
                 nir_thr_used = valley
+                widening = "prescreen"
 
     denom = int((valid & ~soil).sum())
     nir_water_frac = float((water0b | pre_water).sum()) / denom if denom else 0.0
@@ -281,6 +296,7 @@ def stage1(
             no_mat=True,
             confidence=confidence,
             n_fai_rescued=0,
+            widening=widening,
         )
 
     if int(gmm.sum()) < GMM_MIN_PIXELS:
@@ -294,7 +310,7 @@ def stage1(
     n_fai_rescued = 0
     for attempt in range(2):
         features = np.column_stack([fai[cur], ndvi[cur]])
-        p_water, water_comp, means, covs = _fit_water_posterior(features)
+        p_water, water_comp, means, covs, model = _fit_water_posterior(features)
         sep = _separability(means, covs)
         mat_mean_fai = float(means[1 - water_comp, 0])
         if _is_no_mat(features[:, 0], mat_mean_fai):
@@ -310,6 +326,7 @@ def stage1(
                     confidence[adapt_water] = 1.0
                     cur = cur & ~adapt_water
                     nir_thr_used = valley
+                    widening = "adaptive"
                     if int(cur.sum()) < GMM_MIN_PIXELS:
                         return _no_mat_waterless(cur, math.inf)
                     continue
@@ -344,6 +361,9 @@ def stage1(
         no_mat=False,
         confidence=confidence,
         n_fai_rescued=n_fai_rescued,
+        model=model,
+        water_comp=water_comp,
+        widening=widening,
     )
 
 
@@ -355,10 +375,17 @@ class Stage2Result:
         classes: np.ndarray,
         gmm2_sep: float,
         confidence: np.ndarray,
+        model: GaussianMixture | None = None,
+        dense_comp: int = -1,
     ) -> None:
         self.classes = classes
         self.gmm2_sep = gmm2_sep
         self.confidence = confidence
+        # Frozen for the haze pass: the fitted NDVI x NDRE model and its dense
+        # component; None / -1 when Stage 2 resolved every mat pixel to
+        # interface without a fit.
+        self.model = model
+        self.dense_comp = dense_comp
 
 
 class RefinementResult:
@@ -386,8 +413,8 @@ def _one_shape(*arrays: np.ndarray) -> tuple[int, ...]:
 
 def _fit_dense_posterior(
     features: np.ndarray,
-) -> tuple[np.ndarray, int, np.ndarray, np.ndarray]:
-    """Fit the 2-component GMM; return P(dense), dense comp, means, covs."""
+) -> tuple[np.ndarray, int, np.ndarray, np.ndarray, GaussianMixture]:
+    """Fit the 2-component GMM; return P(dense), dense comp, means, covs, model."""
     model = GaussianMixture(
         n_components=2,
         covariance_type="full",
@@ -408,6 +435,7 @@ def _fit_dense_posterior(
         dense_comp,
         model.means_,
         model.covariances_,
+        model,
     )
 
 
@@ -452,7 +480,7 @@ def stage2(
         return Stage2Result(out_classes, math.nan, out_conf)
 
     features = np.column_stack([ndvi[finite], ndre[finite]])
-    p_dense, _, means, covs = _fit_dense_posterior(features)
+    p_dense, dense_comp, means, covs, model = _fit_dense_posterior(features)
     sep = _separability(means, covs)
     pos = np.flatnonzero(finite)
     is_dense = p_dense >= s.TAU_HYACINTH
@@ -462,7 +490,7 @@ def stage2(
     flat_classes[pos[~is_dense]] = s.CLASS_INTERFACE
     flat_conf[pos[is_dense]] = p_dense[is_dense]
     flat_conf[pos[~is_dense]] = 1.0 - p_dense[~is_dense]
-    return Stage2Result(out_classes, sep, out_conf)
+    return Stage2Result(out_classes, sep, out_conf, model, dense_comp)
 
 
 def rescue_water(
@@ -532,3 +560,122 @@ def substrate_test(
     out_classes[hit] = s.CLASS_BARE_SOIL
     out_conf[hit] = 1.0
     return RefinementResult(out_classes, out_conf, int(hit.sum()))
+
+
+def haze_pass(
+    rescue: np.ndarray,
+    base_classes: np.ndarray,
+    valid: np.ndarray,
+    border: np.ndarray,
+    *,
+    fai: np.ndarray,
+    ndvi: np.ndarray,
+    ndre: np.ndarray,
+    mndwi: np.ndarray,
+    bsi: np.ndarray,
+    nsd: np.ndarray,
+    b08: np.ndarray,
+    first: Stage1Result,
+    second: Stage2Result,
+) -> np.ndarray:
+    """Classify haze-over-vegetation pixels with the first pass frozen.
+
+    Mirrors the prior pipeline's second pass step for step: the per-pixel
+    pre-mask rules, the NIR widening the scene used (with the guards of the
+    widening that produced it), the fitted Stage 1 model at TAU_WATER, the
+    FAI rescue of the ambiguous NIR band, the fitted Stage 2 model at
+    TAU_HYACINTH (interface without one), the water → interface rescue, and
+    the NSD substrate test anchored on the BASE map's bare sediment — the
+    rescued pixels never extend the anchor. Nothing is refitted. Returns
+    int16 classes, non-zero only inside ``rescue``; all nodata when Stage 1
+    exited early (no mat). Inputs are not mutated.
+    """
+    s = settings
+    shape = _one_shape(
+        rescue, base_classes, valid, border, fai, ndvi, ndre, mndwi, bsi, nsd, b08
+    )
+    out = np.zeros(shape, dtype=np.int16)
+    if first.no_mat or first.model is None:
+        return out
+    n = np.asanyarray(rescue, dtype=bool)
+    base_classes = np.asanyarray(base_classes)
+    valid = np.asanyarray(valid, dtype=bool)
+    border = np.asanyarray(border, dtype=bool)
+    fai = np.asanyarray(fai, dtype=np.float64)
+    ndvi = np.asanyarray(ndvi, dtype=np.float64)
+    ndre = np.asanyarray(ndre, dtype=np.float64)
+    mndwi = np.asanyarray(mndwi, dtype=np.float64)
+    bsi = np.asanyarray(bsi, dtype=np.float64)
+    nsd = np.asanyarray(nsd, dtype=np.float64)
+    b08 = np.asanyarray(b08, dtype=np.float64)
+
+    # Pre-mask rules, per pixel: soil in the border strip only; fixed NIR water.
+    soil = (
+        n
+        & border
+        & (bsi > s.SOIL_BSI_MIN)
+        & (mndwi < s.SOIL_MNDWI_MAX)
+        & (ndvi < s.SOIL_NDVI_MAX)
+        & (ndre < s.SOIL_NDRE_MAX)
+        & (nsd < s.SOIL_NSD_MAX)
+    )
+    water = n & ~soil & (b08 < s.NIR_WATER_MAX) & (nsd < s.NSD_VEG_MIN)
+    rest = n & ~soil & ~water
+    # The scene's NIR widening with the guards of the step that produced it.
+    thr = first.nir_thr_used
+    widened = thr is not None and thr > s.NIR_WATER_MAX
+    if widened and first.widening == "prescreen":
+        water |= rest & (b08 < thr) & (fai < s.FAI_FLOAT_MIN) & (nsd < s.NSD_VEG_MIN)
+    elif widened and first.widening == "adaptive":
+        water |= rest & (b08 < thr) & (fai < s.FAI_FLOAT_MIN)
+    # GMM-entering pixels need finite features, as in Stage 1; the others
+    # stay nodata.
+    gmm = rest & ~water & np.isfinite(fai) & np.isfinite(ndvi) & np.isfinite(b08)
+
+    mat = np.zeros(shape, dtype=bool)
+    if gmm.any():
+        features = np.column_stack([fai[gmm], ndvi[gmm]])
+        p_water = first.model.predict_proba(features)[:, first.water_comp]
+        is_water = p_water >= s.TAU_WATER
+        pos = np.flatnonzero(gmm)
+        water.ravel()[pos] = is_water
+        mat.ravel()[pos] = ~is_water
+    if widened:
+        # FAI rescue of the ambiguous NIR band [NIR_WATER_MAX, thr).
+        fai_rescue = (
+            n & ~soil & (b08 >= s.NIR_WATER_MAX) & (b08 < thr) & (fai > s.FAI_FLOAT_MIN)
+        )
+        mat |= fai_rescue
+        water &= ~fai_rescue
+
+    out[water] = s.CLASS_WATER
+    out[soil] = s.CLASS_BARE_SOIL
+    if mat.any():
+        finite = mat & np.isfinite(ndvi) & np.isfinite(ndre)
+        out[mat] = s.CLASS_INTERFACE  # no Stage 2 model or non-finite features
+        if second.model is not None and finite.any():
+            features = np.column_stack([ndvi[finite], ndre[finite]])
+            p_dense = second.model.predict_proba(features)[:, second.dense_comp]
+            out[finite] = np.where(
+                p_dense >= s.TAU_HYACINTH, s.CLASS_DENSE_HYACINTH, s.CLASS_INTERFACE
+            )
+
+    # Water → interface rescue, per pixel (rescued pixels are never valid).
+    out[
+        (out == s.CLASS_WATER)
+        & (ndvi > s.NDVI_RESCUE_WATER)
+        & (b08 > s.NIR_RESCUE_WATER)
+    ] = s.CLASS_INTERFACE
+
+    # Substrate test anchored on the BASE map's bare sediment only.
+    anchor = (base_classes == s.CLASS_BARE_SOIL) & valid & (ndvi < s.NDVI_BARE_SEDIMENT)
+    if anchor.any():
+        candidates = (
+            n
+            & ((out == s.CLASS_DENSE_HYACINTH) | (out == s.CLASS_INTERFACE))
+            & (nsd < s.NSD_SUBSTRATE_SOIL)
+        )
+        if candidates.any():
+            near = binary_dilation(anchor, iterations=s.NSD_SEDIMENT_DIST_PX)
+            out[candidates & near] = s.CLASS_BARE_SOIL
+    return out

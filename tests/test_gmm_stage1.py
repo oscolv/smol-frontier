@@ -308,7 +308,7 @@ def test_fai_rescue_after_prescreen_only(monkeypatch: pytest.MonkeyPatch) -> Non
         n = len(features)
         means = np.array([[0.0, 0.0], [0.06, 0.10]])
         covs = np.array([np.eye(2) * 0.01, np.eye(2) * 0.01])
-        return np.ones(n), 0, means, covs
+        return np.ones(n), 0, means, covs, None
 
     monkeypatch.setattr(gmm_module, "_fit_water_posterior", _all_water)
     real_valley = gmm_module.nir_valley
@@ -388,7 +388,7 @@ def test_adaptive_empty_mask_records_nothing(
         n = len(features)
         means = np.array([[0.0, 0.0], [0.05, 0.05]])
         covs = np.array([np.eye(2) * 0.1, np.eye(2) * 0.1])
-        return np.full(n, 0.5), 0, means, covs
+        return np.full(n, 0.5), 0, means, covs, None
 
     monkeypatch.setattr(gmm_module, "_fit_water_posterior", _weak_sep)
     real_valley = gmm_module.nir_valley

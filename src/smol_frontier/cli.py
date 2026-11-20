@@ -48,6 +48,7 @@ from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.publish.export import export_publish
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
+    EXTEND_START,
     CatalogUnavailable,
     FingerprintMismatch,
     build_run,
@@ -408,7 +409,13 @@ def gate_identity(
 def series_build(
     extend: Annotated[
         bool,
-        typer.Option("--extend", help="Also add scenes after the last reference date."),
+        typer.Option(
+            "--extend",
+            help=(
+                f"Also add Earth Search scenes from {EXTEND_START.isoformat()} "
+                "on dates the reference lacks."
+            ),
+        ),
     ] = False,
     resume: Annotated[
         str | None,
@@ -573,7 +580,8 @@ def export_series_csv(
 
     series.csv (one row per series.json scene), series_monthly.csv (the
     monthly medians), README.txt (licence, citation, sources, provenance,
-    column dictionary) and SHA256SUMS (for `sha256sum -c`).
+    column dictionary), LEEME.txt (the same in Spanish) and SHA256SUMS (for
+    `sha256sum -c`).
 
     Reads only the published contract: publish.json must validate, and
     series.json and latest.json must hash to their publish.json entries,

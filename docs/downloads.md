@@ -160,7 +160,7 @@ The files are written into a sibling staging directory
 reader never sees a half-written bundle and a failure keeps the previous
 one. `--out` is resolved to its real path first, so exporting through a
 symlink replaces the target and keeps the link. `--out` may only hold
-the four bundle files; anything else is someone else's data.
+the five bundle files; anything else is someone else's data.
 
 ## Refusals and exit codes
 
@@ -182,7 +182,7 @@ the four bundle files; anything else is someone else's data.
   `series_sha256` than `series.json`;
 - `--out` exists and is not a directory;
 - `--out` is the publish directory or inside it;
-- `--out` holds anything other than the four bundle files as regular
+- `--out` holds anything other than the five bundle files as regular
   files (another file, a subdirectory or a symlink);
 - a symlink in the `--out` path is broken or cannot be resolved, or
   `--out` is missing while several `.<name>.previous-*` directories

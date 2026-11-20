@@ -32,11 +32,7 @@ SCENE_ES_2026_11_08 = "S2A_14QMH_20261108_0_L2A"
 
 
 def _classify_cached(scene_id: str, day: date, *, rescue: bool = True):
-    """Classify a cached scene (skip when absent); return result, quality, bed.
-
-    With ``rescue`` the day's water mirror is loaded and passed, as the CLI
-    and the series do; without it classify() gets ``mirror=None``.
-    """
+    """Classify a cached scene (skip when absent); return result, quality, bed."""
     if not cache_path(paths.cache_dir(), scene_id).exists():
         pytest.skip(f"scene {scene_id} not in data/cache (CI): run `smolf fetch {day}`")
     meta = SceneMeta(

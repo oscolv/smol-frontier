@@ -190,11 +190,9 @@ def _load_day_inputs(
 ) -> tuple[tuple[np.ndarray, StageAreaCurve] | None, str, float | None]:
     """Load the day's level, flood map and curve and check the scene grid.
 
-    The single home of the input and grid checks shared by correct_bed() and
-    load_day_mirror(), so they cannot drift. Returns ((flood, curve), "",
-    level) on success, or (None, reason, level) when an input is missing or
-    the grid (shape, transform, crs) differs from the flood map. Nothing is
-    ever downloaded here.
+    Returns ((flood, curve), "", level) on success, or (None, reason, level)
+    when an input is missing or the grid (shape, transform, crs) differs
+    from the flood map. Nothing is ever downloaded here.
     """
     level = level_on(day)
     if level is None:
@@ -249,11 +247,7 @@ def correct_bed(
 
 
 def day_mirror(flood_stage: np.ndarray, margin_m: float) -> np.ndarray:
-    """Pixels the level-plus-margin leaves under water (pure; boolean array).
-
-    A staged pixel whose flood stage is at or below the margin stage. The
-    boundary is inside (flood == margin counts).
-    """
+    """Pixels the level-plus-margin leaves under water (pure; boolean array)."""
     flood = np.asanyarray(flood_stage, dtype=np.float64)
     return (flood != FLOOD_NODATA) & (flood <= margin_m)
 

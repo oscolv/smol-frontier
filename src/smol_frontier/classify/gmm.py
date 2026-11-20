@@ -9,6 +9,7 @@ cutoff below is spec-literal. Pure numpy + sklearn + scipy; no I/O.
 """
 
 import math
+from typing import Literal
 
 import numpy as np
 from scipy.ndimage import binary_dilation, distance_transform_edt
@@ -29,6 +30,8 @@ __all__ = [
     "stage2",
     "substrate_test",
 ]
+
+Widening = Literal["prescreen", "adaptive"]
 
 # WHY: provisional code for mat pixels leaving Stage 1 — negative so it can
 #   never be mistaken for a final class code; Stage 2 resolves it.
@@ -97,7 +100,7 @@ class Stage1Result:
         n_fai_rescued: int,
         model: GaussianMixture | None = None,
         water_comp: int = -1,
-        widening: str | None = None,
+        widening: Widening | None = None,
     ) -> None:
         self.classes = classes
         self.mat_mask = mat_mask
@@ -109,13 +112,8 @@ class Stage1Result:
         # Pixels flipped to mat by the FAI rescue (the author's FAI_RESCATE
         # flag fires when this is > 0).
         self.n_fai_rescued = n_fai_rescued
-        # Frozen for the haze pass: the accepted attempt's fitted FAI x NDVI
-        # model and its water component (None / -1 on every no-mat exit).
         self.model = model
         self.water_comp = water_comp
-        # Which widening set nir_thr_used — "prescreen" (FAI + NSD guards),
-        # "adaptive" (FAI guard only) or None — so the haze pass reapplies
-        # the same guards.
         self.widening = widening
 
 
@@ -265,7 +263,7 @@ def stage1(
     # Turbidity pre-screen: a GMM set with no dark mode gets valley-widened,
     # but the widening only counts when it moves at least one pixel to water.
     nir_thr_used: float | None = None
-    widening: str | None = None
+    widening: Widening | None = None
     pre_water = np.zeros(shape, dtype=bool)
     if int(gmm.sum()) > 0 and float(np.percentile(b08[gmm], 5)) > s.NIR_WATER_MAX:
         valley = nir_valley(b08[gmm])
@@ -381,9 +379,6 @@ class Stage2Result:
         self.classes = classes
         self.gmm2_sep = gmm2_sep
         self.confidence = confidence
-        # Frozen for the haze pass: the fitted NDVI x NDRE model and its dense
-        # component; None / -1 when Stage 2 resolved every mat pixel to
-        # interface without a fit.
         self.model = model
         self.dense_comp = dense_comp
 
@@ -580,15 +575,10 @@ def haze_pass(
 ) -> np.ndarray:
     """Classify haze-over-vegetation pixels with the first pass frozen.
 
-    Mirrors the prior pipeline's second pass step for step: the per-pixel
-    pre-mask rules, the NIR widening the scene used (with the guards of the
-    widening that produced it), the fitted Stage 1 model at TAU_WATER, the
-    FAI rescue of the ambiguous NIR band, the fitted Stage 2 model at
-    TAU_HYACINTH (interface without one), the water → interface rescue, and
-    the NSD substrate test anchored on the BASE map's bare sediment — the
-    rescued pixels never extend the anchor. Nothing is refitted. Returns
-    int16 classes, non-zero only inside ``rescue``; all nodata when Stage 1
-    exited early (no mat). Inputs are not mutated.
+    Mirrors the prior pipeline's second pass step for step. Nothing is
+    refitted; the substrate anchor is the BASE map's bare sediment only.
+    Returns int16 classes, non-zero only inside ``rescue``; all nodata when
+    Stage 1 exited early (no mat). Inputs are not mutated.
     """
     s = settings
     shape = _one_shape(
@@ -609,7 +599,6 @@ def haze_pass(
     nsd = np.asanyarray(nsd, dtype=np.float64)
     b08 = np.asanyarray(b08, dtype=np.float64)
 
-    # Pre-mask rules, per pixel: soil in the border strip only; fixed NIR water.
     soil = (
         n
         & border
@@ -621,7 +610,6 @@ def haze_pass(
     )
     water = n & ~soil & (b08 < s.NIR_WATER_MAX) & (nsd < s.NSD_VEG_MIN)
     rest = n & ~soil & ~water
-    # The scene's NIR widening with the guards of the step that produced it.
     thr = first.nir_thr_used
     widened = thr is not None and thr > s.NIR_WATER_MAX
     if widened and first.widening == "prescreen":
@@ -641,7 +629,6 @@ def haze_pass(
         water.ravel()[pos] = is_water
         mat.ravel()[pos] = ~is_water
     if widened:
-        # FAI rescue of the ambiguous NIR band [NIR_WATER_MAX, thr).
         fai_rescue = (
             n & ~soil & (b08 >= s.NIR_WATER_MAX) & (b08 < thr) & (fai > s.FAI_FLOAT_MIN)
         )
@@ -660,14 +647,12 @@ def haze_pass(
                 p_dense >= s.TAU_HYACINTH, s.CLASS_DENSE_HYACINTH, s.CLASS_INTERFACE
             )
 
-    # Water → interface rescue, per pixel (rescued pixels are never valid).
     out[
         (out == s.CLASS_WATER)
         & (ndvi > s.NDVI_RESCUE_WATER)
         & (b08 > s.NIR_RESCUE_WATER)
     ] = s.CLASS_INTERFACE
 
-    # Substrate test anchored on the BASE map's bare sediment only.
     anchor = (base_classes == s.CLASS_BARE_SOIL) & valid & (ndvi < s.NDVI_BARE_SEDIMENT)
     if anchor.any():
         candidates = (

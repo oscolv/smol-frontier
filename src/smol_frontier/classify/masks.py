@@ -208,9 +208,8 @@ def haze_vegetation(
 ) -> np.ndarray:
     """Vegetation seen through thin haze: excluded only by the spectral test.
 
-    Inside AND not SCL-invalid AND spectral cloud AND every band in range
-    AND NDVI > CLOUD_NDVI_MAX. Disjoint from valid_mask by construction;
-    NaN NDVI counts as False.
+    Spectral cloud with NDVI > CLOUD_NDVI_MAX, otherwise valid. Disjoint
+    from valid_mask by construction.
     """
     collected = _collect_bands(bands=bands)
     mask = np.asanyarray(inside, dtype=bool) & ~scl_invalid(scl)

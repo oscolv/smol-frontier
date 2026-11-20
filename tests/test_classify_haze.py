@@ -1,5 +1,3 @@
-"""Tests for the haze rescue wired into classify(scene, mirror=...)."""
-
 from datetime import datetime
 
 import numpy as np
@@ -116,7 +114,6 @@ def _scene(*, mat: bool = True) -> IngestedScene:
 
 
 def _mirror() -> np.ndarray:
-    """Day mirror: everything except the 'outside' patch."""
     return ~_region(_OUTSIDE_BLOCK)
 
 
@@ -165,7 +162,6 @@ def test_mirror_none_and_all_false_match_rescue_off() -> None:
         assert result.hyacinth_under_haze_ha == 0.0
         for name in _DIAGNOSTICS:
             assert _same(getattr(result, name), getattr(base, name)), name
-    # Without the rescue the haze patch is nodata (excluded as cloud).
     assert (base.class_map[_HAZE_BLOCK] == settings.CLASS_NODATA).all()
 
 

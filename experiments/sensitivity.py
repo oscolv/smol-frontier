@@ -161,8 +161,7 @@ def measure_scene(item_id: str, day: str) -> dict:
         assets={},
     )
     ing = ingest_scene(meta)
-    # No mirror: these are rescue-off figures (the haze second pass is off).
-    result = pipeline_mod.classify(ing)
+    result = pipeline_mod.classify(ing, mirror=None)
     quality = assess_quality(result)
     ha = result.ha_per_class
     counts = {

@@ -11,11 +11,12 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import responses
 from typer.testing import CliRunner
 
-from smol_frontier import paths, publish, series
+from smol_frontier import cli, paths, publish, series
 from smol_frontier.cli import app
 from smol_frontier.hydro.levels import (
     SIH_URL,
@@ -581,11 +582,6 @@ def test_classify_on_a_covered_day_reaches_the_catalog_search(
 def test_classify_prints_haze_ha_and_passes_the_day_mirror(
     data_dir: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`smolf classify` loads the day mirror and prints the rescued hectares."""
-    import numpy as np
-
-    from smol_frontier import cli
-
     ing = SimpleNamespace(
         scene=SimpleNamespace(id="S2X"),
         transform="t",

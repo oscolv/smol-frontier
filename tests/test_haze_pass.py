@@ -1,5 +1,3 @@
-"""Tests for the frozen second pass over haze-over-vegetation pixels."""
-
 import numpy as np
 import pytest
 from sklearn.mixture import GaussianMixture
@@ -22,8 +20,6 @@ KEYS = ("fai", "ndvi", "ndre", "mndwi", "bsi", "nsd", "b08")
 
 
 class _CutModel:
-    """Stub mixture: component 0 gets P=1 when feature 0 < cut, else P=0."""
-
     def __init__(self, cut: float) -> None:
         self.cut = cut
 
@@ -32,8 +28,8 @@ class _CutModel:
         return np.column_stack([p0, 1.0 - p0])
 
 
-ALL_MAT = _CutModel(-np.inf)  # P(comp 0) = 0 everywhere
-ALL_WATER = _CutModel(np.inf)  # P(comp 0) = 1 everywhere
+ALL_MAT = _CutModel(-np.inf)
+ALL_WATER = _CutModel(np.inf)
 
 
 def _first(model=ALL_MAT, *, thr=None, widening=None, no_mat=False):
@@ -128,7 +124,6 @@ def test_fixed_nir_water_rule_skips_the_gmm() -> None:
     idx = _pixels(b08=0.10, nsd=0.05, fai=0.08)
     out = _run(idx, _first(ALL_MAT))
     assert (out == settings.CLASS_WATER).all()
-    # Same pixels with high NSD go through the (all-mat) GMM instead.
     out = _run(_pixels(b08=0.10, nsd=0.3, fai=0.08), _first(ALL_MAT))
     assert (out == settings.CLASS_INTERFACE).all()
 
@@ -145,7 +140,6 @@ def test_adaptive_widening_has_no_nsd_guard() -> None:
     first = _first(ALL_MAT, thr=0.2, widening="adaptive")
     high_nsd = _pixels(b08=0.15, fai=0.01, nsd=0.30)
     assert (_run(high_nsd, first) == settings.CLASS_WATER).all()
-    # The FAI guard still applies.
     high_fai = _pixels(b08=0.15, fai=0.06, nsd=0.30)
     assert (_run(high_fai, first) == settings.CLASS_INTERFACE).all()
 
@@ -157,11 +151,9 @@ def test_no_widening_means_no_widened_water() -> None:
 
 @pytest.mark.parametrize("widening", ["prescreen", "adaptive"])
 def test_fai_rescue_of_the_ambiguous_nir_band(widening) -> None:
-    # The stage-1 model calls these water; the widened band + FAI makes them mat.
     idx = _pixels(b08=0.15, fai=0.06, nsd=0.30)
     first = _first(ALL_WATER, thr=0.2, widening=widening)
     assert (_run(idx, first) == settings.CLASS_INTERFACE).all()
-    # Outside the band (b08 >= thr) the model's water verdict stands.
     above = _pixels(b08=0.25, fai=0.06, nsd=0.30, ndvi=0.1)
     assert (_run(above, first) == settings.CLASS_WATER).all()
 
@@ -172,7 +164,6 @@ def test_no_fai_rescue_without_widening() -> None:
 
 
 def test_stage1_model_decides_with_tau_water() -> None:
-    # Feature 0 is FAI: below the cut → water component.
     idx = _pixels(fai=0.08)
     idx["fai"][:, :6] = 0.01
     out = _run(idx, _first(_CutModel(0.03)))
@@ -205,7 +196,6 @@ def test_substrate_anchor_comes_from_the_base_map_only() -> None:
     rescue[:, 8:] = True
     base = np.zeros(SHAPE, dtype=np.int16)
     valid = np.zeros(SHAPE, dtype=bool)
-    # Base bare sediment at column 0, valid, low NDVI.
     base[:, 0] = settings.CLASS_BARE_SOIL
     valid[:, :8] = True
     idx["ndvi"][:, 0] = 0.1
@@ -242,12 +232,8 @@ def test_substrate_anchor_needs_valid_low_ndvi_base_soil() -> None:
     base = np.zeros(SHAPE, dtype=np.int16)
     base[:, 5] = settings.CLASS_BARE_SOIL
     idx["ndvi"][:, 5] = 0.1
-    # Anchor is not valid → no reclassification.
     out = _run(idx, _first(ALL_MAT), rescue=rescue, base=base)
     assert (out[rescue] == settings.CLASS_INTERFACE).all()
-
-
-# --- Stage 1 / Stage 2 record what the second pass freezes -----------------
 
 
 def _bimodal(rng, shape=(80, 50), split=50):
@@ -292,7 +278,6 @@ def test_stage_results_carry_the_fitted_models() -> None:
 
 
 def test_haze_pass_reproduces_the_first_pass_on_identical_pixels() -> None:
-    """Frozen models: a rescued copy of a valid pixel gets the valid pixel's class."""
     scene = _bimodal(np.random.default_rng(7))
     shape = scene["fai"].shape
     valid = np.ones(shape, dtype=bool)
@@ -303,7 +288,6 @@ def test_haze_pass_reproduces_the_first_pass_on_identical_pixels() -> None:
         second.classes, second.confidence, valid, scene["ndvi"], scene["b08"]
     )
     base = substrate_test(r.classes, r.confidence, valid, scene["nsd"], scene["ndvi"])
-    # Same values, every pixel "rescued", nothing valid (no anchor anyway).
     out = haze_pass(
         np.ones(shape, dtype=bool),
         np.zeros(shape, dtype=np.int16),

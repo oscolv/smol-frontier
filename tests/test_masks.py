@@ -259,7 +259,7 @@ def test_haze_over_hyacinth_is_rescued() -> None:
 
 
 def test_moderate_ndvi_cloud_is_not_rescued() -> None:
-    # NDVI = (0.22 - 0.10) / (0.22 + 0.10) ~ 0.375 (2025-07-29-like cloud)
+    # 2025-07-29-like cloud (NDVI ~ 0.375)
     assert bool(_haze(B08=0.22, B04=0.10, B02=0.12)[0]) is False
 
 
@@ -274,8 +274,8 @@ def test_haze_invalid_scl_is_not_rescued(scl: int) -> None:
     assert bool(_haze(scl=scl)[0]) is False
 
 
-def test_not_spectral_cloud_is_not_rescued() -> None:
-    assert bool(_haze(B02=0.03)[0]) is False  # clear vegetation
+def test_clear_vegetation_is_not_rescued() -> None:
+    assert bool(_haze(B02=0.03)[0]) is False
 
 
 @pytest.mark.parametrize("band", SPECTRAL_BANDS)

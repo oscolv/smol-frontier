@@ -264,7 +264,6 @@ def test_day_mirror_boundary_above_and_nodata() -> None:
     )
     out = day_mirror(flood, 2001.0)
     assert out.dtype == bool
-    # flood == margin is inside; above is outside; nodata is outside.
     assert out.tolist() == [[True, True, False, False]]
 
 
@@ -297,7 +296,6 @@ def test_load_day_mirror_returns_expected_mask(
     out = load_day_mirror(
         date(2020, 1, 1), rasterio.Affine.identity(), "EPSG:32614", (1, 4)
     )
-    # margin 2001.342857...: the first two pixels are under water.
     assert out is not None
     assert out.tolist() == [[True, True, False, False]]
     assert out.tolist() == day_mirror(flood, 2001.342857142857).tolist()

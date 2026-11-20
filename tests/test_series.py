@@ -352,7 +352,6 @@ _INSIDE = np.zeros((2, 2), dtype=bool)
 
 @pytest.fixture(autouse=True)
 def _no_day_mirror(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Scene processing tests never read the flood map or the level record."""
     monkeypatch.setattr(series, "load_day_mirror", lambda *args: None)
 
 
@@ -720,7 +719,6 @@ def test_config_hash_changes_with_a_threshold(
 def test_process_scene_passes_the_day_mirror_and_records_haze_ha(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The row carries the raw rescued hectares; classify gets the day mirror."""
     target = SeriesTarget(day=date(2026, 10, 27), item_id="S2C_14QMH_20261027_0_L2A")
     mirror = np.ones((2, 2), dtype=bool)
     loads: list[tuple] = []
@@ -739,7 +737,7 @@ def test_process_scene_passes_the_day_mirror_and_records_haze_ha(
         scene=_fake_scene(target.item_id),
         transform="t",
         crs="c",
-        inside=np.zeros((2, 2), dtype=bool),
+        inside=_INSIDE,
     )
     monkeypatch.setattr(
         series, "resolve_scene", lambda day, item_id: (_fake_scene(item_id), "")

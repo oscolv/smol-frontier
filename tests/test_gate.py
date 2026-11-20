@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import smol_frontier.gate as gate_mod
@@ -391,9 +392,6 @@ def test_committed_sample_items_exist_in_new_reference() -> None:
 
 
 def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> list:
-    """Stub ingestion + classify; record the mirror passed to classify()."""
-    import numpy as np
-
     seen: list = []
     ing = SimpleNamespace(
         scene=_es_scene(),

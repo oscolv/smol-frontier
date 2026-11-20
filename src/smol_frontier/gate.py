@@ -168,7 +168,6 @@ class ReferenceRow:
     valid_frac: float
     light: str
     regime: str
-    # Hyacinth under thin haze (raw ha); None in series without the column.
     under_haze_ha: float | None = None
 
 
@@ -196,7 +195,6 @@ class MeasuredScene:
     valid_frac: float
     light: str
     regime: str
-    # Hyacinth rescued under thin haze (raw ha); 0 with the rescue off.
     under_haze_ha: float = 0.0
 
 
@@ -708,11 +706,7 @@ def ingest_with_fallback(scene: SceneMeta) -> tuple[IngestedScene, str]:
 
 
 def _measure_scene_meta(scene, *, rescue: bool = True) -> MeasuredScene:
-    """Classify one ingested scene: raw hectares + light + regime.
-
-    With ``rescue`` the day's water mirror is passed to classify() (haze
-    rescue on); without it nothing is rescued (the pre-rescue baseline).
-    """
+    """Classify one ingested scene: raw hectares + light + regime."""
     ing, note = ingest_with_fallback(scene)
     mirror: np.ndarray | None = None
     if rescue:

@@ -1542,7 +1542,6 @@ def test_publish_map_hectares_compared_to_the_hundredth(
 def test_publish_map_reclassifies_with_the_run_row_mirror(
     series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
 ) -> None:
-    # bed applied: the mirror the run used, from the row level's full margin
     _write_run(series_root, records=[_record("2024-01-04", LATEST_ITEM, "ok")])
     assert _publish(tmp_path / "pub").exit_code == 0
     (mirror,) = scene_env.classify_mirrors

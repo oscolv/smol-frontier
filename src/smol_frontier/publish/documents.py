@@ -227,8 +227,6 @@ def _scene_entry(record: dict[str, object]) -> dict[str, object]:
         return entry
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     if row.get("hyacinth_under_haze_ha") is None:
-        # WHY refuse: a run built before the haze rescue (issue #69) has no
-        #   such column; publishing a guessed 0 would understate the figure.
         msg = (
             f"scene {record['item_id_used']} has no hyacinth_under_haze_ha: "
             "the run predates the haze rescue (contract 3.3.0); rebuild it "

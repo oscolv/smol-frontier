@@ -53,7 +53,7 @@ GRID_SCENE_ID = "S2B_MSIL2A_20261012T170239_R069_T14QMH_20261012T223155"
 GRID_SCENE_DAY = datetime(2026, 10, 12)
 
 # WHY: JRC Global Surface Water occurrence tile holding Endho (third-party
-#   data, credited in PRIOR_WORK.md); read windowed, never whole.
+#   data, credited in docs/provenance.md); read windowed, never whole.
 GSW_URL = (
     "https://storage.googleapis.com/global-surface-water/downloads2021/"
     "occurrence/occurrence_100W_30Nv1_4_2021.tif"

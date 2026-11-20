@@ -1,7 +1,7 @@
 """Daily reservoir water level from the public SIH record (station ENDHD).
 
 Downloads the SIH CSV (Mexico's National Hydrometric Information System;
-third-party data, credited in PRIOR_WORK.md),
+third-party data, credited in docs/provenance.md),
 parses Fecha / Nivel(m) / VolumenAlm(Mm3), and stores the bytes verbatim under
 data/hydro/ (or hydro/ under SMOLF_DATA_DIR). Refreshes are validated against the local copy before replacing
 it: wrong content, fewer days, an earlier end, missing days, or level

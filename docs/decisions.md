@@ -247,7 +247,7 @@ enforced in this repo. Anything not implemented yet says **planned**.
 ## 17. Haze rescue: two passes, NDVI, 0.5, the SIH level as the only limit
 
 - **Rule:** hyacinth that the spectral cloud test hides under thin haze is
-  rescued by the author's method (smol PR #45, PRIOR_WORK.md): SCL valid,
+  rescued by the author's method (smol PR #45, docs/provenance.md): SCL valid,
   spectral cloud, NDVI above `CLOUD_NDVI_MAX = 0.5`, and inside the day's
   water mirror; then classified in a frozen second pass. Four decisions,
   each measured by the author and not re-opened here:

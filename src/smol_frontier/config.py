@@ -106,7 +106,7 @@ class Settings:
     #   hyacinth seen through haze (2026-11-08: NDVI ~ 0.74, SCL vegetation,
     #   52 ha masked); they are classified in a second pass with the scene's
     #   frozen model and never enter the valid mask.
-    # HOW: calibrated by the author on the Endho series (see PRIOR_WORK.md,
+    # HOW: calibrated by the author on the Endho series (see docs/provenance.md,
     #   smol PR #45): the 2025-07-29 cloud SCL passed has median NDVI 0.39;
     #   sensitivity 0.45 / 0.55 moves the series total +11 % / -12 %; below
     #   0.5 cloud gets in (2025-07-29: 93 ha at 0.50, 137 at 0.45, 251 at
@@ -135,7 +135,7 @@ class Settings:
     # WHY: catalog cloud-cover ceiling when extending the series with new
     #   scenes — generous on purpose, because the per-pixel SCL mask and the
     #   spectral cloud test filter clouds later anyway.
-    # HOW: author's catalog value, see PRIOR_WORK.md.
+    # HOW: author's catalog value, see docs/provenance.md.
     MAX_CLOUD_COVER_CATALOG: float = 50.0
 
     # WHY: cloud fraction above which a scene's coverage is doubtful even when
@@ -281,7 +281,7 @@ class Settings:
     #   mat-edge pixels into water, but water, however turbid, cannot produce
     #   high NDVI and high NIR together; rescued pixels recover 12–35 % of
     #   hyacinth at high coverage and 0 ha in clean low-coverage water.
-    # HOW: fixed cutoffs from the author's prior research (see PRIOR_WORK.md).
+    # HOW: fixed cutoffs from the author's prior research (see docs/provenance.md).
     NDVI_RESCUE_WATER: float = 0.30
     NIR_RESCUE_WATER: float = 0.15
 
@@ -289,7 +289,7 @@ class Settings:
     #   sediment is not floating hyacinth; SWIR sees the substrate (low NSD).
     #   Gated by sediment proximity (last word, runs after the rescue) so real
     #   hyacinth over turbid water in a full reservoir (Jul–Dec) is untouched.
-    # HOW: fixed cutoffs from the author's prior research (see PRIOR_WORK.md):
+    # HOW: fixed cutoffs from the author's prior research (see docs/provenance.md):
     #   NSD below 0.10 near (5 px ≈ 50 m) bare sediment (soil with NDVI < 0.20).
     NSD_SUBSTRATE_SOIL: float = 0.10
     NDVI_BARE_SEDIMENT: float = 0.20

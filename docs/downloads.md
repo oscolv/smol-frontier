@@ -51,7 +51,8 @@ stdout.
 series.csv           one row per series.json scene, in its order
 series_monthly.csv   one row per series.json `monthly` entry
 README.txt           licence, disclaimer, citation, sources, provenance, column dictionary
-SHA256SUMS           sha256 of the three files above
+LEEME.txt            the same in Spanish (prevails if the two differ)
+SHA256SUMS           sha256 of the four files above
 ```
 
 - `series.csv` keeps POOR scenes, with their figure cells empty, so the
@@ -61,6 +62,14 @@ SHA256SUMS           sha256 of the three files above
 - `README.txt` is plain ASCII, wrapped at 79 columns (a line ending in a
   sha256 may run longer), and ends with a pointer to `docs/contract.md`
   for the full field definitions.
+- `LEEME.txt` is its Spanish counterpart, UTF-8 (with accents), the same
+  eight sections in the same order. The CSVs are the same for both
+  languages: column names and codes stay English, and LEEME.txt glosses
+  each code (`GOOD = BUENA`, `EXPOSED_BED = lecho expuesto`). The
+  citation is byte-identical in both files, so a figure cited in either
+  language traces to the same run. Both files say that LEEME.txt
+  prevails if they differ. Its licence section links Creative Commons'
+  official Spanish deed and legal code instead of translating them.
 
 The same publish always gives byte-identical files: no wall clock is
 read (the README's copyright year is the latest scene's year).
@@ -131,8 +140,8 @@ ENDHD), and JRC Global Surface Water v1.4 for the reservoir polygon.
 
 ## Verification
 
-`SHA256SUMS` is in `sha256sum` format and covers `README.txt`,
-`series.csv` and `series_monthly.csv` (not itself). In the bundle
+`SHA256SUMS` is in `sha256sum` format and covers `LEEME.txt`,
+`README.txt`, `series.csv` and `series_monthly.csv` (not itself). In the bundle
 folder:
 
 ```sh

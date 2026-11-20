@@ -3,8 +3,9 @@
 ``export_files`` is pure: the parsed ``series.json`` and ``latest.json``
 plus the ``series.json`` sha256 go in, ``{filename: bytes}`` comes out:
 ``series.csv`` (one row per scene), ``series_monthly.csv`` (the monthly
-medians), ``README.txt`` (licence, citation, sources, provenance, column
-dictionary) and ``SHA256SUMS`` over the other three.
+medians), ``README.txt`` and its Spanish counterpart ``LEEME.txt`` (licence,
+disclaimer, citation, sources, provenance, column dictionary) and
+``SHA256SUMS`` over the other four.
 ``export_publish`` reads a publish directory, verifies it against its own
 integrity index and the packaged schemas, and swaps the files into the
 output directory by rename. It reads only the published contract: no
@@ -38,11 +39,11 @@ from smol_frontier.publish.writer import (
 #   entries an existing ``--out`` may hold (anything else is someone else's
 #   data and is refused, never replaced). One set so later exports extend it.
 EXPORT_FILES = frozenset(
-    {"series.csv", "series_monthly.csv", "README.txt", "SHA256SUMS"}
+    {"series.csv", "series_monthly.csv", "README.txt", "LEEME.txt", "SHA256SUMS"}
 )
 
 # WHY: the files SHA256SUMS covers, in its (sorted) order; never itself.
-_SUMMED_FILES = ("README.txt", "series.csv", "series_monthly.csv")
+_SUMMED_FILES = ("LEEME.txt", "README.txt", "series.csv", "series_monthly.csv")
 
 # WHY: every row says which run and which published file it came from, so a
 #   CSV copied out of its folder still traces back to the contract.
@@ -394,118 +395,457 @@ def _years(series_doc: dict[str, object]) -> str:
     return years[0] if len(years) == 1 else f"{years[0]}-{years[-1]}"
 
 
-def _dictionary(name: str, what: str, columns: tuple[str, ...]) -> str:
+def _dictionary(
+    name: str, what: str, columns: tuple[str, ...], text: "ReadmeText"
+) -> str:
+    """One CSV's dictionary block: heading, then unit, empty rule and meaning."""
     heading = f"{name} ({what})"
     entries = [f"{heading}\n{'-' * len(heading)}"]
     for column in columns:
-        doc = COLUMN_DICTIONARY[column]
+        doc = text.dictionary[column]
+        unit, empty = text.unit_label, text.empty_label
         entries.append(
             f"  {column}\n"
-            + _wrap(f"Unit: {doc.unit}. Empty when: {doc.empty_when}.", " " * 6)
+            + _wrap(f"{unit}: {doc.unit}. {empty}: {doc.empty_when}.", " " * 6)
             + "\n"
             + _wrap(doc.meaning, " " * 6)
         )
     return "\n\n".join(entries)
 
 
-def _readme(
-    series_doc: dict[str, object],
-    latest_doc: dict[str, object],
-    series_json_sha256: str,
-) -> bytes:
-    """README.txt: licence, citation, sources, provenance, column dictionary.
+class ReadmeText(NamedTuple):
+    """The fixed texts of one README language; one builder lays them out.
 
-    WHY the year from the latest scene: no wall clock, so the same publish
-    always gives the same bytes.
+    ``{year}``, ``{holder}`` and ``{years}`` are filled in by ``_readme``.
     """
-    run_id = series_doc["run_id"]
-    year = latest_doc["date"][:4]
-    description = _wrap(
+
+    filename: str
+    encoding: str
+    sections: tuple[str, ...]  # title, licence, ..., full definitions (8)
+    description: str
+    licence_head: str
+    licence_urls: tuple[str, ...]
+    licence_body: tuple[str, ...]
+    disclaimer: str
+    citation_intro: str
+    sources: tuple[str, ...]
+    provenance_note: tuple[str, str]
+    labels: dict[str, str]  # contract_version, exported, constants
+    dictionary: dict[str, ColumnDoc]
+    tables: tuple[str, str]  # what one row of series.csv / series_monthly.csv is
+    unit_label: str
+    empty_label: str
+    pointer: str
+
+
+# WHY: the English README. ASCII only, so it reads anywhere.
+README_EN = ReadmeText(
+    filename="README.txt",
+    encoding="ascii",
+    sections=(
+        _TITLE,
+        "Licence",
+        "Disclaimer",
+        "Suggested citation",
+        "Sources",
+        "Provenance",
+        "Column dictionary",
+        "Full definitions",
+    ),
+    description=(
         "Floating water hyacinth cover on Endho Reservoir (Hidalgo, Mexico), "
         "classified from Sentinel-2 L2A scenes by smolf, with the exposed-bed "
         "correction behind the public figure. series.csv has one row per scene "
         "of the run (POOR scenes included, with empty figure cells); "
         "series_monthly.csv has the monthly median of the corrected hectares. "
-        "To check the files, run `sha256sum -c SHA256SUMS` in this folder."
-    )
-    licence = (
-        _wrap(
-            f"(C) {year} {_HOLDER}. Released under the Creative Commons "
-            "Attribution 4.0 International license (CC BY 4.0):"
-        )
-        + f"\n\n    {_LICENCE_URL}\n\n"
-        + _wrap(
-            "You may share and adapt this data, including for commercial "
-            "purposes, as long as you give appropriate credit. When you publish "
-            "results derived from it, please cite the series as suggested below."
-        )
-        + "\n\n"
-        + _wrap(
-            "This license covers only the data in this folder. The smolf code "
-            "that produced it stays under the MIT License."
-        )
-    )
-    disclaimer = _wrap(
+        "To check the files, run `sha256sum -c SHA256SUMS` in this folder. "
+        "README.txt (English) and LEEME.txt (Spanish) describe the same data; "
+        "if they differ, LEEME.txt prevails."
+    ),
+    licence_head=(
+        "(C) {year} {holder}. Released under the Creative Commons Attribution "
+        "4.0 International license (CC BY 4.0):"
+    ),
+    licence_urls=(_LICENCE_URL,),
+    licence_body=(
+        (
+            "You may share and adapt this data, including for commercial purposes, "
+            "as long as you give appropriate credit. When you publish results "
+            "derived from it, please cite the series as suggested below."
+        ),
+        (
+            "This license covers only the data in this folder. The smolf code that "
+            "produced it stays under the MIT License."
+        ),
+    ),
+    disclaimer=(
         "These figures are remote-sensing estimates computed by smolf from "
         "satellite imagery and published water levels. They are not an "
         "official measurement and do not replace data from CONAGUA or other "
         "authorities. The data is provided as is, without warranty of any "
         "kind (CC BY 4.0, section 5)."
+    ),
+    citation_intro="",
+    sources=(
+        "Contains modified Copernicus Sentinel data {years} (Sentinel-2 L2A).",
+        (
+            "Water levels: Mexico's national hydrometric information system (SIH), "
+            "station ENDHD."
+        ),
+        (
+            "Reservoir polygon: JRC Global Surface Water v1.4 (occurrence >= 25%, "
+            "1984-2021; Pekel et al., 2016)."
+        ),
+    ),
+    provenance_note=(
+        "The hash of the run's internal series.csv (the series id),",
+        "not the hash of the series.csv in this folder.",
+    ),
+    labels={
+        "contract_version": "contract smolf_version",
+        "exported": "exported by smolf",
+        "constants": "constants",
+    },
+    dictionary=COLUMN_DICTIONARY,
+    tables=("one row per scene", "one row per month"),
+    unit_label="Unit",
+    empty_label="Empty when",
+    pointer=(
+        "The full field definitions, with the quality gates and the rounding "
+        f"rules, are in docs/contract.md of the smolf repository ({_REPOSITORY})."
+        " These files are derived from the contract but are not part of it."
+    ),
+)
+
+# --- Spanish text of the published bundle ------------------------------------
+# WHY Spanish here: LEEME.txt is a deliverable read by Spanish-speaking
+#   residents, authorities and researchers; it is the one exception to the
+#   English-only rule (AGENTS.md, Language; docs/decisions.md 19). Column
+#   names and codes stay verbatim and are glossed, so both languages describe
+#   byte-identical CSVs. The licence is not translated here: it links
+#   Creative Commons' official Spanish deed and legal code.
+
+_POOR_ES = "escena POOR"
+_POOR_OR_NO_BED_ES = "escena POOR, o bed_applied false"
+_NONE_ES = "sin unidad"
+_NEVER_ES = "nunca"
+
+COLUMN_DICTIONARY_ES: dict[str, ColumnDoc] = {
+    "run_id": ColumnDoc(
+        _NONE_ES, "Id de la corrida de la serie de la que viene la fila.", _NEVER_ES
+    ),
+    "series_sha256": ColumnDoc(
+        _NONE_ES,
+        "sha256 del series.csv interno de la corrida (el id de la serie); no es "
+        "el hash del series.csv de esta carpeta.",
+        _NEVER_ES,
+    ),
+    "series_json_sha256": ColumnDoc(
+        _NONE_ES,
+        "sha256 del series.json publicado del que se generó este archivo.",
+        _NEVER_ES,
+    ),
+    "schema_version": ColumnDoc(
+        _NONE_ES, "Versión del esquema del contrato de ese series.json.", _NEVER_ES
+    ),
+    "smolf_version": ColumnDoc(
+        _NONE_ES,
+        "Versión de smolf que publicó ese series.json (no la que exportó).",
+        _NEVER_ES,
+    ),
+    "license": ColumnDoc(
+        _NONE_ES,
+        "Id SPDX de la licencia de los datos (CC BY 4.0); ver LEEME.txt.",
+        _NEVER_ES,
+    ),
+    "rights_holder": ColumnDoc(
+        _NONE_ES,
+        "Titular de los derechos de los datos, a quien dar crédito al reutilizarlos.",
+        _NEVER_ES,
+    ),
+    "date": ColumnDoc("AAAA-MM-DD", "Fecha de adquisición (UTC).", _NEVER_ES),
+    "item_id": ColumnDoc(
+        _NONE_ES, "Id exacto del ítem STAC de la escena usada.", _NEVER_ES
+    ),
+    "quality_light": ColumnDoc(
+        _NONE_ES,
+        "Semáforo de calidad de la escena: GOOD = BUENA, DOUBTFUL = DUDOSA, "
+        "POOR = MALA.",
+        _NEVER_ES,
+    ),
+    "regime": ColumnDoc(
+        _NONE_ES,
+        "Régimen óptico de la escena: CLEAN = limpio, EXPOSED_BED = lecho "
+        "expuesto, TURBIDITY = turbidez.",
+        _POOR_ES,
+    ),
+    "valid_frac": ColumnDoc(
+        "fracción 0-1",
+        "Fracción visible (sin nubes, observada) del vaso.",
+        _NEVER_ES,
+    ),
+    "cloud_frac": ColumnDoc("fracción 0-1", "Fracción del vaso con nubes.", _POOR_ES),
+    "dense_ha": ColumnDoc("ha", "Lirio denso, sin corregir.", _POOR_ES),
+    "interface_ha": ColumnDoc(
+        "ha",
+        "Lirio de interfase (borde del manto / cobertura rala), sin corregir.",
+        _POOR_ES,
+    ),
+    "hyacinth_raw_ha": ColumnDoc(
+        "ha", "Denso + interfase, antes de la corrección por lecho expuesto.", _POOR_ES
+    ),
+    "hyacinth_under_haze_ha": ColumnDoc(
+        "ha",
+        "Parte de hyacinth_raw_ha vista a través de neblina delgada dentro del "
+        "espejo de agua del día y rescatada por la segunda pasada del "
+        "clasificador; sin corregir. 0 cuando no se rescató nada o no se aplicó "
+        "la corrección por lecho expuesto.",
+        _POOR_ES,
+    ),
+    "pct_reservoir_raw": ColumnDoc(
+        "% 0-100", "hyacinth_raw_ha sobre el área del vaso.", _POOR_ES
+    ),
+    "bed_applied": ColumnDoc(
+        "true/false",
+        "Si se aplicó la corrección por lecho expuesto (true = sí, false = no).",
+        _POOR_ES,
+    ),
+    "bed_reason": ColumnDoc(
+        _NONE_ES,
+        "Por qué no se aplicó la corrección, en inglés (p. ej., no hay cota del "
+        "SIH para el día).",
+        "escena POOR, o se aplicó la corrección",
+    ),
+    "level_m": ColumnDoc(
+        "m s. n. m.",
+        "Cota del agua del día de la escena usada por la corrección.",
+        "escena POOR, o no hay cota para el día",
+    ),
+    "removed_ha": ColumnDoc(
+        "ha",
+        "Lirio retirado por la corrección (sobre el lecho expuesto).",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "dense_corrected_ha": ColumnDoc(
+        "ha", "Lirio denso después de la corrección.", _POOR_OR_NO_BED_ES
+    ),
+    "interface_corrected_ha": ColumnDoc(
+        "ha", "Lirio de interfase después de la corrección.", _POOR_OR_NO_BED_ES
+    ),
+    "hyacinth_corrected_ha": ColumnDoc(
+        "ha",
+        "Lirio total después de la corrección; la cifra pública.",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "pct_reservoir_corrected": ColumnDoc(
+        "% 0-100",
+        "hyacinth_corrected_ha sobre el área del vaso; el porcentaje público.",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "cover_band": ColumnDoc(
+        _NONE_ES,
+        "Semáforo de manejo de pct_reservoir_corrected: GREEN = verde (debajo "
+        "de green_max_pct), YELLOW = amarillo (desde ahí hasta debajo de "
+        "red_min_pct), RED = rojo (en red_min_pct o más).",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "display_status": ColumnDoc(
+        _NONE_ES,
+        "Filtro de despliegue: HIDDEN = oculta, cuando quality_light no es GOOD "
+        "o hyacinth_corrected_ha está vacía; LOWER_BOUND = cota inferior, "
+        "cuando valid_frac es menor que frac_publishable (leer las cifras como "
+        "'al menos'); FULL = completa en otro caso.",
+        _NEVER_ES,
+    ),
+    "display_ha_total": ColumnDoc(
+        "ha (enteras)",
+        "hyacinth_corrected_ha redondeado (la mitad hacia arriba).",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "display_ha_dense": ColumnDoc(
+        "ha (enteras)",
+        "dense_corrected_ha repartido en hectáreas enteras.",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "display_ha_interface": ColumnDoc(
+        "ha (enteras)",
+        "interface_corrected_ha repartido en hectáreas enteras; "
+        "display_ha_dense + display_ha_interface = display_ha_total.",
+        _POOR_OR_NO_BED_ES,
+    ),
+    "month": ColumnDoc(
+        "AAAA-MM",
+        "Mes calendario (fechas UTC); todos los meses desde el de la primera "
+        "escena hasta el de la última, sin saltos.",
+        _NEVER_ES,
+    ),
+    "median_ha": ColumnDoc(
+        "ha",
+        "Mediana ordinaria (promedio de los dos valores centrales cuando el "
+        "número es par) de hyacinth_corrected_ha de las escenas FULL y "
+        "LOWER_BOUND del mes.",
+        "n_scenes es 0",
+    ),
+    "n_scenes": ColumnDoc(
+        "conteo",
+        "Escenas del mes con display_status FULL o LOWER_BOUND.",
+        _NEVER_ES,
+    ),
+}
+
+README_ES = ReadmeText(
+    filename="LEEME.txt",
+    encoding="utf-8",
+    sections=(
+        "Lirio acuático en la presa Endhó: serie Sentinel-2",
+        "Licencia",
+        "Descargo de responsabilidad",
+        "Cita sugerida",
+        "Fuentes",
+        "Procedencia",
+        "Diccionario de columnas",
+        "Definiciones completas",
+    ),
+    description=(
+        "Cobertura de lirio acuático flotante en la presa Endhó (Hidalgo, "
+        "México), clasificada por smolf a partir de escenas Sentinel-2 L2A, con "
+        "la corrección por lecho expuesto detrás de la cifra pública. "
+        "series.csv tiene una fila por escena de la corrida (incluidas las "
+        "escenas POOR, con las celdas de cifras vacías); series_monthly.csv "
+        "tiene la mediana mensual de las hectáreas corregidas. Para verificar "
+        "los archivos, ejecute `sha256sum -c SHA256SUMS` en esta carpeta. "
+        "Los nombres de columna y los códigos (GOOD, EXPOSED_BED, ...) están en "
+        "inglés en los CSV; el diccionario de abajo los explica. LEEME.txt "
+        "(español) y README.txt (inglés) describen los mismos datos; si "
+        "difieren, prevalece LEEME.txt."
+    ),
+    licence_head=(
+        "(C) {year} {holder}. Publicado bajo la licencia Creative Commons "
+        "Atribución 4.0 Internacional (CC BY 4.0). Resumen y texto legal "
+        "oficiales en español:"
+    ),
+    licence_urls=(_LICENCE_URL + "deed.es", _LICENCE_URL + "legalcode.es"),
+    licence_body=(
+        (
+            "Puede compartir y adaptar estos datos, incluso con fines comerciales, "
+            "siempre que dé el crédito correspondiente. Si publica resultados "
+            "derivados de ellos, cite la serie como se sugiere abajo."
+        ),
+        (
+            "Esta licencia cubre solo los datos de esta carpeta. El código de smolf "
+            "que los produjo sigue bajo la licencia MIT."
+        ),
+    ),
+    disclaimer=(
+        "Estas cifras son estimaciones por percepción remota calculadas por "
+        "smolf a partir de imágenes de satélite y de niveles de agua "
+        "publicados. No son una medición oficial ni sustituyen los datos de la "
+        "CONAGUA u otras autoridades. Los datos se ofrecen tal cual, sin "
+        "garantía de ningún tipo (CC BY 4.0, sección 5)."
+    ),
+    citation_intro=(
+        "La cita es la misma en README.txt, para que una cifra citada en "
+        "cualquiera de los dos idiomas remita a la misma corrida:"
+    ),
+    sources=(
+        "Contiene datos modificados de Copernicus Sentinel {years} (Sentinel-2 L2A).",
+        (
+            "Niveles de agua: Sistema de Información Hidrológica (SIH) de la "
+            "CONAGUA, estación ENDHD."
+        ),
+        (
+            "Polígono del vaso: JRC Global Surface Water v1.4 (ocurrencia >= 25 %, "
+            "1984-2021; Pekel et al., 2016)."
+        ),
+    ),
+    provenance_note=(
+        "El hash del series.csv interno de la corrida (el id de la serie),",
+        "no el hash del series.csv de esta carpeta.",
+    ),
+    labels={
+        "contract_version": "smolf_version del contrato",
+        "exported": "exportado por smolf",
+        "constants": "constantes",
+    },
+    dictionary=COLUMN_DICTIONARY_ES,
+    tables=("una fila por escena", "una fila por mes"),
+    unit_label="Unidad",
+    empty_label="Vacía cuando",
+    pointer=(
+        "Las definiciones completas de los campos, con los filtros de calidad "
+        "y las reglas de redondeo, están en docs/contract.md del repositorio "
+        f"de smolf ({_REPOSITORY}), en inglés. Estos archivos se derivan del "
+        "contrato pero no forman parte de él."
+    ),
+)
+
+
+def _readme(
+    series_doc: dict[str, object],
+    latest_doc: dict[str, object],
+    series_json_sha256: str,
+    text: ReadmeText,
+) -> bytes:
+    """One README (README.txt or LEEME.txt) from its language's texts.
+
+    WHY the year from the latest scene: no wall clock, so the same publish
+    always gives the same bytes. WHY one citation string for both languages:
+    a figure cited in either traces to the same run.
+    """
+    run_id = series_doc["run_id"]
+    year = latest_doc["date"][:4]
+    licence = "\n\n".join(
+        [
+            _wrap(text.licence_head.format(year=year, holder=_HOLDER)),
+            "\n".join(f"    {url}" for url in text.licence_urls),
+            *(_wrap(paragraph) for paragraph in text.licence_body),
+        ]
     )
     citation = _wrap(
         f"{_HOLDER} ({year}). {_TITLE}, run {run_id}. smolf. {_REPOSITORY}"
     )
-    copernicus = (
-        "Contains modified Copernicus Sentinel data "
-        f"{_years(series_doc)} (Sentinel-2 L2A)."
+    if text.citation_intro:
+        citation = _wrap(text.citation_intro) + "\n\n" + citation
+    years = _years(series_doc)
+    sources = "\n".join(
+        _wrap(line.format(years=years), "- ", "  ") for line in text.sources
     )
-    sih = (
-        "Water levels: Mexico's national hydrometric information system (SIH), "
-        "station ENDHD."
-    )
-    gsw = (
-        "Reservoir polygon: JRC Global Surface Water v1.4 (occurrence >= 25%, "
-        "1984-2021; Pekel et al., 2016)."
-    )
-    sources = "\n".join(_wrap(line, "- ", "  ") for line in (copernicus, sih, gsw))
     constants = latest_doc["constants"]
+    labels = text.labels
     provenance = "\n".join(
         [
             f"run_id: {run_id}",
             f"series_sha256: {series_doc['series_sha256']}",
-            "  The hash of the run's internal series.csv (the series id),",
-            "  not the hash of the series.csv in this folder.",
+            *(f"  {line}" for line in text.provenance_note),
             f"series.json sha256: {series_json_sha256}",
             f"schema_version: {series_doc['schema_version']}",
-            f"contract smolf_version: {series_doc['smolf_version']}",
-            f"exported by smolf: {__version__}",
+            f"{labels['contract_version']}: {series_doc['smolf_version']}",
+            f"{labels['exported']}: {__version__}",
             f"reservoir_area_ha: {latest_doc['reservoir_area_ha']:.2f}",
-            "constants:",
+            f"{labels['constants']}:",
             *(f"  {key}: {constants[key]}" for key in sorted(constants)),
         ]
     )
     dictionary = "\n\n".join(
         [
-            _dictionary("series.csv", "one row per scene", _SERIES_HEADER),
-            _dictionary("series_monthly.csv", "one row per month", _MONTHLY_HEADER),
+            _dictionary("series.csv", text.tables[0], _SERIES_HEADER, text),
+            _dictionary("series_monthly.csv", text.tables[1], _MONTHLY_HEADER, text),
         ]
     )
-    pointer = _wrap(
-        "The full field definitions, with the quality gates and the rounding "
-        f"rules, are in docs/contract.md of the smolf repository ({_REPOSITORY})."
-        " These files are derived from the contract but are not part of it."
-    )
-    sections = [
-        _section(_TITLE, description),
-        _section("Licence", licence),
-        _section("Disclaimer", disclaimer),
-        _section("Suggested citation", citation),
-        _section("Sources", sources),
-        _section("Provenance", provenance),
-        _section("Column dictionary", dictionary),
-        _section("Full definitions", pointer),
+    bodies = [
+        _wrap(text.description),
+        licence,
+        _wrap(text.disclaimer),
+        citation,
+        sources,
+        provenance,
+        dictionary,
+        _wrap(text.pointer),
     ]
-    return "\n".join(sections).encode("ascii")
+    sections = [
+        _section(title, body) for title, body in zip(text.sections, bodies, strict=True)
+    ]
+    return "\n".join(sections).encode(text.encoding)
 
 
 def _sha256sums(files: dict[str, bytes]) -> bytes:
@@ -538,8 +878,9 @@ def export_files(
         "series_monthly.csv": _table(
             _MONTHLY_HEADER, provenance, series_doc["monthly"]
         ),
-        "README.txt": _readme(series_doc, latest_doc, series_json_sha256),
     }
+    for text in (README_EN, README_ES):
+        files[text.filename] = _readme(series_doc, latest_doc, series_json_sha256, text)
     files["SHA256SUMS"] = _sha256sums(files)
     return files
 

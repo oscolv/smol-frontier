@@ -5,7 +5,10 @@
 - Everything in the repository is in English — code, comments, docs, CLI
   output, column and file names.
 - Exceptions: third-party data kept byte-for-byte (the SIH CSV headers stay
-  as published) and proper nouns (Endhó, SIH).
+  as published), proper nouns (Endhó, SIH), and the Spanish text of
+  published deliverables for Spanish readers: only `LEEME.txt` of the
+  download bundle, confined to the marked block in `publish/export.py`
+  (`docs/decisions.md` 19). Its CSV column names and codes stay English.
 
 ## Layout and toolchain
 

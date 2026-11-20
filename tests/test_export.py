@@ -485,9 +485,9 @@ def test_export_refuses_out_holding_a_foreign_file(
     ]
 
 
-def test_export_allowlist_is_the_four_bundle_files() -> None:
+def test_export_allowlist_is_the_five_bundle_files() -> None:
     assert export.EXPORT_FILES == frozenset(
-        {"series.csv", "series_monthly.csv", "README.txt", "SHA256SUMS"}
+        {"series.csv", "series_monthly.csv", "README.txt", "LEEME.txt", "SHA256SUMS"}
     )
 
 
@@ -860,7 +860,67 @@ def test_sha256sums_verify_the_bundle(pub: Path, tmp_path: Path) -> None:
     assert text.endswith("\n")
     lines = text.splitlines()
     names = [line.split("  ", 1)[1] for line in lines]
-    assert names == sorted(["README.txt", "series.csv", "series_monthly.csv"])
+    assert names == sorted(
+        ["LEEME.txt", "README.txt", "series.csv", "series_monthly.csv"]
+    )
     for line in lines:
         digest, name = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line).groups()
         assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
+
+
+# --- LEEME.txt (Spanish README) -------------------------------------------------
+
+
+def test_leeme_mirrors_the_readme_in_spanish(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    readme = (out / "README.txt").read_bytes().decode("ascii")
+    leeme = (out / "LEEME.txt").read_bytes().decode("utf-8")
+    assert "\r" not in leeme
+    assert "Endhó" in leeme
+    assert _sections(leeme) == [
+        "Lirio acuático en la presa Endhó: serie Sentinel-2",
+        "Licencia",
+        "Descargo de responsabilidad",
+        "Cita sugerida",
+        "Fuentes",
+        "Procedencia",
+        "Diccionario de columnas",
+        "Definiciones completas",
+    ]
+    assert len(_sections(leeme)) == len(_sections(readme))
+    latest = json.loads((pub / "latest.json").read_text(encoding="utf-8"))
+    json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
+    year = latest["date"][:4]
+    assert f"(C) {year} Oscar Olvera Neria (UAM Azcapotzalco)" in leeme
+    assert "https://creativecommons.org/licenses/by/4.0/deed.es" in leeme
+    assert "https://creativecommons.org/licenses/by/4.0/legalcode.es" in leeme
+    disclaimer = leeme.split("\nDescargo de responsabilidad\n", 1)[1]
+    disclaimer = " ".join(disclaimer.split("\nCita sugerida", 1)[0].split())
+    assert "No son una medición oficial" in disclaimer
+    assert "sin garantía" in disclaimer
+    # One citation, byte-identical in both languages.
+    citation_en = readme.split("\nSuggested citation\n", 1)[1].split("\nSources\n")[0]
+    citation_es = leeme.split("\nCita sugerida\n", 1)[1].split("\nFuentes\n")[0]
+    assert citation_en.split("\n\n")[-1].strip() in citation_es
+    assert RUN_ID in citation_es
+    # Provenance values are the same in both files.
+    for value in (RUN_ID, SERIES_SHA, json_sha, smol_frontier.__version__):
+        assert value in leeme.split("\nProcedencia\n", 1)[1]
+    # Spanish prevails, and both files say so.
+    assert "LEEME.txt" in readme and "prevails" in readme
+    assert "README.txt" in leeme and "prevalece" in leeme
+    # Codes stay verbatim, glossed in Spanish.
+    for gloss in ("GOOD = BUENA", "POOR = MALA", "EXPOSED_BED = lecho expuesto"):
+        assert gloss in " ".join(leeme.split()), gloss
+    dictionary = leeme.split("\nDiccionario de columnas", 1)[1]
+    for column in export.COLUMN_DICTIONARY:
+        assert re.search(rf"^  {column}$", dictionary, re.MULTILINE), column
+    for line in leeme.splitlines():
+        assert len(line) <= 79 or re.search(r"[0-9a-f]{64}$", line), line
+
+
+def test_spanish_dictionary_has_the_same_columns() -> None:
+    assert set(export.COLUMN_DICTIONARY_ES) == set(export.COLUMN_DICTIONARY)
+    for name, entry in export.COLUMN_DICTIONARY_ES.items():
+        assert entry.unit and entry.meaning and entry.empty_when, name

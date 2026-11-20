@@ -4,7 +4,7 @@ Default mode re-ingests every row of the reference series by exact Earth
 Search item id (Planetary Computer fallback per scene, reusing the identity
 gate's ingest-by-item code), then runs ``classify()`` + quality light +
 regime + the exposed-bed correction. ``--extend`` additionally searches
-Earth Search for scenes after the last reference date.
+Earth Search from EXTEND_START for scenes on dates the reference lacks.
 
 Scenes with valid_frac below MIN_VALID_FRACTION (light POOR) never enter
 ``series.csv``; they are recorded in the manifest as skipped. Failed scenes
@@ -25,10 +25,10 @@ import logging
 import platform
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +61,7 @@ from smol_frontier.sources.stac import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "EXTEND_START",
     "SERIES_CSV_NAME",
     "SERIES_FIELDS",
     "CatalogUnavailable",
@@ -87,6 +88,16 @@ __all__ = [
 # WHY: fixed run layout — one directory per run keeps scene JSONs, the series
 #   CSV, and the manifest together so a run is resumable and auditable alone.
 SERIES_CSV_NAME = "series.csv"
+
+# WHY: the new-scene search starts on a fixed day, not after the newest
+#   reference date. A newer reference can end later without holding every
+#   Earth Search scene before its end (v2026-11-19 runs to 2026-11-08 but
+#   lacks 2026-10-19 and 2026-11-06), and a window anchored on its last date
+#   would silently drop scenes that earlier runs had already published.
+# HOW: the day after the last date of the v2026-10-22 reference (2026-10-12),
+#   the first day every `--extend` run before smolf 0.8.0 searched, so the
+#   extended scene set matches those runs.
+EXTEND_START = date(2026, 10, 13)
 
 # WHY: fixed column order for series.csv — raw classifier figures first, then
 #   the bed-correction inputs and corrected figures (empty when not applied).
@@ -309,18 +320,21 @@ def list_reference_targets() -> list[SeriesTarget]:
     return [SeriesTarget(day=row.date, item_id=row.item_id) for row in load_reference()]
 
 
-def list_extend_targets(last_ref_day: date, today: date) -> list[SeriesTarget]:
-    """Earth Search scenes after the last reference date, up to today.
+def list_extend_targets(
+    reference_days: Collection[date], today: date
+) -> list[SeriesTarget]:
+    """Earth Search scenes from EXTEND_START up to today on non-reference dates.
 
     One scene per date (the catalog search already deduplicates to the
     latest processing per date and tile) with tile cloud cover under
-    MAX_CLOUD_COVER_CATALOG. Empty when today holds no new date.
+    MAX_CLOUD_COVER_CATALOG. A date the reference holds keeps its reference
+    item. Empty when today is before EXTEND_START.
     """
-    if today <= last_ref_day:
+    if today < EXTEND_START:
         return []
     try:
         scenes = search_scenes(
-            last_ref_day + timedelta(days=1),
+            EXTEND_START,
             today,
             settings.MAX_CLOUD_COVER_CATALOG,
             backends=(EARTH_SEARCH,),
@@ -334,7 +348,11 @@ def list_extend_targets(last_ref_day: date, today: date) -> list[SeriesTarget]:
             "nothing was written. Retry later."
         )
         raise CatalogUnavailable(msg) from exc
-    return [SeriesTarget(day=item.datetime.date(), item_id=item.id) for item in scenes]
+    return [
+        SeriesTarget(day=item.datetime.date(), item_id=item.id)
+        for item in scenes
+        if item.datetime.date() not in reference_days
+    ]
 
 
 def _short(exc: Exception) -> str:
@@ -651,8 +669,10 @@ def build_run(
         if targets is None:
             targets = list_reference_targets()
             if extend:
-                last_day = max(target.day for target in targets)
-                targets = targets + list_extend_targets(last_day, today or date.today())
+                reference_days = {target.day for target in targets}
+                targets = targets + list_extend_targets(
+                    reference_days, today or date.today()
+                )
         # WHY before anything is written: a refused build leaves no run dir.
         check_levels_cover(
             targets, last_day_with_level() if levels_end is None else levels_end()

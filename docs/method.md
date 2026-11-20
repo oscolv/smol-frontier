@@ -12,8 +12,8 @@ in this repo (cited in each section). Prior research is referenced through
 One interface, two catalogs: each search tries Planetary Computer first and
 falls back to Earth Search on timeout or HTTP error, logging which catalog
 served the result. Reference scenes are re-ingested by exact Earth Search
-item id; the series `--extend` mode searches Earth Search for dates after
-the last reference date. Same-date duplicates keep the highest
+item id; the series `--extend` mode searches Earth Search from 2026-10-13
+(`EXTEND_START`) for dates the reference lacks (decisions §18). Same-date duplicates keep the highest
 `s2:processing_baseline` per date and tile (`deduplicate()`); every
 reference scene is tile 14QMH, so this is one scene per date with the
 latest processing.
@@ -245,7 +245,8 @@ Sources: config.py; `hydro/flood_map.py` (`PIXEL_HA = 0.01`);
 Runs §6–§8 per scene over the 468 reference rows (v2026-11-19) by exact
 item id
 (Planetary Computer fallback per scene, shared with the gate), or
-additionally past the last reference date with `--extend`. POOR scenes are
+additionally, with `--extend`, every Earth Search scene from 2026-10-13
+on a date the reference lacks (decisions §18). POOR scenes are
 recorded as skipped and never enter `series.csv`; failed scenes are
 recorded as errors and never stop the run. Each run writes
 `outputs/series/<run_id>/` with one JSON per finished scene (written at

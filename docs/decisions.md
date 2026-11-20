@@ -279,3 +279,19 @@ enforced in this repo. Anything not implemented yet says **planned**.
   `hyacinth_under_haze_ha`); `gate.py` (v2026-11-19 by default,
   `--baseline` for v2026-10-22); `tests/test_haze_pass.py`,
   `tests/test_classify_haze.py`, `tests/test_regression_scenes.py`.
+
+## 18. `--extend` searches from a fixed day, not from the reference's end
+
+- **Rule:** `series build --extend` searches Earth Search from
+  `EXTEND_START` (2026-10-13) up to today and adds every scene on a date
+  the reference does not hold. A reference date keeps its reference item.
+- **Why:** a published scene must not disappear when the reference is
+  replaced. The v2026-11-19 reference runs to 2026-11-08 but lacks
+  2026-10-19 and 2026-11-06; smolf 0.8.0 searched only after 2026-11-08, so
+  its runs dropped both (469 scenes against 471 for the v0.7.x runs).
+  2026-10-13 is the day after the v2026-10-22 reference's last date, the
+  first day every earlier `--extend` run searched, so the extended set
+  matches those runs, including the latest processing per date
+  (`S2A_14QMH_20261019_1_L2A`, as before).
+- **Where in this repo:** `series.py` (`EXTEND_START`,
+  `list_extend_targets()`), `tests/test_series.py`.

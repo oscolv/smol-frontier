@@ -136,7 +136,7 @@ def test_publish_regression_2026_10_12(tmp_path: Path) -> None:
     assert latest["reservoir_area_ha"] == 1261.75
     assert latest["constants"]["green_max_ha"] == 378.53
     assert latest["constants"]["red_min_ha"] == 630.88
-    assert latest["smolf_version"] == "0.8.1"
+    assert latest["smolf_version"] == "0.9.0"
     assert latest["schema_version"] == "3.3.0"
     assert _class5_ha(out_dir, latest) == 0.0
 

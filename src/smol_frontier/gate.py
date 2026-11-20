@@ -21,8 +21,11 @@ from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path
 
+import numpy as np
+
 from smol_frontier.classify import pipeline
 from smol_frontier.config import PROJECT_ROOT, settings
+from smol_frontier.hydro.bed import load_day_mirror
 from smol_frontier.ingest import IngestedScene, ingest_scene
 from smol_frontier.quality import assess_quality
 from smol_frontier.sources.radiometry import AnomalousProduct
@@ -37,10 +40,12 @@ from smol_frontier.sources.stac import (
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "BASELINE_REFERENCE_CSV",
     "CSV_FIELDS",
     "GATE_SAMPLE_CSV",
     "PASS_MEDIAN_HA",
     "PASS_P95_HA",
+    "REFERENCE_CSV",
     "ComparedScene",
     "GateSummary",
     "GateTarget",
@@ -66,9 +71,15 @@ __all__ = [
 ]
 
 # WHY: fixed inputs — the author's reference series and the fixed 30-scene
-#   gate sample. Both were added by hand and are never edited by the gate.
+#   gate sample. All were added by hand and are never edited by the gate.
+#   v2026-11-19 (the series WITH the haze rescue; adds lirio_bajo_neblina_ha)
+#   is the gold standard; v2026-10-22 (no rescue) stays as the baseline that
+#   `smolf gate identity --baseline` must still match with the rescue off.
 # HOW: repo layout anchored at PROJECT_ROOT.
 REFERENCE_CSV = (
+    PROJECT_ROOT / "tests/reference/serie_2017-01-01_2026-12-31_v2026-11-19.csv"
+)
+BASELINE_REFERENCE_CSV = (
     PROJECT_ROOT / "tests/reference/serie_2017-01-01_2026-12-31_v2026-10-22.csv"
 )
 GATE_SAMPLE_CSV = PROJECT_ROOT / "tests/reference/gate_scenes.csv"
@@ -154,6 +165,8 @@ class ReferenceRow:
     valid_frac: float
     light: str
     regime: str
+    # Hyacinth under thin haze (raw ha); None in series without the column.
+    under_haze_ha: float | None = None
 
 
 @dataclass(frozen=True)
@@ -421,6 +434,8 @@ class RunMeta:
     n_requested: int
     workers: int
     wall_seconds: float
+    reference: str = REFERENCE_CSV.name
+    rescue: bool = True
 
 
 def _fmt_ha(value: float) -> str:
@@ -451,7 +466,8 @@ def render_summary(summary: GateSummary, meta: RunMeta) -> str:
         f"# Identity gate — {meta.timestamp}",
         "",
         f"mode: {meta.mode} ({meta.n_requested} scenes requested)",
-        f"reference: {REFERENCE_CSV.name}",
+        f"reference: {meta.reference}",
+        f"haze rescue: {'on' if meta.rescue else 'off'}",
         f"workers: {meta.workers}, wall time: {wall}",
         f"fallback backend scenes: {summary.fallback.n}",
         f"failed scenes: {summary.n_errors}",
@@ -536,6 +552,13 @@ def render_rows_table(rows: list[ComparedScene]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _optional_float(value: str | None) -> float | None:
+    """Parse an optional numeric cell (absent column or blank → None)."""
+    if value is None or not value.strip():
+        return None
+    return float(value)
+
+
 def load_reference(path: Path | None = None) -> list[ReferenceRow]:
     """Load the author's reference series (labels mapped to English)."""
     path = REFERENCE_CSV if path is None else Path(path)
@@ -555,6 +578,7 @@ def load_reference(path: Path | None = None) -> list[ReferenceRow]:
                         valid_frac=float(raw["valid_frac"]),
                         light=map_light(raw["quality"] or ""),
                         regime=map_regime(raw["regimen"] or ""),
+                        under_haze_ha=_optional_float(raw.get("lirio_bajo_neblina_ha")),
                     )
                 )
             except (KeyError, ValueError) as exc:
@@ -653,10 +677,19 @@ def ingest_with_fallback(scene: SceneMeta) -> tuple[IngestedScene, str]:
         return ing, note
 
 
-def _measure_scene_meta(scene) -> MeasuredScene:
-    """Classify one ingested scene: raw hectares + light + regime."""
+def _measure_scene_meta(scene, *, rescue: bool = True) -> MeasuredScene:
+    """Classify one ingested scene: raw hectares + light + regime.
+
+    With ``rescue`` the day's water mirror is passed to classify() (haze
+    rescue on); without it nothing is rescued (the pre-rescue baseline).
+    """
     ing, note = ingest_with_fallback(scene)
-    result = pipeline.classify(ing)
+    mirror: np.ndarray | None = None
+    if rescue:
+        mirror = load_day_mirror(
+            ing.scene.datetime.date(), ing.transform, ing.crs, np.shape(ing.inside)
+        )
+    result = pipeline.classify(ing, mirror)
     quality = assess_quality(result)
     ha = result.ha_per_class
     return MeasuredScene(
@@ -697,17 +730,18 @@ def resolve_scene(day: date, item_id: str):
         return scene, f"earth-search failed ({exc}); used {scene.id}"
 
 
-def measure_scene(target: GateTarget) -> ComparedScene:
+def measure_scene(target: GateTarget, *, rescue: bool = True) -> ComparedScene:
     """Ingest + classify + compare one gate scene (never raises).
 
     Uses the reference Earth Search item id; when Earth Search fails,
     falls back to the Planetary Computer scene of the same date and tile
     and records the backend change. Any failure becomes an error row.
+    ``rescue`` switches the haze rescue on (default) or off (baseline).
     """
     ref = target.ref
     try:
         scene, note = resolve_scene(ref.date, ref.item_id)
-        measured = _measure_scene_meta(scene)
+        measured = _measure_scene_meta(scene, rescue=rescue)
         full_note = "; ".join(part for part in (note, measured.note) if part)
         return compare(ref, replace(measured, note=full_note), stratum=target.stratum)
     except Exception as exc:  # noqa: BLE001 — a failed scene is skipped, not fatal
@@ -732,17 +766,22 @@ def run_gate(
     targets: list[GateTarget],
     workers: int = 4,
     on_done=None,
+    *,
+    rescue: bool = True,
 ) -> list[ComparedScene]:
     """Measure every target concurrently; scenes already cached skip fetch.
 
     ``on_done`` (optional) is called in the caller thread with each finished
-    row, for progress output. Returns rows sorted by (date, item).
+    row, for progress output; ``rescue`` is the haze-rescue mode. Returns rows sorted by (date, item).
     """
     rows: list[ComparedScene] = []
     if not targets:
         return rows
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(measure_scene, target): target for target in targets}
+        futures = {
+            pool.submit(measure_scene, target, rescue=rescue): target
+            for target in targets
+        }
         for future in as_completed(futures):
             row = future.result()
             rows.append(row)

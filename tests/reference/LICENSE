@@ -5,7 +5,12 @@ The CSV files in tests/reference/ are a validation extract of the author's
 prior Sentinel-2 classification series for Endho Reservoir:
 
 - serie_2017-01-01_2026-12-31_v2026-10-22.csv — 465 scenes, 2017-2026,
-  raw classifier output (no exposed-bed correction).
+  raw classifier output (no exposed-bed correction); the baseline
+  with the haze rescue off.
+- serie_2017-01-01_2026-12-31_v2026-11-19.csv — 468 scenes, 2017-2026,
+  raw classifier output (no exposed-bed correction) of the series with the
+  haze rescue; adds the lirio_bajo_neblina_ha column (hyacinth under thin
+  haze). The identity gate's reference.
 - gate_scenes.csv — the fixed 30-scene identity-gate sample drawn from it.
 
 (C) 2026 Oscar Olvera Neria. Released under the Creative Commons

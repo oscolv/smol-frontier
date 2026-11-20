@@ -4,6 +4,7 @@ The live gate run is the `smolf gate identity` CLI, never a pytest test.
 """
 
 import csv
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -365,3 +366,121 @@ def test_ingest_with_fallback_also_anomalous_raises(
     monkeypatch.setattr(gate_mod, "search_scenes", lambda *a, **k: [_es_scene()])
     with pytest.raises(AnomalousProduct, match="also anomalous"):
         ingest_with_fallback(_pc_scene())
+
+
+def test_reference_constants_name_both_series() -> None:
+    assert gate_mod.REFERENCE_CSV.name.endswith("v2026-11-19.csv")
+    assert gate_mod.BASELINE_REFERENCE_CSV.name.endswith("v2026-10-22.csv")
+
+
+def test_load_reference_reads_both_committed_files() -> None:
+    new = load_reference(gate_mod.REFERENCE_CSV)
+    old = load_reference(gate_mod.BASELINE_REFERENCE_CSV)
+    assert len(new) == 468
+    assert len(old) == 465
+    assert all(row.under_haze_ha is not None for row in new)
+    assert all(row.under_haze_ha is None for row in old)
+    assert load_reference()[0] == new[0]
+
+
+def test_committed_sample_items_exist_in_new_reference() -> None:
+    targets, errors = load_sample_targets(load_reference())
+    assert len(targets) == 30
+    assert errors == []
+
+
+def _stub_pipeline(monkeypatch: pytest.MonkeyPatch) -> list:
+    """Stub ingestion + classify; record the mirror passed to classify()."""
+    import numpy as np
+
+    seen: list = []
+    ing = SimpleNamespace(
+        scene=_es_scene(),
+        transform="T",
+        crs="C",
+        inside=np.zeros((4, 5), dtype=bool),
+    )
+    mirror = np.ones((4, 5), dtype=bool)
+    result = SimpleNamespace(
+        ha_per_class={
+            gate_mod.settings.CLASS_DENSE_HYACINTH: 1.0,
+            gate_mod.settings.CLASS_INTERFACE: 2.0,
+            gate_mod.settings.CLASS_WATER: 3.0,
+            gate_mod.settings.CLASS_BARE_SOIL: 4.0,
+        },
+        hyacinth_total_ha=3.0,
+        valid_fraction=0.9,
+    )
+
+    def fake_classify(scene, mirror=None):
+        seen.append(mirror)
+        return result
+
+    def fake_load_mirror(day, transform, crs, shape):
+        assert (day, transform, crs, shape) == (date(2026, 10, 27), "T", "C", (4, 5))
+        return mirror
+
+    monkeypatch.setattr(gate_mod, "ingest_with_fallback", lambda s: (ing, ""))
+    monkeypatch.setattr(gate_mod.pipeline, "classify", fake_classify)
+    monkeypatch.setattr(gate_mod, "load_day_mirror", fake_load_mirror)
+    monkeypatch.setattr(
+        gate_mod,
+        "assess_quality",
+        lambda r: SimpleNamespace(light="GOOD", regime=""),
+    )
+    monkeypatch.setattr(gate_mod, "resolve_scene", lambda d, i: (_es_scene(), ""))
+    return seen
+
+
+def test_measure_scene_passes_mirror_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _stub_pipeline(monkeypatch)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    row = gate_mod.measure_scene(target)
+    assert row.error == ""
+    assert len(seen) == 1
+    assert seen[0] is not None
+
+
+def test_measure_scene_baseline_passes_no_mirror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _stub_pipeline(monkeypatch)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("mirror must not be loaded with rescue off")
+
+    monkeypatch.setattr(gate_mod, "load_day_mirror", boom)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    row = gate_mod.measure_scene(target, rescue=False)
+    assert row.error == ""
+    assert seen == [None]
+
+
+def test_run_gate_threads_rescue_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _stub_pipeline(monkeypatch)
+    target = GateTarget(ref=_ref(date=date(2026, 10, 27)))
+    gate_mod.run_gate([target], workers=1, rescue=False)
+    gate_mod.run_gate([target], workers=1)
+    assert seen[0] is None
+    assert seen[1] is not None
+
+
+def test_render_summary_names_reference_and_mode() -> None:
+    rows = [_row(1.0)]
+    on = RunMeta(
+        timestamp="t",
+        mode="sample",
+        n_requested=1,
+        workers=1,
+        wall_seconds=1.0,
+        reference="serie_x_v2026-11-19.csv",
+        rescue=True,
+    )
+    off = replace(on, reference="serie_x_v2026-10-22.csv", rescue=False)
+    assert "reference: serie_x_v2026-11-19.csv" in render_summary(summarize(rows), on)
+    assert "haze rescue: on" in render_summary(summarize(rows), on)
+    text = render_summary(summarize(rows), off)
+    assert "reference: serie_x_v2026-10-22.csv" in text
+    assert "haze rescue: off" in text

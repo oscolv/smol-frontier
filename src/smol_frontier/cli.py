@@ -45,6 +45,7 @@ from smol_frontier.hydro.levels import (
     update_levels,
 )
 from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
+from smol_frontier.publish.export import export_publish
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     CatalogUnavailable,
@@ -64,6 +65,8 @@ gate_app = typer.Typer(help="Identity gate against the reference series.")
 app.add_typer(gate_app, name="gate")
 series_app = typer.Typer(help="Resumable hyacinth time series.")
 app.add_typer(series_app, name="series")
+export_app = typer.Typer(help="Downloadable files derived from a finished publish.")
+app.add_typer(export_app, name="export")
 
 
 @app.callback()
@@ -551,6 +554,36 @@ def publish(
         typer.echo(f"error: {_one_line(exc)}", err=True)
         raise typer.Exit(1)
     typer.echo(f"published: {out_dir / 'latest.json'}")
+
+
+@export_app.command("series-csv")
+def export_series_csv(
+    from_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--from", help="Publish directory to read (default: outputs/publish)."
+        ),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output directory (default: outputs/downloads)."),
+    ] = None,
+) -> None:
+    """Write series.csv, one row per scene of a finished publish's series.json.
+
+    Reads only the published contract: publish.json must validate, and
+    series.json and latest.json must hash to their publish.json entries,
+    pass their schemas and belong to the same run. Refuses (exit 2) any
+    failure, an --out that is a file, and an --out holding files the export
+    does not own; a refusal writes nothing. The output directory is replaced
+    atomically and the same publish gives byte-identical files.
+    """
+    try:
+        out_dir = export_publish(from_dir=from_dir, out_dir=out)
+    except PublishRefused as exc:
+        typer.echo(f"refused: {_one_line(exc)}", err=True)
+        raise typer.Exit(2)
+    typer.echo(f"exported: {out_dir}")
 
 
 if __name__ == "__main__":

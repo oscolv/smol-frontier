@@ -13,6 +13,7 @@ def test_resolvers_match_repo_layout(monkeypatch: pytest.MonkeyPatch) -> None:
     assert paths.cache_dir() == PROJECT_ROOT / "data/cache"
     assert paths.series_dir() == PROJECT_ROOT / "outputs/series"
     assert paths.publish_dir() == PROJECT_ROOT / "outputs/publish"
+    assert paths.downloads_dir() == PROJECT_ROOT / "outputs/downloads"
     assert paths.gate_dir() == PROJECT_ROOT / "outputs/identity_gate"
     assert paths.outputs_dir() == PROJECT_ROOT / "outputs"
     assert paths.levels_path() == PROJECT_ROOT / "data/hydro/ENDHD.csv"
@@ -23,6 +24,7 @@ def _under(root: Path) -> dict[str, Path]:
         "cache_dir": root / "cache",
         "series_dir": root / "outputs/series",
         "publish_dir": root / "outputs/publish",
+        "downloads_dir": root / "outputs/downloads",
         "gate_dir": root / "outputs/identity_gate",
         "outputs_dir": root / "outputs",
     }
@@ -35,6 +37,7 @@ def test_data_dir_unset_and_empty_keep_repo_layout(
         "cache_dir": PROJECT_ROOT / "data/cache",
         "series_dir": PROJECT_ROOT / "outputs/series",
         "publish_dir": PROJECT_ROOT / "outputs/publish",
+        "downloads_dir": PROJECT_ROOT / "outputs/downloads",
         "gate_dir": PROJECT_ROOT / "outputs/identity_gate",
         "outputs_dir": PROJECT_ROOT / "outputs",
     }

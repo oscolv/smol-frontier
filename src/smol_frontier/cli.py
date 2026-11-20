@@ -569,7 +569,11 @@ def export_series_csv(
         typer.Option("--out", help="Output directory (default: outputs/downloads)."),
     ] = None,
 ) -> None:
-    """Write series.csv, one row per scene of a finished publish's series.json.
+    """Write a finished publish's download bundle into one folder.
+
+    series.csv (one row per series.json scene), series_monthly.csv (the
+    monthly medians), README.txt (licence, citation, sources, provenance,
+    column dictionary) and SHA256SUMS (for `sha256sum -c`).
 
     Reads only the published contract: publish.json must validate, and
     series.json and latest.json must hash to their publish.json entries,

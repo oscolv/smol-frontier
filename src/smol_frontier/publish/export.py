@@ -1,7 +1,10 @@
 """Export: downloadable files derived from a finished publish.
 
 ``export_files`` is pure: the parsed ``series.json`` and ``latest.json``
-plus the ``series.json`` sha256 go in, ``{filename: bytes}`` comes out.
+plus the ``series.json`` sha256 go in, ``{filename: bytes}`` comes out:
+``series.csv`` (one row per scene), ``series_monthly.csv`` (the monthly
+medians), ``README.txt`` (licence, citation, sources, provenance, column
+dictionary) and ``SHA256SUMS`` over the other three.
 ``export_publish`` reads a publish directory, verifies it against its own
 integrity index and the packaged schemas, and swaps the files into the
 output directory by rename. It reads only the published contract: no
@@ -15,9 +18,11 @@ import io
 import json
 import shutil
 import tempfile
+import textwrap
 from pathlib import Path
+from typing import NamedTuple
 
-from smol_frontier import paths
+from smol_frontier import __version__, paths
 from smol_frontier.publish.documents import validate
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused
 from smol_frontier.publish.writer import (
@@ -32,7 +37,12 @@ from smol_frontier.publish.writer import (
 # WHY: allowlist — the only names `export` may ever write, and the only
 #   entries an existing ``--out`` may hold (anything else is someone else's
 #   data and is refused, never replaced). One set so later exports extend it.
-EXPORT_FILES = frozenset({"series.csv"})
+EXPORT_FILES = frozenset(
+    {"series.csv", "series_monthly.csv", "README.txt", "SHA256SUMS"}
+)
+
+# WHY: the files SHA256SUMS covers, in its (sorted) order; never itself.
+_SUMMED_FILES = ("README.txt", "series.csv", "series_monthly.csv")
 
 # WHY: every row says which run and which published file it came from, so a
 #   CSV copied out of its folder still traces back to the contract.
@@ -77,8 +87,12 @@ SCENE_COLUMNS = (
     "display_ha_interface",
 )
 
-# WHY: one header for every row, provenance first.
+# WHY: the fields of a series.json ``monthly`` entry, in the contract's order.
+MONTHLY_COLUMNS = ("month", "median_ha", "n_scenes")
+
+# WHY: one header per CSV, provenance first, so both files trace back alike.
 _SERIES_HEADER = (*PROVENANCE_COLUMNS, *SCENE_COLUMNS)
+_MONTHLY_HEADER = (*PROVENANCE_COLUMNS, *MONTHLY_COLUMNS)
 
 # WHY: the contract's display_ha parts, flattened as display_ha_<part>.
 _DISPLAY_HA_PARTS = ("total", "dense", "interface")
@@ -104,7 +118,166 @@ _DECIMALS = {
     "display_ha_total": 0,
     "display_ha_dense": 0,
     "display_ha_interface": 0,
+    "median_ha": 2,
 }
+
+
+class ColumnDoc(NamedTuple):
+    """One README dictionary entry: unit, meaning and when the cell is empty."""
+
+    unit: str
+    meaning: str
+    empty_when: str
+
+
+_POOR = "POOR scene"
+_POOR_OR_NO_BED = "POOR scene, or bed_applied false"
+
+# WHY: the README's column dictionary, one entry per column of either CSV
+#   (a test fails on a missing or extra entry). Meanings follow the per-scene
+#   and monthly tables of docs/contract.md, worded for a reader who has only
+#   the downloaded folder.
+COLUMN_DICTIONARY: dict[str, ColumnDoc] = {
+    "run_id": ColumnDoc("none", "Id of the series run the row comes from.", "never"),
+    "series_sha256": ColumnDoc(
+        "none",
+        "sha256 of the run's internal series.csv (the series id); not the hash "
+        "of the series.csv in this folder.",
+        "never",
+    ),
+    "series_json_sha256": ColumnDoc(
+        "none", "sha256 of the published series.json this file was made from.", "never"
+    ),
+    "schema_version": ColumnDoc(
+        "none", "Contract schema version of that series.json.", "never"
+    ),
+    "smolf_version": ColumnDoc(
+        "none",
+        "smolf version that published that series.json (not the exporter).",
+        "never",
+    ),
+    "date": ColumnDoc("YYYY-MM-DD", "UTC acquisition date.", "never"),
+    "item_id": ColumnDoc("none", "Exact STAC item id of the scene used.", "never"),
+    "quality_light": ColumnDoc(
+        "none", "Scene quality light: GOOD, DOUBTFUL or POOR.", "never"
+    ),
+    "regime": ColumnDoc(
+        "none", "Optical regime of the scene: CLEAN, EXPOSED_BED or TURBIDITY.", _POOR
+    ),
+    "valid_frac": ColumnDoc(
+        "fraction 0-1",
+        "Visible (cloud-free, observed) fraction of the reservoir.",
+        "never",
+    ),
+    "cloud_frac": ColumnDoc(
+        "fraction 0-1", "Clouded fraction of the reservoir.", _POOR
+    ),
+    "dense_ha": ColumnDoc("ha", "Dense hyacinth, raw.", _POOR),
+    "interface_ha": ColumnDoc(
+        "ha", "Interface hyacinth (mat edge / sparse cover), raw.", _POOR
+    ),
+    "hyacinth_raw_ha": ColumnDoc(
+        "ha", "Dense + interface, before the exposed-bed correction.", _POOR
+    ),
+    "hyacinth_under_haze_ha": ColumnDoc(
+        "ha",
+        "Part of hyacinth_raw_ha seen through thin haze inside the day's water "
+        "mirror and rescued by the classifier's second pass; raw. 0 when nothing "
+        "was rescued or the exposed-bed correction was not applied.",
+        _POOR,
+    ),
+    "pct_reservoir_raw": ColumnDoc(
+        "% 0-100", "hyacinth_raw_ha over the reservoir area.", _POOR
+    ),
+    "bed_applied": ColumnDoc(
+        "true/false", "Whether the exposed-bed correction was applied.", _POOR
+    ),
+    "bed_reason": ColumnDoc(
+        "none",
+        "Why the correction was not applied (e.g. no SIH level for the day).",
+        "POOR scene, or the correction was applied",
+    ),
+    "level_m": ColumnDoc(
+        "m a.s.l.",
+        "Water level of the scene day used by the correction.",
+        "POOR scene, or no level for the day",
+    ),
+    "removed_ha": ColumnDoc(
+        "ha",
+        "Hyacinth removed by the correction (on the exposed bed).",
+        _POOR_OR_NO_BED,
+    ),
+    "dense_corrected_ha": ColumnDoc(
+        "ha", "Dense hyacinth after the correction.", _POOR_OR_NO_BED
+    ),
+    "interface_corrected_ha": ColumnDoc(
+        "ha", "Interface hyacinth after the correction.", _POOR_OR_NO_BED
+    ),
+    "hyacinth_corrected_ha": ColumnDoc(
+        "ha",
+        "Total hyacinth after the correction; the public figure.",
+        _POOR_OR_NO_BED,
+    ),
+    "pct_reservoir_corrected": ColumnDoc(
+        "% 0-100",
+        "hyacinth_corrected_ha over the reservoir area; the public percentage.",
+        _POOR_OR_NO_BED,
+    ),
+    "cover_band": ColumnDoc(
+        "none",
+        "Management band of pct_reservoir_corrected: GREEN below green_max_pct, "
+        "YELLOW from it to below red_min_pct, RED at or above red_min_pct.",
+        _POOR_OR_NO_BED,
+    ),
+    "display_status": ColumnDoc(
+        "none",
+        "Display gate: HIDDEN when quality_light is not GOOD or "
+        "hyacinth_corrected_ha is empty; LOWER_BOUND when valid_frac is below "
+        "frac_publishable (read the figures as 'at least'); FULL otherwise.",
+        "never",
+    ),
+    "display_ha_total": ColumnDoc(
+        "ha (whole)", "hyacinth_corrected_ha rounded half up.", _POOR_OR_NO_BED
+    ),
+    "display_ha_dense": ColumnDoc(
+        "ha (whole)",
+        "dense_corrected_ha apportioned to whole hectares.",
+        _POOR_OR_NO_BED,
+    ),
+    "display_ha_interface": ColumnDoc(
+        "ha (whole)",
+        "interface_corrected_ha apportioned to whole hectares; "
+        "display_ha_dense + display_ha_interface = display_ha_total.",
+        _POOR_OR_NO_BED,
+    ),
+    "month": ColumnDoc(
+        "YYYY-MM",
+        "Calendar month (UTC dates); every month from the first to the last "
+        "scene month, none skipped.",
+        "never",
+    ),
+    "median_ha": ColumnDoc(
+        "ha",
+        "Ordinary median (mean of the two middle values when the count is even) "
+        "of the month's hyacinth_corrected_ha over its FULL and LOWER_BOUND "
+        "scenes.",
+        "n_scenes is 0",
+    ),
+    "n_scenes": ColumnDoc(
+        "count",
+        "The month's scenes with display_status FULL or LOWER_BOUND.",
+        "never",
+    ),
+}
+
+# WHY: the README's fixed texts. Copyright holder and licence of the data
+#   (the code stays MIT), worded like tests/reference/LICENSE.
+_TITLE = "Water hyacinth on Endho Reservoir: Sentinel-2 series"
+_HOLDER = "Oscar Olvera Neria"
+_LICENCE_URL = "https://creativecommons.org/licenses/by/4.0/"
+_REPOSITORY = "https://github.com/oscolv/smol-frontier"
+# WHY 79: plain text read in a terminal or a viewer without wrapping.
+_WIDTH = 79
 
 # WHY: the two published documents the export reads; maps and photos never.
 _SOURCES = ("series.json", "latest.json")
@@ -155,6 +328,170 @@ def _require_same_run(
             raise PublishRefused(msg)
 
 
+def _provenance(
+    series_doc: dict[str, object], series_json_sha256: str
+) -> dict[str, object]:
+    """The provenance cells every row of both CSVs carries."""
+    return {
+        "run_id": series_doc["run_id"],
+        "series_sha256": series_doc["series_sha256"],
+        "series_json_sha256": series_json_sha256,
+        "schema_version": series_doc["schema_version"],
+        "smolf_version": series_doc["smolf_version"],
+    }
+
+
+def _table(
+    header: tuple[str, ...],
+    provenance: dict[str, object],
+    entries: list[dict[str, object]],
+) -> bytes:
+    """A CSV of ``entries`` under ``header``, provenance on every row."""
+    rows = []
+    for entry in entries:
+        values = {**provenance, **entry}
+        rows.append([_cell(column, values[column]) for column in header])
+    return _csv_bytes(header, rows)
+
+
+def _section(title: str, body: str) -> str:
+    """A README section: the title underlined with '=', then its body."""
+    return f"{title}\n{'=' * len(title)}\n\n{body.rstrip()}\n"
+
+
+def _wrap(text: str, indent: str = "", hanging: str | None = None) -> str:
+    """``text`` filled to the README width; ``hanging`` indents later lines."""
+    rest = indent if hanging is None else hanging
+    # WHY no hyphen breaks: a URL split at "smol-" no longer works when copied.
+    return textwrap.fill(
+        text,
+        _WIDTH,
+        initial_indent=indent,
+        subsequent_indent=rest,
+        break_on_hyphens=False,
+    )
+
+
+def _years(series_doc: dict[str, object], latest_date: str) -> str:
+    """The span of scene years, ``2017-2026`` (or one year)."""
+    years = sorted({latest_date[:4], *(s["date"][:4] for s in series_doc["scenes"])})
+    return years[0] if len(years) == 1 else f"{years[0]}-{years[-1]}"
+
+
+def _dictionary(name: str, what: str, columns: tuple[str, ...]) -> str:
+    heading = f"{name} ({what})"
+    entries = [f"{heading}\n{'-' * len(heading)}"]
+    for column in columns:
+        doc = COLUMN_DICTIONARY[column]
+        entries.append(
+            f"  {column}\n"
+            + _wrap(f"Unit: {doc.unit}. Empty when: {doc.empty_when}.", " " * 6)
+            + "\n"
+            + _wrap(doc.meaning, " " * 6)
+        )
+    return "\n\n".join(entries)
+
+
+def _readme(
+    series_doc: dict[str, object],
+    latest_doc: dict[str, object],
+    series_json_sha256: str,
+) -> bytes:
+    """README.txt: licence, citation, sources, provenance, column dictionary.
+
+    WHY the year from the latest scene: no wall clock, so the same publish
+    always gives the same bytes.
+    """
+    run_id = series_doc["run_id"]
+    year = latest_doc["date"][:4]
+    description = _wrap(
+        "Floating water hyacinth cover on Endho Reservoir (Hidalgo, Mexico), "
+        "classified from Sentinel-2 L2A scenes by smolf, with the exposed-bed "
+        "correction behind the public figure. series.csv has one row per scene "
+        "of the run (POOR scenes included, with empty figure cells); "
+        "series_monthly.csv has the monthly median of the corrected hectares. "
+        "To check the files, run `sha256sum -c SHA256SUMS` in this folder."
+    )
+    licence = (
+        _wrap(
+            f"(C) {year} {_HOLDER}. Released under the Creative Commons "
+            "Attribution 4.0 International license (CC BY 4.0):"
+        )
+        + f"\n\n    {_LICENCE_URL}\n\n"
+        + _wrap(
+            "You may share and adapt this data, including for commercial "
+            "purposes, as long as you give appropriate credit. When you publish "
+            "results derived from it, please cite the series as suggested below."
+        )
+        + "\n\n"
+        + _wrap(
+            "This license covers only the data in this folder. The smolf code "
+            "that produced it stays under the MIT License."
+        )
+    )
+    citation = _wrap(
+        f"{_HOLDER} ({year}). {_TITLE}, run {run_id}. smolf. {_REPOSITORY}"
+    )
+    copernicus = (
+        "Contains modified Copernicus Sentinel data "
+        f"{_years(series_doc, latest_doc['date'])} (Sentinel-2 L2A)."
+    )
+    sih = (
+        "Water levels: Mexico's national hydrometric information system (SIH), "
+        "station ENDHD."
+    )
+    gsw = (
+        "Reservoir polygon: JRC Global Surface Water v1.4 (occurrence >= 25%, "
+        "1984-2021; Pekel et al., 2016)."
+    )
+    sources = "\n".join(_wrap(line, "- ", "  ") for line in (copernicus, sih, gsw))
+    constants = latest_doc["constants"]
+    provenance = "\n".join(
+        [
+            f"run_id: {run_id}",
+            f"series_sha256: {series_doc['series_sha256']}",
+            "  The hash of the run's internal series.csv (the series id),",
+            "  not the hash of the series.csv in this folder.",
+            f"series.json sha256: {series_json_sha256}",
+            f"schema_version: {series_doc['schema_version']}",
+            f"contract smolf_version: {series_doc['smolf_version']}",
+            f"exported by smolf: {__version__}",
+            f"reservoir_area_ha: {latest_doc['reservoir_area_ha']:.2f}",
+            "constants:",
+            *(f"  {key}: {constants[key]}" for key in sorted(constants)),
+        ]
+    )
+    dictionary = "\n\n".join(
+        [
+            _dictionary("series.csv", "one row per scene", _SERIES_HEADER),
+            _dictionary("series_monthly.csv", "one row per month", _MONTHLY_HEADER),
+        ]
+    )
+    pointer = _wrap(
+        "The full field definitions, with the quality gates and the rounding "
+        f"rules, are in docs/contract.md of the smolf repository ({_REPOSITORY})."
+        " These files are derived from the contract but are not part of it."
+    )
+    sections = [
+        _section(_TITLE, description),
+        _section("Licence", licence),
+        _section("Suggested citation", citation),
+        _section("Sources", sources),
+        _section("Provenance", provenance),
+        _section("Column dictionary", dictionary),
+        _section("Full definitions", pointer),
+    ]
+    return "\n".join(sections).encode("ascii")
+
+
+def _sha256sums(files: dict[str, bytes]) -> bytes:
+    """``sha256sum -c`` lines (``<hex>  <name>``) for the summed files."""
+    lines = [
+        f"{hashlib.sha256(files[name]).hexdigest()}  {name}\n" for name in _SUMMED_FILES
+    ]
+    return "".join(lines).encode("ascii")
+
+
 def export_files(
     series_doc: dict[str, object],
     latest_doc: dict[str, object],
@@ -163,22 +500,24 @@ def export_files(
     """The export files, by name, of one publish's parsed documents.
 
     ``series.csv`` has one row per ``series.json`` scene, in its order, POOR
-    scenes included, each with the provenance columns. Raises PublishRefused
-    when ``latest_doc`` belongs to another run. Deterministic: no clock.
+    scenes included; ``series_monthly.csv`` one row per ``monthly`` entry.
+    Both carry the provenance columns. ``latest_doc`` supplies only the
+    README's year, ``reservoir_area_ha`` and ``constants``. Raises
+    PublishRefused when ``latest_doc`` belongs to another run.
+    Deterministic: no clock.
     """
     _require_same_run(series_doc, latest_doc, "latest.json")
-    provenance = {
-        "run_id": series_doc["run_id"],
-        "series_sha256": series_doc["series_sha256"],
-        "series_json_sha256": series_json_sha256,
-        "schema_version": series_doc["schema_version"],
-        "smolf_version": series_doc["smolf_version"],
+    provenance = _provenance(series_doc, series_json_sha256)
+    scenes = [_scene_values(scene) for scene in series_doc["scenes"]]
+    files = {
+        "series.csv": _table(_SERIES_HEADER, provenance, scenes),
+        "series_monthly.csv": _table(
+            _MONTHLY_HEADER, provenance, series_doc["monthly"]
+        ),
+        "README.txt": _readme(series_doc, latest_doc, series_json_sha256),
     }
-    rows = []
-    for scene in series_doc["scenes"]:
-        values = {**provenance, **_scene_values(scene)}
-        rows.append([_cell(column, values[column]) for column in _SERIES_HEADER])
-    return {"series.csv": _csv_bytes(_SERIES_HEADER, rows)}
+    files["SHA256SUMS"] = _sha256sums(files)
+    return files
 
 
 def _read_json(path: Path) -> tuple[bytes, object]:
@@ -269,9 +608,15 @@ def write_export(out_dir: Path, files: dict[str, bytes], given: Path) -> None:
         if name not in EXPORT_FILES:
             msg = f"refusing to export a file outside the allowlist: {name}"
             raise ValueError(msg)
-    _restore_previous(out_dir)  # a crash mid-swap may have left the old one
-    _drop_stale_staging(out_dir)
+    # WHY this order, as publish's ``_recover_out_dir`` + ``check_out_dir``:
+    #   a lone ``.previous-*`` must be back before the check, or a crash
+    #   mid-swap would read as a missing ``--out`` and lose the old export
+    #   (restoring only renames, so a refusal after it loses nothing). The
+    #   refusal checks then run before anything is deleted: stale staging is
+    #   dropped only once ``--out`` is known to be the export's own.
+    _restore_previous(out_dir)
     _check_export_dir(out_dir, given)
+    _drop_stale_staging(out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(prefix=_staging_prefix(out_dir.name), dir=out_dir.parent)

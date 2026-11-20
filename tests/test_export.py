@@ -1,4 +1,4 @@
-"""`smolf export series-csv`: a verified series.csv from a finished publish.
+"""`smolf export series-csv`: a verified download bundle from a finished publish.
 
 The main seam is the CLI end to end over a synthetic publish directory in
 tmp_path, built from real `series_document`/`latest_document` output and a
@@ -9,6 +9,7 @@ rare rows (POOR, bed not applied, a quoted reason, fixed decimals).
 import csv
 import hashlib
 import io
+import itertools
 import json
 import re
 from importlib import resources
@@ -17,6 +18,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import smol_frontier
 from smol_frontier import paths, publish
 from smol_frontier.cli import app
 from smol_frontier.publish import export
@@ -296,15 +298,13 @@ def test_series_csv_dialect(pub: Path, tmp_path: Path) -> None:
     assert '"no SIH level for the day, correction skipped"' in data.decode()
 
 
-def test_series_csv_is_the_only_file_and_byte_identical(
-    pub: Path, tmp_path: Path
-) -> None:
+def test_export_writes_the_bundle_byte_identically(pub: Path, tmp_path: Path) -> None:
     out = tmp_path / "downloads"
     assert _export(pub, out).exit_code == 0
-    first = (out / "series.csv").read_bytes()
+    first = {p.name: p.read_bytes() for p in out.iterdir()}
     assert _export(pub, out).exit_code == 0
-    assert [p.name for p in out.iterdir()] == ["series.csv"]
-    assert (out / "series.csv").read_bytes() == first
+    assert sorted(p.name for p in out.iterdir()) == sorted(export.EXPORT_FILES)
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == first
     assert sorted(p.name for p in tmp_path.iterdir()) == [
         "ENDHD.csv",
         "downloads",
@@ -398,7 +398,13 @@ def _latest_other_series(pub: Path, levels: Path) -> None:
         (_series_missing, "series.json"),
         (_series_not_indexed, "series.json"),
         (_series_schema_invalid, "series.json"),
-        (_latest_other_run, "run"),
+        (
+            _latest_other_run,
+            (
+                "latest.json does not belong to the run of series.json "
+                f"(run_id: 20230101T000000 != {RUN_ID})"
+            ),
+        ),
         (_latest_other_series, "series_sha256"),
     ],
     ids=[
@@ -461,8 +467,46 @@ def test_export_refuses_out_holding_a_foreign_file(
     ]
 
 
-def test_export_allowlist_is_series_csv_only() -> None:
-    assert frozenset({"series.csv"}) == export.EXPORT_FILES
+def test_export_allowlist_is_the_four_bundle_files() -> None:
+    assert export.EXPORT_FILES == frozenset(
+        {"series.csv", "series_monthly.csv", "README.txt", "SHA256SUMS"}
+    )
+
+
+def test_refused_export_leaves_stale_staging_alone(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    out.mkdir()
+    (out / "notes.txt").write_text("keep me", encoding="utf-8")
+    stale = tmp_path / ".downloads.staging-abc123"
+    stale.mkdir()
+    (stale / "series.csv").write_text("half", encoding="utf-8")
+    result = _export(pub, out)
+    assert result.exit_code == 2
+    assert "notes.txt" in result.stderr
+    assert (stale / "series.csv").read_text(encoding="utf-8") == "half"
+
+
+def test_export_drops_stale_staging_on_success(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    stale = tmp_path / ".downloads.staging-abc123"
+    stale.mkdir()
+    (stale / "series.csv").write_text("half", encoding="utf-8")
+    assert _export(pub, out).exit_code == 0
+    assert not stale.exists()
+
+
+def test_export_restores_a_lone_previous_before_checking(
+    pub: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "downloads"
+    previous = tmp_path / ".downloads.previous-.downloads.staging-abc123"
+    previous.mkdir()
+    (previous / "notes.txt").write_text("keep me", encoding="utf-8")
+    result = _export(pub, out)
+    assert result.exit_code == 2
+    assert "notes.txt" in result.stderr
+    assert (out / "notes.txt").read_text(encoding="utf-8") == "keep me"
+    assert not previous.exists()
 
 
 # --- pure function: the rare rows ------------------------------------------------
@@ -543,20 +587,42 @@ _NO_BED = {
 }
 
 
-def _pure(*scenes: dict) -> list[dict[str, str]]:
+# The fields of latest.json the export reads (besides the run identity).
+_PURE_LATEST = {
+    "run_id": RUN_ID,
+    "series_sha256": SERIES_SHA,
+    "date": "2031-03-04",
+    "reservoir_area_ha": 1261.75,
+    "constants": {
+        "frac_publishable": 0.95,
+        "green_max_pct": 30.0,
+        "red_min_pct": 50.0,
+        "green_max_ha": 378.53,
+        "red_min_ha": 630.88,
+    },
+}
+
+
+def _pure_files(*scenes: dict, monthly: list | None = None) -> dict[str, bytes]:
     document = {
         "schema_version": "3.3.0",
         "smolf_version": "0.8.1",
         "run_id": RUN_ID,
         "series_sha256": SERIES_SHA,
         "scenes": list(scenes),
-        "monthly": [],
+        "monthly": monthly or [],
     }
-    latest = {"run_id": RUN_ID, "series_sha256": SERIES_SHA}
-    files = export.export_files(document, latest, "ab" * 32)
-    assert set(files) == {"series.csv"}
-    text = files["series.csv"].decode("utf-8")
-    return list(csv.DictReader(io.StringIO(text, newline="")))
+    files = export.export_files(document, _PURE_LATEST, "ab" * 32)
+    assert set(files) == export.EXPORT_FILES
+    return files
+
+
+def _csv_rows(data: bytes) -> list[dict[str, str]]:
+    return list(csv.DictReader(io.StringIO(data.decode("utf-8"), newline="")))
+
+
+def _pure(*scenes: dict) -> list[dict[str, str]]:
+    return _csv_rows(_pure_files(*scenes)["series.csv"])
 
 
 def test_pure_fixed_decimals() -> None:
@@ -603,18 +669,7 @@ def test_pure_bed_not_applied_row() -> None:
 
 
 def test_pure_quotes_a_reason_with_a_comma_rfc4180() -> None:
-    files = export.export_files(
-        {
-            "schema_version": "3.3.0",
-            "smolf_version": "0.8.1",
-            "run_id": RUN_ID,
-            "series_sha256": SERIES_SHA,
-            "scenes": [_scene(**_NO_BED)],
-            "monthly": [],
-        },
-        {"run_id": RUN_ID, "series_sha256": SERIES_SHA},
-        "ab" * 32,
-    )
+    files = _pure_files(_scene(**_NO_BED))
     assert b',"no level, ""SIH"" gap",' in files["series.csv"]
     assert b'"' not in files["series.csv"].split(b"\n")[0]
 
@@ -632,3 +687,147 @@ def test_pure_refuses_latest_from_another_run() -> None:
         export.export_files(
             document, {"run_id": "other", "series_sha256": SERIES_SHA}, "ab" * 32
         )
+
+
+def test_pure_monthly_empty_month_has_empty_median() -> None:
+    files = _pure_files(
+        _scene(date="2024-01-09"),
+        _scene(date="2024-03-02"),
+        monthly=[
+            {"month": "2024-01", "median_ha": 15.7, "n_scenes": 1},
+            {"month": "2024-02", "median_ha": None, "n_scenes": 0},
+            {"month": "2024-03", "median_ha": 0, "n_scenes": 1},
+        ],
+    )
+    rows = _csv_rows(files["series_monthly.csv"])
+    assert [(r["month"], r["median_ha"], r["n_scenes"]) for r in rows] == [
+        ("2024-01", "15.70", "1"),
+        ("2024-02", "", "0"),
+        ("2024-03", "0.00", "1"),
+    ]
+    for row in rows:
+        assert row["series_json_sha256"] == "ab" * 32
+        assert row["run_id"] == RUN_ID
+
+
+def test_pure_readme_year_comes_from_the_latest_scene() -> None:
+    readme = _pure_files(_scene())["README.txt"].decode("ascii")
+    assert "(C) 2031 Oscar Olvera Neria" in readme
+    assert "Copernicus Sentinel data 2024" in readme
+
+
+# --- monthly CSV, README, SHA256SUMS (CLI end to end) -------------------------
+
+
+def test_series_monthly_csv_matches_series_json(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    data = (out / "series_monthly.csv").read_bytes()
+    assert not data.startswith(b"\xef\xbb\xbf")
+    assert b"\r" not in data
+    assert data.endswith(b"\n")
+    header = data.split(b"\n", 1)[0].decode("ascii").split(",")
+    assert header == [*export.PROVENANCE_COLUMNS, "month", "median_ha", "n_scenes"]
+    document = _series(pub)
+    json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
+    rows = _csv_rows(data)
+    assert len(rows) == len(document["monthly"]) >= 1
+    for row, month in zip(rows, document["monthly"], strict=True):
+        assert row["month"] == month["month"]
+        assert float(row["median_ha"]) == month["median_ha"]
+        assert re.fullmatch(r"\d+\.\d\d", row["median_ha"])
+        assert int(row["n_scenes"]) == month["n_scenes"]
+        assert row["run_id"] == RUN_ID
+        assert row["series_sha256"] == SERIES_SHA
+        assert row["series_json_sha256"] == json_sha
+        assert row["schema_version"] == document["schema_version"]
+        assert row["smolf_version"] == document["smolf_version"]
+
+
+def test_column_dictionary_covers_every_column_of_both_csvs(
+    pub: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    columns = set()
+    for name in ("series.csv", "series_monthly.csv"):
+        header = (out / name).read_bytes().split(b"\n", 1)[0].decode("ascii")
+        columns.update(header.split(","))
+    assert set(export.COLUMN_DICTIONARY) == columns
+    for name, entry in export.COLUMN_DICTIONARY.items():
+        assert entry.unit and entry.meaning and entry.empty_when, name
+
+
+def _sections(readme: str) -> list[str]:
+    """Section titles: a line followed by a line of '=' of the same length."""
+    lines = readme.splitlines()
+    return [
+        line
+        for line, rule in itertools.pairwise(lines)
+        if line and rule == "=" * len(line)
+    ]
+
+
+def test_readme_sections_in_order_with_provenance(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    readme = (out / "README.txt").read_bytes().decode("ascii")
+    assert "\r" not in readme
+    assert _sections(readme) == [
+        "Water hyacinth on Endho Reservoir: Sentinel-2 series",
+        "Licence",
+        "Suggested citation",
+        "Sources",
+        "Provenance",
+        "Column dictionary",
+        "Full definitions",
+    ]
+    document = _series(pub)
+    latest = json.loads((pub / "latest.json").read_text(encoding="utf-8"))
+    json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
+    year = latest["date"][:4]
+    assert f"(C) {year} Oscar Olvera Neria" in readme
+    assert "CC BY 4.0" in readme
+    assert "https://creativecommons.org/licenses/by/4.0/" in readme
+    assert "appropriate credit" in readme
+    citation = readme.split("Suggested citation", 1)[1].split("Sources", 1)[0]
+    assert RUN_ID in citation
+    assert "https://github.com/oscolv/smol-frontier" in citation
+    sources = readme.split("\nSources\n", 1)[1].split("\nProvenance\n", 1)[0]
+    assert "modified Copernicus Sentinel data" in sources
+    assert "SIH" in sources
+    assert "JRC Global Surface Water v1.4" in sources
+    provenance = readme.split("\nProvenance\n", 1)[1].split("\nColumn dictionary", 1)[0]
+    assert f"run_id: {RUN_ID}" in provenance
+    assert f"series_sha256: {SERIES_SHA}" in provenance
+    assert "internal series.csv" in provenance
+    assert "not the hash of the series.csv in this folder" in provenance
+    assert f"series.json sha256: {json_sha}" in provenance
+    assert f"schema_version: {document['schema_version']}" in provenance
+    assert f"contract smolf_version: {document['smolf_version']}" in provenance
+    assert f"exported by smolf: {smol_frontier.__version__}" in provenance
+    assert f"reservoir_area_ha: {latest['reservoir_area_ha']:.2f}" in provenance
+    for key, value in latest["constants"].items():
+        assert f"{key}: {value}" in provenance
+    dictionary = readme.split("\nColumn dictionary", 1)[1]
+    for column in export.COLUMN_DICTIONARY:
+        assert re.search(rf"^  {column}$", dictionary, re.MULTILINE), column
+    pointer = readme.split("\nFull definitions\n", 1)[1]
+    assert "docs/contract.md" in pointer
+    assert "https://github.com/oscolv/smol-frontier" in pointer
+    # Hashes are never wrapped; every other line fits a terminal.
+    for line in readme.splitlines():
+        assert len(line) <= 79 or re.search(r"[0-9a-f]{64}$", line), line
+
+
+def test_sha256sums_verify_the_bundle(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    text = (out / "SHA256SUMS").read_bytes().decode("ascii")
+    assert text.endswith("\n")
+    lines = text.splitlines()
+    names = [line.split("  ", 1)[1] for line in lines]
+    assert names == sorted(["README.txt", "series.csv", "series_monthly.csv"])
+    for line in lines:
+        digest, name = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line).groups()
+        assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest

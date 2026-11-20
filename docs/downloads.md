@@ -50,7 +50,7 @@ stdout.
 ```text
 series.csv           one row per series.json scene, in its order
 series_monthly.csv   one row per series.json `monthly` entry
-README.txt           licence, citation, sources, provenance, column dictionary
+README.txt           licence, disclaimer, citation, sources, provenance, column dictionary
 SHA256SUMS           sha256 of the three files above
 ```
 
@@ -67,7 +67,8 @@ read (the README's copyright year is the latest scene's year).
 
 ## Columns
 
-Both CSVs start with the five provenance columns, then their own:
+Both CSVs start with the five provenance columns and the two rights
+columns, then their own:
 
 - `series.csv`: the per-scene fields of the contract, in the order of
   its per-scene table, with the `display_ha` object flattened in place
@@ -103,15 +104,27 @@ out of its folder still traces back to the publish:
 version (`exported by smolf:`), `reservoir_area_ha` and the published
 constants.
 
+### Rights columns
+
+Every row also carries the licence, so a CSV or a single row copied
+without `README.txt` still says how it may be reused and whom to credit:
+
+| Column | Value |
+| --- | --- |
+| `license` | `CC-BY-4.0` (SPDX id). |
+| `rights_holder` | `Oscar Olvera Neria (UAM Azcapotzalco)`. |
+
 **Name clash.** `series_sha256` keeps its contract meaning: the hash of
 the series run's internal `series.csv`. It is **not** the hash of the
 `series.csv` in the bundle; that one is in `SHA256SUMS`.
 
 ## Licence
 
-The data in the bundle is released under CC BY 4.0, with the copyright
-year of the latest scene; the smolf code stays under the MIT License.
-`README.txt` states the licence, a suggested citation (naming the
+The data in the bundle is released under CC BY 4.0, held by Oscar
+Olvera Neria (UAM Azcapotzalco), with the copyright year of the latest
+scene; the smolf code stays under the MIT License. `README.txt` states
+the licence, a disclaimer (remote-sensing estimates, not an official
+measurement, no warranty), a suggested citation (naming the
 `run_id`) and the attributions: modified Copernicus Sentinel data
 (Sentinel-2 L2A) for the scene years, the SIH water levels (station
 ENDHD), and JRC Global Surface Water v1.4 for the reservoir polygon.

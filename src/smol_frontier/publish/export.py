@@ -56,6 +56,13 @@ PROVENANCE_COLUMNS = (
     "smolf_version",
 )
 
+# WHY: the licence travels with every row, so a CSV (or a row) copied out of
+#   its folder without README.txt still says how it may be reused and whom
+#   to credit. SPDX id for the licence; holder with affiliation.
+RIGHTS_COLUMNS = ("license", "rights_holder")
+_LICENCE_SPDX = "CC-BY-4.0"
+_HOLDER = "Oscar Olvera Neria (UAM Azcapotzalco)"
+
 # WHY: the per-scene fields in the order of the per-scene table of
 #   docs/contract.md (tests check both the order and that the set equals the
 #   packaged per-scene schema), with the display_ha object flattened in
@@ -91,8 +98,8 @@ SCENE_COLUMNS = (
 MONTHLY_COLUMNS = ("month", "median_ha", "n_scenes")
 
 # WHY: one header per CSV, provenance first, so both files trace back alike.
-_SERIES_HEADER = (*PROVENANCE_COLUMNS, *SCENE_COLUMNS)
-_MONTHLY_HEADER = (*PROVENANCE_COLUMNS, *MONTHLY_COLUMNS)
+_SERIES_HEADER = (*PROVENANCE_COLUMNS, *RIGHTS_COLUMNS, *SCENE_COLUMNS)
+_MONTHLY_HEADER = (*PROVENANCE_COLUMNS, *RIGHTS_COLUMNS, *MONTHLY_COLUMNS)
 
 # WHY: the contract's display_ha parts, flattened as display_ha_<part>.
 _DISPLAY_HA_PARTS = ("total", "dense", "interface")
@@ -155,6 +162,14 @@ COLUMN_DICTIONARY: dict[str, ColumnDoc] = {
         "none",
         "smolf version that published that series.json (not the exporter).",
         "never",
+    ),
+    "license": ColumnDoc(
+        "none",
+        "SPDX id of the data licence (CC BY 4.0); see README.txt.",
+        "never",
+    ),
+    "rights_holder": ColumnDoc(
+        "none", "Copyright holder of the data, to credit on reuse.", "never"
     ),
     "date": ColumnDoc("YYYY-MM-DD", "UTC acquisition date.", "never"),
     "item_id": ColumnDoc("none", "Exact STAC item id of the scene used.", "never"),
@@ -273,7 +288,6 @@ COLUMN_DICTIONARY: dict[str, ColumnDoc] = {
 # WHY: the README's fixed texts. Copyright holder and licence of the data
 #   (the code stays MIT), worded like tests/reference/LICENSE.
 _TITLE = "Water hyacinth on Endho Reservoir: Sentinel-2 series"
-_HOLDER = "Oscar Olvera Neria"
 _LICENCE_URL = "https://creativecommons.org/licenses/by/4.0/"
 _REPOSITORY = "https://github.com/oscolv/smol-frontier"
 # WHY 79: plain text read in a terminal or a viewer without wrapping.
@@ -331,13 +345,15 @@ def _require_same_run(
 def _provenance(
     series_doc: dict[str, object], series_json_sha256: str
 ) -> dict[str, object]:
-    """The provenance cells every row of both CSVs carries."""
+    """The provenance and rights cells every row of both CSVs carries."""
     return {
         "run_id": series_doc["run_id"],
         "series_sha256": series_doc["series_sha256"],
         "series_json_sha256": series_json_sha256,
         "schema_version": series_doc["schema_version"],
         "smolf_version": series_doc["smolf_version"],
+        "license": _LICENCE_SPDX,
+        "rights_holder": _HOLDER,
     }
 
 
@@ -429,6 +445,13 @@ def _readme(
             "that produced it stays under the MIT License."
         )
     )
+    disclaimer = _wrap(
+        "These figures are remote-sensing estimates computed by smolf from "
+        "satellite imagery and published water levels. They are not an "
+        "official measurement and do not replace data from CONAGUA or other "
+        "authorities. The data is provided as is, without warranty of any "
+        "kind (CC BY 4.0, section 5)."
+    )
     citation = _wrap(
         f"{_HOLDER} ({year}). {_TITLE}, run {run_id}. smolf. {_REPOSITORY}"
     )
@@ -475,6 +498,7 @@ def _readme(
     sections = [
         _section(_TITLE, description),
         _section("Licence", licence),
+        _section("Disclaimer", disclaimer),
         _section("Suggested citation", citation),
         _section("Sources", sources),
         _section("Provenance", provenance),

@@ -232,14 +232,16 @@ def test_series_csv_header_is_provenance_then_scene_fields(
     out = tmp_path / "downloads"
     assert _export(pub, out).exit_code == 0
     header = (out / "series.csv").read_bytes().split(b"\n", 1)[0].decode()
-    assert header.split(",")[:5] == [
+    assert header.split(",")[:7] == [
         "run_id",
         "series_sha256",
         "series_json_sha256",
         "schema_version",
         "smolf_version",
+        "license",
+        "rights_holder",
     ]
-    assert tuple(header.split(",")[5:]) == export.SCENE_COLUMNS
+    assert tuple(header.split(",")[7:]) == export.SCENE_COLUMNS
     assert "display_ha_total,display_ha_dense,display_ha_interface" in header
 
 
@@ -268,7 +270,11 @@ def test_series_csv_matches_series_json_field_by_field(
                 assert cell != "" and float(cell) == value, field
             else:
                 assert cell == value, field
-        assert set(row) == {*export.PROVENANCE_COLUMNS, *_flat(scene)}
+        assert set(row) == {
+            *export.PROVENANCE_COLUMNS,
+            *export.RIGHTS_COLUMNS,
+            *_flat(scene),
+        }
 
 
 def test_series_csv_provenance_on_every_row(pub: Path, tmp_path: Path) -> None:
@@ -282,6 +288,8 @@ def test_series_csv_provenance_on_every_row(pub: Path, tmp_path: Path) -> None:
         assert row["series_json_sha256"] == json_sha
         assert row["schema_version"] == document["schema_version"]
         assert row["smolf_version"] == document["smolf_version"]
+        assert row["license"] == "CC-BY-4.0"
+        assert row["rights_holder"] == "Oscar Olvera Neria (UAM Azcapotzalco)"
 
 
 def test_series_csv_dialect(pub: Path, tmp_path: Path) -> None:
@@ -737,7 +745,13 @@ def test_series_monthly_csv_matches_series_json(pub: Path, tmp_path: Path) -> No
     assert b"\r" not in data
     assert data.endswith(b"\n")
     header = data.split(b"\n", 1)[0].decode("ascii").split(",")
-    assert header == [*export.PROVENANCE_COLUMNS, "month", "median_ha", "n_scenes"]
+    assert header == [
+        *export.PROVENANCE_COLUMNS,
+        *export.RIGHTS_COLUMNS,
+        "month",
+        "median_ha",
+        "n_scenes",
+    ]
     document = _series(pub)
     json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
     rows = _csv_rows(data)
@@ -752,6 +766,8 @@ def test_series_monthly_csv_matches_series_json(pub: Path, tmp_path: Path) -> No
         assert row["series_json_sha256"] == json_sha
         assert row["schema_version"] == document["schema_version"]
         assert row["smolf_version"] == document["smolf_version"]
+        assert row["license"] == "CC-BY-4.0"
+        assert row["rights_holder"] == "Oscar Olvera Neria (UAM Azcapotzalco)"
 
 
 def test_column_dictionary_covers_every_column_of_both_csvs(
@@ -786,6 +802,7 @@ def test_readme_sections_in_order_with_provenance(pub: Path, tmp_path: Path) -> 
     assert _sections(readme) == [
         "Water hyacinth on Endho Reservoir: Sentinel-2 series",
         "Licence",
+        "Disclaimer",
         "Suggested citation",
         "Sources",
         "Provenance",
@@ -796,8 +813,14 @@ def test_readme_sections_in_order_with_provenance(pub: Path, tmp_path: Path) -> 
     latest = json.loads((pub / "latest.json").read_text(encoding="utf-8"))
     json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
     year = latest["date"][:4]
-    assert f"(C) {year} Oscar Olvera Neria" in readme
+    assert f"(C) {year} Oscar Olvera Neria (UAM Azcapotzalco)" in readme
     assert "CC BY 4.0" in readme
+    disclaimer = readme.split("\nDisclaimer\n", 1)[1].split("\nSuggested citation", 1)[
+        0
+    ]
+    assert "not an official measurement" in disclaimer
+    assert "CONAGUA" in disclaimer
+    assert "without warranty" in disclaimer
     assert "https://creativecommons.org/licenses/by/4.0/" in readme
     assert "appropriate credit" in readme
     citation = readme.split("Suggested citation", 1)[1].split("Sources", 1)[0]

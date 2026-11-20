@@ -295,3 +295,24 @@ enforced in this repo. Anything not implemented yet says **planned**.
   (`S2A_14QMH_20261019_1_L2A`, as before).
 - **Where in this repo:** `series.py` (`EXTEND_START`,
   `list_extend_targets()`), `tests/test_series.py`.
+
+## 19. The download bundle speaks Spanish too, but its data does not
+
+- **Rule:** `smolf export series-csv` writes `LEEME.txt`, a Spanish
+  counterpart of `README.txt`, in the same bundle and in `SHA256SUMS`.
+  The CSVs are identical for both languages: English column names and
+  codes, glossed in LEEME.txt. One citation string, the same in both.
+  If the two texts differ, LEEME.txt prevails. The licence is linked to
+  Creative Commons' official Spanish deed and legal code, never
+  translated here.
+- **Why:** most readers are Spanish-speaking (residents, authorities,
+  Mexican researchers), but translated CSVs would be a second dataset
+  with other hashes, so the same figure cited in two languages would
+  trace to two files, and scripts would work on only one of them. The
+  es-MX locale uses a decimal point, so the CSV dialect needs no
+  Spanish variant. Spanish prevails because the data describe a
+  Mexican reservoir for a mostly local audience. This is the one
+  exception to the English-only rule (AGENTS.md, Language).
+- **Where in this repo:** `publish/export.py` (`README_EN`, `README_ES`,
+  `COLUMN_DICTIONARY_ES`, `_readme()`), `docs/downloads.md`,
+  `tests/test_export.py`.

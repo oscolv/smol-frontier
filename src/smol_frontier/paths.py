@@ -18,6 +18,7 @@ __all__ = [
     "DataDirError",
     "cache_dir",
     "check_data_dir",
+    "downloads_dir",
     "gate_dir",
     "levels_path",
     "levels_read_path",
@@ -96,6 +97,14 @@ def publish_dir() -> Path:
     if root is not None:
         return root / "outputs/publish"
     return PROJECT_ROOT / "outputs/publish"
+
+
+def downloads_dir() -> Path:
+    """Default location of the downloadable exports of a publish."""
+    root = _data_root()
+    if root is not None:
+        return root / "outputs/downloads"
+    return PROJECT_ROOT / "outputs/downloads"
 
 
 def gate_dir() -> Path:

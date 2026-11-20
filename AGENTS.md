@@ -5,7 +5,10 @@
 - Everything in the repository is in English — code, comments, docs, CLI
   output, column and file names.
 - Exceptions: third-party data kept byte-for-byte (the SIH CSV headers stay
-  as published) and proper nouns (Endhó, SIH).
+  as published), proper nouns (Endhó, SIH), and the Spanish text of
+  published deliverables for Spanish readers: only `LEEME.txt` of the
+  download bundle, confined to the marked block in `publish/export.py`
+  (`docs/decisions.md` 19). Its CSV column names and codes stay English.
 
 ## Layout and toolchain
 
@@ -40,6 +43,9 @@ The pipeline in order, one line per stage:
   reservoir-clipped same-month photos, read from the items' COGs at
   publish time, from one complete run; see
   `docs/contract.md`)
+- Download bundle — `publish/export.py` (`smolf export series-csv`;
+  `series.csv`, `series_monthly.csv`, `README.txt` and `SHA256SUMS` from a
+  verified publish; outside the contract, see `docs/downloads.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene
@@ -75,10 +81,14 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `outputs/publish/` — the published data contract (`latest.json`,
   `series.json`, `publish.json`, the latest scene's map; gitignored,
   regenerable via `smolf publish`).
+- `outputs/downloads/` — the download bundle derived from the publish
+  (`series.csv`, `series_monthly.csv`, `README.txt`, `SHA256SUMS`;
+  gitignored, regenerable via `smolf export series-csv`).
 - `$SMOLF_DATA_DIR/` — when set (read at call time by `paths.py`), holds
-  every write instead: `cache/`, `outputs/…` (same subfolders as above) and
-  `hydro/ENDHD.csv[.json]` (the refreshed SIH record; readers fall back to
-  the committed copy until it exists). Other inputs stay in the checkout.
+  every write instead: `cache/`, `outputs/…` (same subfolders as above,
+  `outputs/downloads/` included) and `hydro/ENDHD.csv[.json]` (the
+  refreshed SIH record; readers fall back to the committed copy until it
+  exists). Other inputs stay in the checkout.
 
 ## Parameters and provenance
 
@@ -143,8 +153,8 @@ The author's prior research and the SIH data are in Spanish:
   (m a.s.l.); estiaje = dry season; curva cota–área = stage–area curve;
   azolve = sedimentation; semáforo = traffic light;
   BUENA/DUDOSA/MALA = GOOD/DOUBTFUL/POOR; régimen LECHO/TURBIDEZ =
-  EXPOSED_BED/TURBIDITY; SIH = Mexico's national hydrometric information
-  system.
+  EXPOSED_BED/TURBIDITY; SIH = Sistema de Información Hidrológica
+  (CONAGUA), Mexico's national hydrometric information system.
 
 ## Dependencies
 

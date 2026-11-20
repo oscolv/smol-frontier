@@ -446,6 +446,16 @@ def test_export_refuses_out_that_is_a_file(pub: Path, tmp_path: Path) -> None:
     assert out.read_text(encoding="utf-8") == "keep me"
 
 
+def test_export_refuses_out_inside_the_publish_dir(pub: Path) -> None:
+    before = sorted(p.relative_to(pub) for p in pub.rglob("*"))
+    result = _export(pub, pub / "downloads")
+    assert result.exit_code == 2
+    assert len(result.stderr.strip().splitlines()) == 1
+    assert result.stderr.startswith("refused: ")
+    assert sorted(p.relative_to(pub) for p in pub.rglob("*")) == before
+    assert not list(pub.parent.glob(".downloads.*"))
+
+
 @pytest.mark.parametrize("foreign", ["notes.txt", "sub/series.csv", "latest.json"])
 def test_export_refuses_out_holding_a_foreign_file(
     pub: Path, tmp_path: Path, foreign: str

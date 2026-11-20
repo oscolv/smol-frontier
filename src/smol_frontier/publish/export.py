@@ -644,5 +644,10 @@ def export_publish(from_dir: Path | None = None, out_dir: Path | None = None) ->
     series_doc, latest_doc, series_json_sha256 = read_publish(source)
     files = export_files(series_doc, latest_doc, series_json_sha256)
     real = _resolve_out_dir(target)
+    # WHY: the bundle is outside the contract; written inside the publish
+    #   directory it would become a foreign entry the next publish refuses.
+    if real.is_relative_to(source.resolve()):
+        msg = f"--out {target} is inside the publish directory {source}"
+        raise PublishRefused(msg)
     write_export(real, files, target)
     return target

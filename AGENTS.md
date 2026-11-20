@@ -83,8 +83,9 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
   gitignored, regenerable via `smolf export series-csv`).
 - `$SMOLF_DATA_DIR/` — when set (read at call time by `paths.py`), holds
   every write instead: `cache/`, `outputs/…` (same subfolders as above,
-  `outputs/downloads/` included) and `hydro/ENDHD.csv[.json]` (the refreshed SIH record; readers fall back to
-  the committed copy until it exists). Other inputs stay in the checkout.
+  `outputs/downloads/` included) and `hydro/ENDHD.csv[.json]` (the
+  refreshed SIH record; readers fall back to the committed copy until it
+  exists). Other inputs stay in the checkout.
 
 ## Parameters and provenance
 

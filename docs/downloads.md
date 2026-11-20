@@ -58,8 +58,9 @@ SHA256SUMS           sha256 of the three files above
   row count equals the number of scenes in `series.json`.
 - `series_monthly.csv` covers every month from the first to the last
   scene month, none skipped; `median_ha` is empty when `n_scenes` is 0.
-- `README.txt` is plain ASCII, wrapped at 79 columns, and ends with a
-  pointer to `docs/contract.md` for the full field definitions.
+- `README.txt` is plain ASCII, wrapped at 79 columns (a line ending in a
+  sha256 may run longer), and ends with a pointer to `docs/contract.md`
+  for the full field definitions.
 
 The same publish always gives byte-identical files: no wall clock is
 read (the README's copyright year is the latest scene's year).
@@ -158,6 +159,7 @@ the four bundle files; anything else is someone else's data.
 - `publish.json` or `latest.json` names a different `run_id` or
   `series_sha256` than `series.json`;
 - `--out` exists and is not a directory;
+- `--out` is the publish directory or inside it;
 - `--out` holds anything other than the four bundle files as regular
   files (another file, a subdirectory or a symlink);
 - a symlink in the `--out` path is broken or cannot be resolved, or

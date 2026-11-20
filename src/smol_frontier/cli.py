@@ -578,8 +578,8 @@ def export_series_csv(
     Reads only the published contract: publish.json must validate, and
     series.json and latest.json must hash to their publish.json entries,
     pass their schemas and belong to the same run. Refuses (exit 2) any
-    failure, an --out that is a file, and an --out holding files the export
-    does not own; a refusal writes nothing. The output directory is replaced
+    failure, an --out that is a file or inside the publish directory, and an
+    --out holding files the export does not own; a refusal writes nothing. The output directory is replaced
     atomically and the same publish gives byte-identical files.
     """
     try:

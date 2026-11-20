@@ -13,9 +13,12 @@ from smol_frontier.hydro.bed import (
     compute_bed_correction,
     correct_bed,
     cushion_ha,
+    day_mirror,
     exposed_bed_mask,
+    load_day_mirror,
 )
 from smol_frontier.hydro.curve import StageAreaCurve
+from smol_frontier.hydro.flood_map import FLOOD_NODATA
 
 DENSE = settings.CLASS_DENSE_HYACINTH
 INTERFACE = settings.CLASS_INTERFACE
@@ -251,4 +254,91 @@ def test_bed_mask_margin_function_matches_compute_bed_correction() -> None:
     assert bed_margin(2000.5, stages, areas, areas, areas) == out.margin_m
     assert bed_margin(2000.5, stages, areas, areas, areas) == pytest.approx(
         2001 + 24 / 70
+    )
+
+
+def test_day_mirror_boundary_above_and_nodata() -> None:
+    flood = np.array(
+        [[2000.0, 2001.0, 2001.5, FLOOD_NODATA]],
+        dtype=np.float64,
+    )
+    out = day_mirror(flood, 2001.0)
+    assert out.dtype == bool
+    # flood == margin is inside; above is outside; nodata is outside.
+    assert out.tolist() == [[True, True, False, False]]
+
+
+def _patch_mirror_inputs(monkeypatch: pytest.MonkeyPatch, level) -> np.ndarray:
+    monkeypatch.setattr(bed_module, "level_on", lambda *a, **k: level)
+    flood = np.array([[2000.0, 2001.0, 2002.0, 2003.0]], dtype=np.float32)
+    monkeypatch.setattr(
+        bed_module,
+        "load_flood_map",
+        lambda *a, **k: (flood, rasterio.Affine.identity(), "EPSG:32614"),
+    )
+    monkeypatch.setattr(
+        bed_module,
+        "load_curve",
+        lambda *a, **k: StageAreaCurve(
+            stage_m=np.array([2000.0, 2001.0, 2002.0, 2003.0]),
+            volume_hm3=np.zeros(4),
+            area_km2=np.array([0.1, 0.2, 0.9, 1.0]),
+            area_p2_5=np.array([0.1, 0.2, 0.9, 1.0]),
+            area_p97_5=np.array([0.1, 0.2, 0.9, 1.0]),
+        ),
+    )
+    return flood
+
+
+def test_load_day_mirror_returns_expected_mask(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flood = _patch_mirror_inputs(monkeypatch, 2000.5)
+    out = load_day_mirror(
+        date(2020, 1, 1), rasterio.Affine.identity(), "EPSG:32614", (1, 4)
+    )
+    # margin 2001.342857...: the first two pixels are under water.
+    assert out is not None
+    assert out.tolist() == [[True, True, False, False]]
+    assert out.tolist() == day_mirror(flood, 2001.342857142857).tolist()
+
+
+@pytest.mark.parametrize("level", [None, float("nan")])
+def test_load_day_mirror_none_without_level(
+    monkeypatch: pytest.MonkeyPatch, level
+) -> None:
+    _patch_mirror_inputs(monkeypatch, level)
+    assert (
+        load_day_mirror(
+            date(2020, 1, 1), rasterio.Affine.identity(), "EPSG:32614", (1, 4)
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize("aspect", ["shape", "transform", "crs"])
+def test_load_day_mirror_none_on_grid_mismatch(
+    monkeypatch: pytest.MonkeyPatch, aspect: str
+) -> None:
+    _patch_mirror_inputs(monkeypatch, 2000.5)
+    transform, crs, shape = rasterio.Affine.identity(), "EPSG:32614", (1, 4)
+    if aspect == "shape":
+        shape = (2, 2)
+    if aspect == "transform":
+        transform = rasterio.Affine.translation(10.0, 0.0)
+    if aspect == "crs":
+        crs = "EPSG:32613"
+    assert load_day_mirror(date(2020, 1, 1), transform, crs, shape) is None
+
+
+def test_load_day_mirror_none_on_missing_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    _patch_mirror_inputs(monkeypatch, 2000.5)
+    monkeypatch.setattr(bed_module, "DEFAULT_FLOOD_PATH", tmp_path / "nope.tif")
+    assert (
+        load_day_mirror(
+            date(2020, 1, 1), rasterio.Affine.identity(), "EPSG:32614", (1, 4)
+        )
+        is None
     )

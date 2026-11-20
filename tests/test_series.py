@@ -612,12 +612,12 @@ def test_new_scene_search_queries_earth_search_only(
         ]
 
     monkeypatch.setattr(series, "search_scenes", fake_search)
-    targets = series.list_extend_targets(date(2026, 11, 1), date(2026, 11, 16))
+    targets = series.list_extend_targets({date(2026, 11, 1)}, date(2026, 11, 16))
     # WHY: a Planetary Computer search would hand back PC item ids, which
     #   differ from Earth Search ids and would churn the series identity.
     assert calls == [
         {
-            "start": date(2026, 11, 2),
+            "start": series.EXTEND_START,
             "end": date(2026, 11, 16),
             "backends": ("earth-search",),
         }
@@ -625,6 +625,48 @@ def test_new_scene_search_queries_earth_search_only(
     assert targets == [
         series.SeriesTarget(day=date(2026, 11, 11), item_id="S2C_14QMH_20261111_0_L2A")
     ]
+
+
+def test_extend_keeps_scenes_inside_a_longer_reference_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: the v2026-11-19 reference runs to 2026-11-08 but lacks
+    2026-10-19 and 2026-11-06, which v0.7.x runs had already published."""
+    found = [
+        ("S2A_14QMH_20261019_1_L2A", date(2026, 10, 19)),
+        ("S2C_14QMH_20261027_0_L2A", date(2026, 10, 27)),
+        ("S2C_14QMH_20261106_0_L2A", date(2026, 11, 6)),
+        ("S2A_14QMH_20261108_1_L2A", date(2026, 11, 8)),
+        ("S2B_14QMH_20261111_0_L2A", date(2026, 11, 11)),
+    ]
+
+    def fake_search(start: date, end: date, max_cloud: float, **kwargs: object) -> list:
+        return [
+            SimpleNamespace(id=item_id, datetime=datetime(d.year, d.month, d.day, 17))
+            for item_id, d in found
+        ]
+
+    monkeypatch.setattr(series, "search_scenes", fake_search)
+    reference_days = {date(2026, 10, 12), date(2026, 10, 27), date(2026, 11, 8)}
+    targets = series.list_extend_targets(reference_days, date(2026, 11, 19))
+    # A reference date keeps its reference item, even when Earth Search now
+    # lists another processing for it.
+    assert targets == [
+        series.SeriesTarget(date(2026, 10, 19), "S2A_14QMH_20261019_1_L2A"),
+        series.SeriesTarget(date(2026, 11, 6), "S2C_14QMH_20261106_0_L2A"),
+        series.SeriesTarget(date(2026, 11, 11), "S2B_14QMH_20261111_0_L2A"),
+    ]
+
+
+def test_extend_before_its_start_never_searches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def forbidden(*args: object, **kwargs: object) -> list:
+        raise AssertionError("new-scene search must not run")
+
+    monkeypatch.setattr(series, "search_scenes", forbidden)
+    today = series.EXTEND_START - timedelta(days=1)
+    assert series.list_extend_targets(set(), today) == []
 
 
 def test_build_without_extend_never_searches_new_scenes(

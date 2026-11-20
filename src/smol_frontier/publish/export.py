@@ -372,9 +372,9 @@ def _wrap(text: str, indent: str = "", hanging: str | None = None) -> str:
     )
 
 
-def _years(series_doc: dict[str, object], latest_date: str) -> str:
+def _years(series_doc: dict[str, object]) -> str:
     """The span of scene years, ``2017-2026`` (or one year)."""
-    years = sorted({latest_date[:4], *(s["date"][:4] for s in series_doc["scenes"])})
+    years = sorted({s["date"][:4] for s in series_doc["scenes"]})
     return years[0] if len(years) == 1 else f"{years[0]}-{years[-1]}"
 
 
@@ -434,7 +434,7 @@ def _readme(
     )
     copernicus = (
         "Contains modified Copernicus Sentinel data "
-        f"{_years(series_doc, latest_doc['date'])} (Sentinel-2 L2A)."
+        f"{_years(series_doc)} (Sentinel-2 L2A)."
     )
     sih = (
         "Water levels: Mexico's national hydrometric information system (SIH), "
@@ -582,7 +582,7 @@ def _check_export_dir(out_dir: Path, given: Path) -> None:
     hold earlier exports: a missing or empty directory, or allowlisted
     regular files. A file, a symlink or a subdirectory is someone else's.
     """
-    if not out_dir.exists() and not out_dir.is_symlink():
+    if not out_dir.exists():
         return
     shown = given if given.absolute() == out_dir else f"{given} (-> {out_dir})"
     if not out_dir.is_dir():

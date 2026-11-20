@@ -153,8 +153,8 @@ The author's prior research and the SIH data are in Spanish:
   (m a.s.l.); estiaje = dry season; curva cota–área = stage–area curve;
   azolve = sedimentation; semáforo = traffic light;
   BUENA/DUDOSA/MALA = GOOD/DOUBTFUL/POOR; régimen LECHO/TURBIDEZ =
-  EXPOSED_BED/TURBIDITY; SIH = Mexico's national hydrometric information
-  system.
+  EXPOSED_BED/TURBIDITY; SIH = Sistema de Información Hidrológica
+  (CONAGUA), Mexico's national hydrometric information system.
 
 ## Dependencies
 

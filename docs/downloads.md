@@ -15,7 +15,7 @@ The bundle is **not part of the publish contract** (`docs/contract.md`):
 
 - its files are not listed in `publish.json` and are never written into
   the publish directory;
-- it is not versioned by `schema_version`; the contract stays 3.3.0;
+- it is not versioned by `schema_version`;
 - it has no JSON Schema. Its layout may change in any smolf release, so
   a downstream consumer that needs stable fields reads `series.json`.
 
@@ -174,7 +174,10 @@ the five bundle files; anything else is someone else's data.
 
 - `publish.json`, `series.json` or `latest.json` cannot be read or is not
   valid JSON;
-- any of the three fails its packaged schema;
+- any of the three fails its packaged schema (after upgrading smolf,
+  re-run `smolf publish` first: a publish from an older minor release
+  can lack a property the packaged schemas require, such as
+  `stage_area_curve` of 3.4.0);
 - `publish.json` does not list `series.json` or `latest.json`;
 - `series.json` or `latest.json` does not hash to its `publish.json`
   entry;

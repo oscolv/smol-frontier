@@ -345,9 +345,9 @@ the unit of every other contract figure. The grid ends at
 draw the curve only between `stage_min_m` and `stage_max_m`. The
 `anchors` are the official level–volume points of the dam's design
 report (`CURVE_ANCHORS`); A(h) is the derivative of the fitted V(h), so
-they mark where the fit is pinned rather than points on the area curve. Anchors can lie outside `stage_min_m`..`stage_max_m` (today
-2003.16 m and 2020.0 m do), because they pin V(h), not the published
-A(h) grid.
+they mark where the fit is pinned rather than points on the area curve.
+Anchors can lie outside `stage_min_m`..`stage_max_m` (today 2003.16 m
+and 2020.0 m do), because they pin V(h), not the published A(h) grid.
 
 Quality flags (degrading/informational) are not part of 3.4.0.
 
@@ -596,7 +596,10 @@ one of a same-month scene. All of them:
     3.3 schema accepts 3.4.0 files and ignores the unknown property.
     `latest.json` and `publish.json` are unchanged. Publish now checks
     the curve's sha256 against the run manifest on every publish, not
-    only when the latest scene applied the correction.
+    only when the latest scene applied the correction. `smolf export
+    series-csv` validates against the packaged schemas, so after
+    upgrading, re-run `smolf publish` before exporting (an older 3.3.0
+    publish is refused for the missing `stage_area_curve`).
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a

@@ -26,7 +26,8 @@ home_dir=${SMOLF_VERIFY_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/smolf-verify
 die() { echo "smolf-verify: $*" >&2; exit 2; }
 
 load_run() {
-  run=$(cd "${1:?run dir required}" 2>/dev/null && pwd -P) || die "no such run: $1"
+  [ -n "${1:-}" ] || die "run dir required"
+  run=$(cd "$1" 2>/dev/null && pwd -P) || die "no such run: $1"
   [ -f "$run/env" ] || die "not a run dir (no env file): $run"
   # shellcheck disable=SC1091
   . "$run/env"
@@ -36,7 +37,7 @@ cmd_new() {
   local ref="" shared=0
   while [ $# -gt 0 ]; do
     case $1 in
-      --ref) ref=${2:?--ref needs a commit}; shift 2 ;;
+      --ref) [ -n "${2:-}" ] || die "new: --ref needs a commit"; ref=$2; shift 2 ;;
       --shared-cache) shared=1; shift ;;
       *) die "new: unknown option $1" ;;
     esac
@@ -85,9 +86,13 @@ cmd_new() {
 }
 
 cmd_doctor() {
-  load_run "$1"; shift
+  load_run "${1:-}"; shift
   local net=0 bad=0
-  [ "${1:-}" = "--net" ] && net=1
+  case ${1:-} in
+    "") ;;
+    --net) net=1 ;;
+    *) die "doctor: unknown option $1" ;;
+  esac
   echo "run:        $run"
   echo "code:       $SMOLF_CODE ($(git -C "$SMOLF_CODE" rev-parse --short HEAD))"
   echo "data dir:   $SMOLF_DATA_DIR"
@@ -175,13 +180,16 @@ PY
 }
 
 cmd_run() {
-  load_run "$1"; shift
-  local feature=${1:?feature id required}; shift
+  load_run "${1:-}"; shift
+  [ -n "${1:-}" ] || die "run: feature id required"
+  local feature=$1; shift
   local hosts="" level=""
   while [ $# -gt 0 ] && [ "$1" != "--" ]; do
     case $1 in
-      --block-host) hosts="${hosts:+$hosts,}${2:?--block-host needs a host}"; shift 2 ;;
-      --log-level) level=${2:?--log-level needs a level}; shift 2 ;;
+      --block-host) [ -n "${2:-}" ] || die "run: --block-host needs a host"
+                    hosts="${hosts:+$hosts,}$2"; shift 2 ;;
+      --log-level) [ -n "${2:-}" ] || die "run: --log-level needs a level"
+                   level=$2; shift 2 ;;
       *) die "run: unknown option $1 (smolf args go after --)" ;;
     esac
   done
@@ -203,8 +211,9 @@ cmd_run() {
 }
 
 cmd_hectares() {
-  load_run "$1"; shift
-  local tif=${1:?classified GeoTIFF required}
+  load_run "${1:-}"; shift
+  [ -n "${1:-}" ] || die "hectares: classified GeoTIFF required"
+  local tif=$1
   local py; py=$(dirname "$SMOLF")/python
   (cd /tmp && "$py" - "$tif" <<'PY'
 import sys
@@ -224,10 +233,13 @@ PY
 }
 
 cmd_cleanup() {
-  load_run "$1"
+  load_run "${1:-}"
   if [ -d "$run/checkout" ]; then
     chmod -R u+w "$run/checkout"
-    git -C "$repo" worktree remove --force "$run/checkout"
+    # A checkout whose worktree record is already gone is not a working tree
+    # to git; delete the directory itself so the run still cleans up.
+    git -C "$repo" worktree remove --force "$run/checkout" 2>/dev/null ||
+      rm -rf "$run/checkout"
     git -C "$repo" worktree prune
   fi
   # rm -rf does not follow the shared-cache symlink; only the link goes.

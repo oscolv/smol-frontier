@@ -35,7 +35,7 @@ Preconditions:
 ## Gotchas
 
 - The input checks run before any `--out` check, so a bad `--out` is reported only when the publish itself is valid. A tampered `series.json` hits the hash check before the schema check.
-- `exported:` echoes `--out` as typed, not resolved.
+- `exported:` echoes `--out` as given (normalised by `Path`: no trailing slash or `./`), not resolved.
 - The bundle files are not in `publish.json`. Export never changes the publish, so its `sha256sum -c` still passes afterwards.
 - `--out` refusals for symlinked or several-previous dirs reuse publish's wording (`… several previous publishes remain …`).
 - The daily job does not run export (see daily-job.md). A new publish leaves the old bundle in place until export runs again.

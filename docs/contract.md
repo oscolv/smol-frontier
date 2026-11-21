@@ -54,13 +54,19 @@ series.json
 publish.json
 map/<date>_<item_id>.tif
 map/<date>_<item_id>.png
+map/<date>_<item_id>.png              (exposed_bed_example.map_corrected)
+map/<date>_<item_id>.raw.png          (exposed_bed_example.map_raw)
 image/<date>_<item_id>.webp
 image/clipped/<date>_<item_id>.webp   (one per same_month year with a scene)
 ```
 
-The two map files and `image/<date>_<item_id>.webp` are those of the
-scene described by `latest.json`; the clipped photos are those of the
-`same_month` scenes. Files of earlier publishes are not kept. File names
+The first two map files and `image/<date>_<item_id>.webp` are those of
+the scene described by `latest.json`; the clipped photos are those of the
+`same_month` scenes. The two example PNGs are those of the
+`exposed_bed_example` scene of `series.json`, and exist only when that
+block is not null; when the example scene is also the latest scene, its
+corrected PNG is the latest `map.png`, written once. Files of earlier
+publishes are not kept. File names
 change with the scene, so a cache can never pair a new `latest.json` with
 an old map or image.
 
@@ -316,6 +322,13 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `stage_area_curve.anchors[].volume_hm3` | number ≥ 0, hm³ | no | Stored volume at the anchor level (a volume, not an area: the fit is V(h)). |
 | `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. (CONAGUA dam inventory)`. |
 | `stage_area_curve.sha256` | string, 64 hex | no | sha256 of the committed curve CSV (`data/hydro/stage_area_curve.csv`); equals the run manifest's `stage_area_curve_csv` input. |
+| `exposed_bed_example` | object | when the run has no example scene | The dry-season control scene with its raw and corrected maps, to show the exposed-bed correction on a real scene (see below). Since 3.4.0. |
+| `exposed_bed_example.map_raw` | object | no | The scene's raw map: classes 0–4, before the correction. |
+| `exposed_bed_example.map_raw.path` | string | no | `map/<date>_<item_id>.raw.png`. |
+| `exposed_bed_example.map_raw.bounds` | `[[south, west], [north, east]]` | no | EPSG:4326 extent of the PNG, in the format of `map.bounds`. |
+| `exposed_bed_example.map_corrected` | object | no | The scene's corrected map: classes 0–5, class 5 being the hyacinth the correction removed. |
+| `exposed_bed_example.map_corrected.path` | string | no | `map/<date>_<item_id>.png`. |
+| `exposed_bed_example.map_corrected.bounds` | `[[south, west], [north, east]]` | no | EPSG:4326 extent of the PNG, in the format of `map.bounds`. |
 
 ### `monthly`
 
@@ -349,6 +362,29 @@ they mark where the fit is pinned rather than points on the area curve.
 Anchors can lie outside `stage_min_m`..`stage_max_m` (today 2003.16 m
 and 2020.0 m do), because they pin V(h), not the published A(h) grid.
 
+### `exposed_bed_example`
+
+The scene of `EXPOSED_BED_EXAMPLE_DATE` (`config.py`, 2024-06-09): the
+dry-season control (estiaje, level 2004.60 m) whose raw hyacinth is
+almost all exposed bed. The block is the run's first `ok` record of that
+date (in `scenes` order), exactly as its `scenes` entry (same fields,
+same values), plus `map_raw` and `map_corrected`. Its `bed_applied` is
+always `true` and its `removed_ha` a number: the block is `null` when
+the run has no `ok` record of that date or when the correction did not
+apply to it, and smolf never substitutes another scene. Publish copies
+the run's figures; it carries no dense/interface split of `removed_ha`,
+which the run does not record.
+
+Both maps use the palette of "Map files" and the grid of the latest
+`map.png` (same size, same `bounds`), so a web map can switch between
+them in place. The scene is re-classified from the hash-verified cache
+with the latest map's checks (see "Refusals and exit codes"), so the
+class-5 area of its 10 m map equals `removed_ha` to the hundredth; the
+warped PNG keeps that area to within a fraction of a percent (41 768
+display pixels for 41 869 on the 2024-06-09 control). The raw map has no
+class-5 pixel: it shows that hyacinth with its classifier class instead.
+There is no GeoTIFF of the example scene.
+
 Quality flags (degrading/informational) are not part of 3.4.0.
 
 ## `publish.json`
@@ -369,7 +405,9 @@ and never lists itself.
 
 ## Map files
 
-Both files show the scene of `latest.json` with these classes:
+`map.geotiff` and `map.png` show the scene of `latest.json`, and the
+`exposed_bed_example` PNGs of `series.json` show that scene, with these
+classes:
 
 | Code | Class | Colour (`config.py`) |
 | --- | --- | --- |
@@ -519,6 +557,10 @@ one of a same-month scene. All of them:
 - the exposed-bed margin recomputed from the row's `level_m` with the
   committed stage–area curve does not round to the row's margin, or the
   class-5 area differs from `removed_ha` at the hundredth;
+- the `exposed_bed_example` scene fails any of the latest map's checks
+  above (cache hash and re-ingest, hectares per class and under haze,
+  flood-stage map, margin, class-5 area equal to `removed_ha`), or its
+  display grid differs from the latest `map.png`'s (since 3.4.0);
 - the true-colour image of the latest scene or of any `same_month`
   scene cannot be read (STAC item missing, catalog or COG unreachable): a
   contract without its photos would be partial.
@@ -592,14 +634,22 @@ one of a same-month scene. All of them:
     #85): `series.json` carries `stage_area_curve`, the committed
     stage–area curve in hectares (`stage_m`, `area_ha`, `area_ha_p2_5`,
     `area_ha_p97_5`, `stage_min_m`, `stage_max_m`, `anchors`, `sha256`).
-    It is required in the 3.4.0 schema, following the ruling of 3.3.0: a
-    3.3 schema accepts 3.4.0 files and ignores the unknown property.
-    `latest.json` and `publish.json` are unchanged. Publish now checks
-    the curve's sha256 against the run manifest on every publish, not
-    only when the latest scene applied the correction. `smolf export
+    `series.json` also carries `exposed_bed_example` (issue #87), the
+    2024-06-09 dry-season control scene as its `scenes` entry plus
+    `map_raw` and `map_corrected` (`path`, `bounds`), or `null`; its two
+    PNGs, `map/<date>_<item_id>.raw.png` and `map/<date>_<item_id>.png`,
+    are published next to the latest map and listed in `publish.json`
+    (whose closed `files[].path` pattern already admits both names).
+    Both properties are required in the 3.4.0 schema, following the
+    ruling of 3.3.0: a 3.3 schema accepts 3.4.0 files and ignores the
+    unknown properties. `latest.json` and the `publish.json` schema are
+    unchanged. Publish now checks the curve's sha256 against the run
+    manifest on every publish, not only when the latest scene applied the
+    correction. `smolf export
     series-csv` validates against the packaged schemas, so after
     upgrading, re-run `smolf publish` before exporting (an older 3.3.0
-    publish is refused for the missing `stage_area_curve`).
+    publish is refused for the missing `stage_area_curve` and
+    `exposed_bed_example`).
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a

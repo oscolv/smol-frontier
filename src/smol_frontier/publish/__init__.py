@@ -5,8 +5,9 @@ runs that cannot back a reproducible contract (incomplete, dirty, no scene
 with figures), maps the run's scene records to the English contract fields,
 validates every document against its packaged JSON Schema, re-classifies
 the latest scene from the hash-verified scene cache into the published map
-(classes 0-5, class 5 = removed by the exposed-bed correction), reads its
-Sentinel-2 true-colour photo and the reservoir-clipped photos of the
+(classes 0-5, class 5 = removed by the exposed-bed correction) and the
+exposed-bed example scene into its raw and corrected PNGs, reads the
+latest scene's Sentinel-2 true-colour photo and the reservoir-clipped photos of the
 ``same_month`` scenes on the map's display grid, and swaps
 the output directory in atomically. The run manifest is provenance, never
 contract: nothing is copied out of it verbatim.
@@ -18,9 +19,9 @@ byte-identical files; only the integrity index `publish.json` carries a timestam
 
 # WHY a package: one module per job (decision rule 3) — `select` picks the
 #   run, `documents` maps it to the contract, `map` rebuilds the latest
-#   scene's map, `truecolour` reads, clips and writes the photos, `writer` stages
-#   and swaps the output in. Every public name
-#   stays importable from `smol_frontier.publish`.
+#   scene's map (and the exposed-bed example's), `truecolour` reads, clips
+#   and writes the photos, `writer` stages and swaps the output in. Every
+#   public name stays importable from `smol_frontier.publish`.
 
 from smol_frontier.config import settings as settings  # re-exported (tests read it)
 from smol_frontier.publish.documents import (
@@ -28,6 +29,7 @@ from smol_frontier.publish.documents import (
     SCHEMA_VERSION,
     canonical_json,
     current_level,
+    exposed_bed_record,
     latest_document,
     latest_record,
     reservoir_outline,
@@ -46,6 +48,7 @@ from smol_frontier.publish.map import (
     committed_curve,
     map_path,
     png_path,
+    raw_png_path,
 )
 from smol_frontier.publish.select import select_run
 from smol_frontier.publish.truecolour import guard_true_colour, image_path
@@ -76,6 +79,7 @@ __all__ = [
     "check_out_dir",
     "committed_curve",
     "current_level",
+    "exposed_bed_record",
     "guard_true_colour",
     "image_path",
     "is_allowed",
@@ -85,6 +89,7 @@ __all__ = [
     "png_path",
     "publish_index",
     "publish_run",
+    "raw_png_path",
     "reservoir_outline",
     "select_run",
     "series_document",

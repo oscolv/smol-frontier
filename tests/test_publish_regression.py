@@ -4,12 +4,14 @@ Each test builds a one-scene run directory in tmp_path from a committed
 scene record (tests/fixtures/publish_regression/) and publishes it for
 real: hash-verified cache read, re-classification, class-5 mask, schema
 validation, atomic write. The 2026-10-12 record comes from a real series
-run (run 20261030T031055, Earth Search); the 2024-06-09 one was generated
-from the cached Planetary Computer copy of the dry-season control scene
-(no series run covers it). Since the haze rescue (issue #69) both rows
-were regenerated with the series builder's own `process_scene` on the
-cached files (identity fields and cache hashes kept), so they carry
-`hyacinth_under_haze_ha` and the rescue-on figures.
+run (run 20261030T031055, Earth Search); the Planetary Computer 2024-06-09
+one was generated from the cached copy of the dry-season control scene.
+Since the haze rescue (issue #69) both rows were regenerated with the
+series builder's own `process_scene` on the cached files (identity fields
+and cache hashes kept), so they carry `hyacinth_under_haze_ha` and the
+rescue-on figures. The Earth Search 2024-06-09 record is copied verbatim
+from the production run 20261119T200232 (smolf 0.8.1); it backs the
+`exposed_bed_example` test (issue #87).
 
 Skips with a clear reason when the scene is not cached (CI) or the local
 cache file is not the one the record was built from (a re-fetch): a cache
@@ -30,6 +32,7 @@ from rasterio.warp import transform_bounds
 
 from smol_frontier import aoi, paths, publish
 from smol_frontier.classify.display import DISPLAY_CRS
+from smol_frontier.classify.geotiff import PUBLISHED_COLORMAP
 from smol_frontier.config import settings
 from smol_frontier.hydro import flood_map
 from smol_frontier.ingest import cache_path
@@ -38,6 +41,7 @@ from smol_frontier.publish import truecolour
 FIXTURES = Path(__file__).parent / "fixtures" / "publish_regression"
 SCENE_2026_10_12 = "S2B_14QMH_20261012_0_L2A"
 SCENE_2024_06_09 = "S2A_MSIL2A_20240609T165901_R069_T14QMH_20240610T011221"
+SCENE_2024_06_09_ES = "S2A_14QMH_20240609_0_L2A"
 
 # WHY: the committed hydrology inputs the records were built with (run
 #   20261030T031055's manifest inputs). Publish refuses if the committed
@@ -158,6 +162,54 @@ def test_publish_regression_2024_06_09(tmp_path: Path) -> None:
     assert latest["display_status"] == "FULL"
     assert latest["display_ha"] == {"total": 16, "dense": 4, "interface": 12}
     assert _class5_ha(out_dir, latest) == 418.51
+
+
+def _png_class_count(path: Path, code: int) -> int:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(path) as src:
+            rgba = src.read()
+    colour = np.array(PUBLISHED_COLORMAP[code])[:, None, None]
+    return int((rgba == colour).all(axis=0).sum())
+
+
+def test_publish_regression_exposed_bed_example_2024_06_09(tmp_path: Path) -> None:
+    """Production control (Earth Search): raw 434.35 → 15.66, 418.69 removed."""
+    latest, out_dir = _publish_fixture(tmp_path, SCENE_2024_06_09_ES)
+    series_doc = json.loads((out_dir / "series.json").read_text(encoding="utf-8"))
+    block = series_doc["exposed_bed_example"]
+    [entry] = series_doc["scenes"]
+    assert {k: v for k, v in block.items() if not k.startswith("map_")} == entry
+    assert block["item_id"] == SCENE_2024_06_09_ES
+    assert block["hyacinth_raw_ha"] == 434.35
+    assert block["hyacinth_under_haze_ha"] == 1.9
+    assert block["hyacinth_corrected_ha"] == 15.66
+    assert block["removed_ha"] == 418.69
+    assert block["level_m"] == 2004.6
+    assert block["regime"] == "EXPOSED_BED"
+    # the block carries the series.json scene fields, which have no margin:
+    #   the margin is the record's, re-checked by publish (recomputed from
+    #   level_m, it must round to the row's margin_m)
+    record = json.loads(
+        (FIXTURES / f"{SCENE_2024_06_09_ES}.json").read_text(encoding="utf-8")
+    )
+    assert record["row"]["margin_m"] == 2005.54
+    # the example is the latest scene here: its corrected PNG is map.png
+    assert block["map_corrected"] == {
+        "path": latest["map"]["png"],
+        "bounds": latest["map"]["bounds"],
+    }
+    assert block["map_raw"]["bounds"] == latest["map"]["bounds"]
+    raw = out_dir / block["map_raw"]["path"]
+    corrected = out_dir / block["map_corrected"]["path"]
+    assert _image_shape(out_dir, block["map_raw"]["path"]) == _image_shape(
+        out_dir, block["map_corrected"]["path"]
+    )
+    assert _png_class_count(raw, settings.CLASS_BED_REMOVED) == 0
+    assert _class5_ha(out_dir, latest) == 418.69
+    # the warped display grid keeps the class-5 area within 0.5 %
+    warped = _png_class_count(corrected, settings.CLASS_BED_REMOVED)
+    assert abs(warped * flood_map.PIXEL_HA - 418.69) < 0.005 * 418.69
 
 
 def test_publish_regression_png_bounds_enclose_aoi_bbox(tmp_path: Path) -> None:

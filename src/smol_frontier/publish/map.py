@@ -34,12 +34,17 @@ _HECTARE_CHECKS = (
 
 @dataclass(frozen=True, eq=False)
 class PublishedMap:
-    """The published class map (0-5) on the scene's native grid."""
+    """The published class map (0-5) on the scene's native grid.
+
+    ``raw_class_map`` is the classifier's own map (0-4), before the class-5
+    overlay: the raw map of the exposed-bed example.
+    """
 
     class_map: np.ndarray
     transform: rasterio.Affine
     crs: str
     display: DisplayImage
+    raw_class_map: np.ndarray
 
 
 def _map_stem(record: dict[str, object]) -> str:
@@ -55,6 +60,11 @@ def map_path(record: dict[str, object]) -> str:
 def png_path(record: dict[str, object]) -> str:
     """Relative path of a scene's display PNG: ``map/<date>_<item_id>.png``."""
     return f"{_map_stem(record)}.png"
+
+
+def raw_png_path(record: dict[str, object]) -> str:
+    """Relative path of a scene's raw PNG: ``map/<date>_<item_id>.raw.png``."""
+    return f"{_map_stem(record)}.raw.png"
 
 
 def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
@@ -187,7 +197,8 @@ def build_map(
     ``committed`` is the curve ``committed_curve`` verified for this run.
     Class 5 and the haze-rescue mirror use the run row's level and the
     margin recomputed from it (never a fresh level lookup), and only when
-    the correction was applied.
+    the correction was applied. The classifier's map before the overlay is
+    kept as ``raw_class_map``.
     """
     row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     item_id = record["item_id_used"]
@@ -231,4 +242,4 @@ def build_map(
         published[removed] = settings.CLASS_BED_REMOVED
     # the C21 guard runs here and again in each published-raster writer
     display = render_display_image(published, ing.transform, ing.crs)
-    return PublishedMap(published, ing.transform, ing.crs, display)
+    return PublishedMap(published, ing.transform, ing.crs, display, result.class_map)

@@ -10,11 +10,16 @@ from pathlib import Path
 import numpy as np
 
 from smol_frontier import __version__, paths, series
-from smol_frontier.classify.display import DisplayImage, write_display_png
+from smol_frontier.classify.display import (
+    DisplayImage,
+    render_display_image,
+    write_display_png,
+)
 from smol_frontier.classify.geotiff import write_published_geotiff
 from smol_frontier.publish.documents import (
     SCHEMA_VERSION,
     canonical_json,
+    exposed_bed_record,
     latest_document,
     latest_record,
     series_document,
@@ -23,11 +28,13 @@ from smol_frontier.publish.documents import (
 from smol_frontier.publish.errors import PublishRefused, _require_dict
 from smol_frontier.publish.map import (
     _MAP_DIR,
+    CommittedCurve,
     PublishedMap,
     build_map,
     committed_curve,
     map_path,
     png_path,
+    raw_png_path,
 )
 from smol_frontier.publish.select import _read_manifest, select_run
 from smol_frontier.publish.truecolour import (
@@ -47,8 +54,10 @@ ALLOWED_FILES = frozenset({"latest.json", "series.json", "publish.json"})
 #   is the only file that never lists itself.
 INDEX_FILE = "publish.json"
 
-# WHY: the only other files allowed — the latest scene's map, one level deep
-#   under map/, named <date>_<item_id> (no path separators in the id).
+# WHY: the only other files allowed — the latest scene's map and the
+#   exposed-bed example's raw and corrected PNGs, one level deep under map/,
+#   named <date>_<item_id>.tif, .png or .raw.png (no path separators in the
+#   id; its dots already admit .raw.png).
 ALLOWED_MAP_PATTERN = re.compile(
     r"map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\.(?:tif|png)"
 )
@@ -314,16 +323,20 @@ def _write_contract(
     series_sha256: str,
     maps: list[tuple[str, str, PublishedMap]] | None = None,
     images: list[tuple[str, np.ndarray, str | None]] | None = None,
+    pngs: list[tuple[str, DisplayImage]] | None = None,
 ) -> None:
     """Write allowlisted files into a sibling staging dir, then swap it in.
 
-    Maps, given as (GeoTIFF path, PNG path, layer), go through the guarded
-    raster writers only (uint8, classes 0-5). ``publish.json`` is built last
-    from the bytes actually staged and validated before the swap.
+    Maps, given as (GeoTIFF path, PNG path, layer), and PNG-only maps, given
+    as (PNG path, display image), go through the guarded raster writers only
+    (uint8, classes 0-5). ``publish.json`` is built last from the bytes
+    actually staged and validated before the swap.
     """
     maps = [] if maps is None else maps
     images = [] if images is None else images
+    pngs = [] if pngs is None else pngs
     map_names = [name for tif, png, _ in maps for name in (tif, png)]
+    map_names += [name for name, _ in pngs]
     image_names = [name for name, _, _ in images]
     for name in [*documents, *map_names, *image_names]:
         if not is_allowed(name):
@@ -347,6 +360,9 @@ def _write_contract(
                 staging / tif, layer.class_map, layer.transform, layer.crs
             )
             write_display_png(staging / png, layer.display)
+        for name, display in pngs:
+            (staging / name).parent.mkdir(mode=0o755, exist_ok=True)
+            write_display_png(staging / name, display)
         for name, array, collection in images:
             (staging / name).parent.mkdir(mode=0o755, parents=True, exist_ok=True)
             write_true_colour_webp(staging / name, array, collection)
@@ -400,6 +416,7 @@ def publish_run(
     rgba = to_rgba(photo.reflectance, layer.display.transform)
     images = [(image_path(record), rgba, photo.collection)]
     images += _clipped_images(latest, records, layer.display, photos)
+    pngs = _example_maps(series_doc, records, record, layer, manifest, committed)
     validate("latest", latest)
     validate("series", series_doc)
     _write_contract(
@@ -412,8 +429,54 @@ def publish_run(
         str(manifest["series_sha256"]),
         [(map_path(record), png_path(record), layer)],
         images,
+        pngs,
     )
     return target
+
+
+def _example_maps(
+    series_doc: dict[str, object],
+    records: list[dict[str, object]],
+    latest: dict[str, object],
+    layer: PublishedMap,
+    manifest: dict[str, object],
+    committed: CommittedCurve,
+) -> list[tuple[str, DisplayImage]]:
+    """The exposed-bed example's raw and corrected PNGs; fills their bounds.
+
+    WHY build_map: the example maps get the latest map's checks (cache hash,
+    hectares, class-5 area equal to removed_ha). When the example is the
+    latest scene its layer is reused: classified once, and its corrected
+    PNG is the latest PNG, written once.
+    """
+    block = series_doc["exposed_bed_example"]
+    example = exposed_bed_record(records)
+    if block is None or example is None:
+        return []
+    block = _require_dict(block, "series.json exposed_bed_example")
+    same = example is latest
+    example_layer = layer if same else build_map(example, manifest, committed)
+    corrected = example_layer.display
+    raw = render_display_image(
+        example_layer.raw_class_map, example_layer.transform, example_layer.crs
+    )
+    for key, display in (("map_raw", raw), ("map_corrected", corrected)):
+        if (
+            display.classes.shape != layer.display.classes.shape
+            or display.transform != layer.display.transform
+        ):
+            msg = (
+                f"exposed-bed example {example['item_id_used']} is not on "
+                "the grid of the latest map"
+            )
+            raise PublishRefused(msg)
+        _require_dict(block[key], f"exposed_bed_example {key}")["bounds"] = (
+            display.bounds
+        )
+    pngs = [(raw_png_path(example), raw)]
+    if not same:
+        pngs.append((png_path(example), corrected))
+    return pngs
 
 
 def _photo(

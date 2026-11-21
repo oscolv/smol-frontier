@@ -241,8 +241,11 @@ class map itself is never changed — only the reported figures.
 
 Sources: config.py; `hydro/flood_map.py` (`PIXEL_HA = 0.01`);
 `tests/test_levels.py`, `tests/test_curve.py`, `tests/test_flood_map.py`,
-`tests/test_bed.py`; `tests/test_regression_scenes.py` (2024-06-09: raw
-434.21 ha → 15.70 ha with the haze rescue; 432.25 → 13.74 without).
+`tests/test_bed.py`; `tests/test_regression_scenes.py`. The dry-season
+control 2024-06-09 (level 2004.60 m, margin 2005.54 m), Earth Search copy
+in the production run 20261119T200232: raw 434.35 ha (1.90 ha under
+haze) → 15.66 ha corrected, 418.69 ha removed. It is the
+`exposed_bed_example` of `series.json` (§11).
 
 ## 9. Series builder and manifest (`series.py`, `smolf series build`)
 
@@ -348,9 +351,13 @@ neither or both exits 2) into `outputs/publish/` (or
 last `ok` scene plus run context, constants, the reservoir outline as an
 RFC 7946 MultiPolygon and the current SIH level),
 `series.json` (every `ok` and POOR scene; errors excluded; the committed
-stage–area curve),
+stage–area curve; the `exposed_bed_example`, the run's first `ok` record
+of `EXPOSED_BED_EXAMPLE_DATE = 2024-06-09` with its raw and corrected
+maps, or null when the run has none or its correction did not apply),
 `map/<date>_<item_id>.tif` and `.png` for the
-latest scene, and the integrity index `publish.json`. Field by field:
+latest scene, `map/<date>_<item_id>.raw.png` and `.png` for the example
+scene (PNG only, on the latest `map.png` grid, re-classified with the
+latest map's checks), and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
 (`SCHEMA_VERSION = "3.4.0"`, written exactly; each schema accepts any
 `3.x.y`, and only a new optional field, a change in how a photo is
@@ -427,9 +434,11 @@ valid contract, each only if it is itself a valid contract.
 Measured: `smolf publish --run 20261030T031055` → exit 0, `latest.json`
 2026-10-12, `hyacinth_corrected_ha` 818.34, `pct_reservoir_corrected`
 64.86, GOOD, CLEAN, RED, `smolf_version` 0.3.0, `schema_version` 2.0.0.
-The 2024-06-09 control (Planetary Computer copy) publishes raw 432.25 ha →
-corrected 13.74 ha, `removed_ha` 418.51, EXPOSED_BED, with 41 851 class-5
-pixels (418.51 ha).
+The 2024-06-09 control of the production run 20261119T200232 (Earth
+Search copy) publishes as `exposed_bed_example`: raw 434.35 ha (1.90 ha
+under haze) → corrected 15.66 ha, `removed_ha` 418.69, EXPOSED_BED, level
+2004.60 m, margin 2005.54 m, with 41 869 class-5 pixels (418.69 ha) in
+the re-classified 10 m map (41 768 in the warped corrected PNG).
 
 Sources: `tests/test_publish.py` (fixture run end to end, refusals,
 schema negatives, guard, class-5 mask); `tests/test_publish_regression.py`

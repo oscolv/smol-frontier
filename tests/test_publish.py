@@ -2228,6 +2228,60 @@ def test_publish_exposed_bed_example_off_the_latest_grid_exit_2(
     assert scene_env.photo_calls == []  # refused before any photo read
 
 
+def test_publish_exposed_bed_example_removed_ha_mismatch_exit_2_keeps_previous(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root, "20240101T000000", [_record("2024-01-01", "A", "ok")])
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", "20240101T000000").exit_code == 0
+    before = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    scene_env.photo_calls.clear()
+    records = _example_records()
+    # only the example (not the latest scene) disagrees with its class-5 area
+    records[-2] = _record(
+        "2024-06-09", EXAMPLE_ITEM, "ok", regime="EXPOSED_BED", removed_ha=0.57
+    )
+    _write_run(series_root, records=records)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    assert EXAMPLE_ITEM in result.output and "removed_ha" in result.output
+    after = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    assert after == before
+    assert scene_env.photo_calls == []
+
+
+def test_publish_exposed_bed_example_null_when_first_ok_record_uncorrected(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    records = [
+        _record(
+            "2024-06-09",
+            "S2A_14QMH_20240609_0_L2A",
+            "ok",
+            bed_applied=False,
+            bed_reason="no SIH level for 2024-06-09",
+            level_m=None,
+            margin_m=None,
+            expected_bed_ha=None,
+            removed_ha=None,
+        ),
+        _record("2024-06-09", "S2B_14QMH_20240609_0_L2A", "ok"),
+        _record("2024-07-01", AFTER_EXAMPLE_ITEM, "ok"),
+    ]
+    out = _publish_records(series_root, tmp_path, records)
+    assert _series(out)["exposed_bed_example"] is None
+    assert not list((out / "map").glob("2024-06-09_*"))
+    assert len(scene_env.classify_mirrors) == 1
+
+
 def test_publish_exposed_bed_example_allowlist() -> None:
     assert publish.is_allowed(EXAMPLE_RAW_PNG)
     assert publish.is_allowed(EXAMPLE_PNG)
@@ -2255,6 +2309,8 @@ def test_publish_exposed_bed_example_schema(series_root: Path, tmp_path: Path) -
         {k: v for k, v in block.items() if k != "margin_m"},
         {k: v for k, v in block.items() if k != "expected_bed_ha"},
         {**block, "margin_m": None},
+        {**block, "level_m": None},
+        {k: v for k, v in block.items() if k != "level_m"},
         {**block, "expected_bed_ha": None},
         {**block, "bed_applied": False},
     ):

@@ -241,7 +241,10 @@ class map itself is never changed — only the reported figures.
 
 Sources: config.py; `hydro/flood_map.py` (`PIXEL_HA = 0.01`);
 `tests/test_levels.py`, `tests/test_curve.py`, `tests/test_flood_map.py`,
-`tests/test_bed.py`; `tests/test_regression_scenes.py`. The dry-season
+`tests/test_bed.py`; `tests/test_regression_scenes.py`, which guards
+the Planetary Computer copy of 2024-06-09 (raw 434.21 ha → 15.70 ha);
+the Earth Search figures below come from the production run (see the
+AGENTS.md control values). The dry-season
 control 2024-06-09 (level 2004.60 m, margin 2005.54 m), Earth Search copy
 in the production run 20261119T200232: raw 434.35 ha (1.90 ha under
 haze) → 15.66 ha corrected, 418.69 ha removed. It is the

@@ -374,9 +374,10 @@ same values), plus `margin_m` and `expected_bed_ha` (copied from the run
 row and rounded to 2 decimals like `level_m`, so the rule can be
 explained: hyacinth above `margin_m` was removed) and `map_raw` and
 `map_corrected`. Its `bed_applied` is always `true`, and its
-`removed_ha`, `margin_m` and `expected_bed_ha` are numbers: the block is `null` when
-the run has no `ok` record of that date or when the correction did not
-apply to it, and smolf never substitutes another scene. Publish copies
+`level_m`, `removed_ha`, `margin_m` and `expected_bed_ha` are numbers,
+never null: the block is `null` when the run has no `ok` record of that
+date or when the correction did not apply to it, and smolf never
+substitutes another scene. Publish copies
 the run's figures; it carries no dense/interface split of `removed_ha`,
 which the run does not record.
 

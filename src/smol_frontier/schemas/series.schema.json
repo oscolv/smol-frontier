@@ -127,6 +127,7 @@
               "type": "object",
               "required": [
                 "bed_applied",
+                "level_m",
                 "removed_ha",
                 "margin_m",
                 "expected_bed_ha",
@@ -136,6 +137,10 @@
               "properties": {
                 "bed_applied": {
                   "const": true
+                },
+                "level_m": {
+                  "description": "The day's SIH level the correction used, m a.s.l.; never null here.",
+                  "type": "number"
                 },
                 "removed_ha": {
                   "$ref": "#/$defs/area"

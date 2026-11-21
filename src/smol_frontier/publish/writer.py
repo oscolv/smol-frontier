@@ -25,6 +25,7 @@ from smol_frontier.publish.map import (
     _MAP_DIR,
     PublishedMap,
     build_map,
+    committed_curve,
     map_path,
     png_path,
 )
@@ -385,10 +386,11 @@ def publish_run(
     run_dir = select_run(root, run_id)
     records = series.load_records(run_dir / "scenes")
     manifest = _read_manifest(run_dir)
+    committed = committed_curve(manifest)
     latest = latest_document(records, manifest, levels_path)
-    series_doc = series_document(records, manifest)
+    series_doc = series_document(records, manifest, committed)
     record = latest_record(records)
-    layer = build_map(record, manifest)
+    layer = build_map(record, manifest, committed)
     latest_map = _require_dict(latest["map"], "latest.json map")
     latest_map["bounds"] = layer.display.bounds
     photos: dict[str, TrueColour] = {}

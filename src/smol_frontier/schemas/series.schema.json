@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/oscolv/smol-frontier/schemas/series.schema.json",
   "title": "smolf series.json",
-  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). monthly is the per-month median of hyacinth_corrected_ha over non-HIDDEN scenes. Additional properties are allowed.",
+  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). monthly is the per-month median of hyacinth_corrected_ha over non-HIDDEN scenes. stage_area_curve is the committed stage–area curve A(h) the exposed-bed correction reads, in hectares. Additional properties are allowed.",
   "type": "object",
   "required": [
     "schema_version",
@@ -10,7 +10,8 @@
     "run_id",
     "series_sha256",
     "scenes",
-    "monthly"
+    "monthly",
+    "stage_area_curve"
   ],
   "properties": {
     "schema_version": {
@@ -43,6 +44,74 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/month"
+      }
+    },
+    "stage_area_curve": {
+      "description": "The committed stage–area curve (data/hydro/stage_area_curve.csv), never refitted: parallel arrays with one entry per grid row, areas converted from km² to hectares. Since 3.4.0.",
+      "type": "object",
+      "required": [
+        "stage_m",
+        "area_ha",
+        "area_ha_p2_5",
+        "area_ha_p97_5",
+        "stage_min_m",
+        "stage_max_m",
+        "anchors",
+        "sha256"
+      ],
+      "properties": {
+        "stage_m": {
+          "description": "Grid stages, m a.s.l., ascending, 3 decimals.",
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "number"
+          }
+        },
+        "area_ha": {
+          "description": "Fitted water-surface area at each stage, ha.",
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/area"
+          }
+        },
+        "area_ha_p2_5": {
+          "description": "Bootstrap 2.5th percentile of the area at each stage, ha.",
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/area"
+          }
+        },
+        "area_ha_p97_5": {
+          "description": "Bootstrap 97.5th percentile of the area at each stage, ha.",
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "$ref": "#/$defs/area"
+          }
+        },
+        "stage_min_m": {
+          "description": "First grid stage, m a.s.l.",
+          "type": "number"
+        },
+        "stage_max_m": {
+          "description": "Last grid stage, m a.s.l.; the curve is undefined above it.",
+          "type": "number"
+        },
+        "anchors": {
+          "description": "Official level–volume points the V(h) fit is pinned to.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/curve_anchor"
+          }
+        },
+        "sha256": {
+          "description": "sha256 of the committed curve CSV; equals the run manifest's stage_area_curve_csv input.",
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
       }
     }
   },
@@ -558,6 +627,27 @@
           "median_ha": {
             "type": "number"
           }
+        }
+      }
+    },
+    "curve_anchor": {
+      "type": "object",
+      "required": [
+        "stage_m",
+        "volume_hm3",
+        "source"
+      ],
+      "properties": {
+        "stage_m": {
+          "type": "number"
+        },
+        "volume_hm3": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
         }
       }
     }

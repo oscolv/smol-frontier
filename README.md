@@ -5,7 +5,7 @@ covered by water hyacinth. It reads Sentinel-2 satellite scenes and reports
 the covered area in hectares for each scene. The pipeline is deterministic,
 and every input is public, so anyone can rerun it and get the same figures.
 
-The current release is smolf 0.9.0. A verification layer and an agent that
+The current release is smolf 0.10.0. A verification layer and an agent that
 explain change over time will run on top of these figures. They are not
 built yet.
 

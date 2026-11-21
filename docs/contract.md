@@ -1,4 +1,4 @@
-# Publish contract (`schema_version` 3.3.0)
+# Publish contract (`schema_version` 3.4.0)
 
 What `smolf publish` writes and what a downstream consumer may rely on.
 The JSON Schemas packaged with smolf (`src/smol_frontier/schemas/`:
@@ -7,7 +7,7 @@ Schema draft 2020-12) are the source of truth; this document explains
 them field by field. `tests/test_contract_doc.py` fails if a schema
 property is missing here.
 
-First release containing this contract: smolf 0.8.0 (tag `v0.8.0`).
+First release containing this contract: smolf 0.10.0 (tag `v0.10.0`).
 Changes from earlier versions are listed under "Versioning".
 
 The download bundle (`smolf export series-csv`) is derived from this
@@ -188,8 +188,8 @@ or DOUBTFUL), with every per-scene field above at the top level, plus:
 
 | Field | Type | Unit | Null | Meaning |
 | --- | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
-| `smolf_version` | string | — | no | smolf version that wrote the file (`0.9.0` for this release). |
+| `schema_version` | string `3.x.y` | — | no | Contract version; smolf writes exactly `3.4.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `smolf_version` | string | — | no | smolf version that wrote the file (`0.10.0` for this release). |
 | `newest_acquisition` | object | — | no | Newest scene of the run of any quality (never an error scene). It may be POOR and newer than the scene above: "a newer scene exists but was unusable". |
 | `newest_acquisition.date` | string `YYYY-MM-DD` | — | no | Its acquisition date. |
 | `newest_acquisition.item_id` | string | — | no | Its STAC item id. |
@@ -295,7 +295,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.4.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -304,6 +304,18 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `monthly[].month` | string `YYYY-MM` | no | Calendar month (UTC dates). |
 | `monthly[].median_ha` | number ≥ 0, ha | when `n_scenes` is 0 | Ordinary median of the month's non-HIDDEN `hyacinth_corrected_ha`. |
 | `monthly[].n_scenes` | integer ≥ 0 | no | The month's scenes with `display_status` `FULL` or `LOWER_BOUND`. |
+| `stage_area_curve` | object | no | The committed stage–area curve A(h) the exposed-bed correction reads (see below). Since 3.4.0. |
+| `stage_area_curve.stage_m` | array of numbers, m a.s.l. | no | Grid stages, ascending, one entry per row of the committed grid, 3 decimals. |
+| `stage_area_curve.area_ha` | array of numbers ≥ 0, ha | no | Fitted water-surface area at each `stage_m`, 2 decimals. |
+| `stage_area_curve.area_ha_p2_5` | array of numbers ≥ 0, ha | no | Lower bound (bootstrap 2.5th percentile) of the area at each `stage_m`, 2 decimals. |
+| `stage_area_curve.area_ha_p97_5` | array of numbers ≥ 0, ha | no | Upper bound (bootstrap 97.5th percentile) of the area at each `stage_m`, 2 decimals. |
+| `stage_area_curve.stage_min_m` | number, m a.s.l. | no | First grid stage (`stage_m[0]`). |
+| `stage_area_curve.stage_max_m` | number, m a.s.l. | no | Last grid stage (`stage_m[-1]`); the curve is not defined above it. |
+| `stage_area_curve.anchors` | array of anchor objects | no | The official points the fit is pinned to. |
+| `stage_area_curve.anchors[].stage_m` | number, m a.s.l. | no | Anchor level. |
+| `stage_area_curve.anchors[].volume_hm3` | number ≥ 0, hm³ | no | Stored volume at the anchor level (a volume, not an area: the fit is V(h)). |
+| `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. (CONAGUA dam inventory)`. |
+| `stage_area_curve.sha256` | string, 64 hex | no | sha256 of the committed curve CSV (`data/hydro/stage_area_curve.csv`); equals the run manifest's `stage_area_curve_csv` input. |
 
 ### `monthly`
 
@@ -319,7 +331,25 @@ instead of inventing a value. `LOWER_BOUND` scenes enter the median at
 face value; a consumer that wants to flag such months can count them in
 `scenes`.
 
-Quality flags (degrading/informational) are not part of 3.3.0.
+### `stage_area_curve`
+
+The curve file the exposed-bed correction reads
+(`data/hydro/stage_area_curve.csv`), as committed; publish never refits
+it, and refuses when the file differs from the run's input (see
+"Refusals and exit codes"), so the published curve is the one behind the
+published figures. The four arrays are parallel: entry `i` of `area_ha`,
+`area_ha_p2_5` and `area_ha_p97_5` belongs to `stage_m[i]`. smolf converts
+the file's km² to hectares (× 100) before rounding, so the areas share
+the unit of every other contract figure. The grid ends at
+`CURVE_GRID_TOP` (2018.5 m) because the spline extrapolates above it;
+draw the curve only between `stage_min_m` and `stage_max_m`. The
+`anchors` are the official level–volume points of the SRH descriptive
+report of the dam (`CURVE_ANCHORS`, see `source`); A(h) is the derivative of the fitted V(h), so
+they mark where the fit is pinned rather than points on the area curve.
+Anchors can lie outside `stage_min_m`..`stage_max_m` (today 2003.16 m
+and 2020.0 m do), because they pin V(h), not the published A(h) grid.
+
+Quality flags (degrading/informational) are not part of 3.4.0.
 
 ## `publish.json`
 
@@ -328,7 +358,7 @@ and never lists itself.
 
 | Field | Type | Null | Meaning |
 | --- | --- | --- | --- |
-| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.3.0`, the schema accepts any `3.x.y` (no trailing newline). |
+| `schema_version` | string `3.x.y` | no | Contract version; smolf writes exactly `3.4.0`, the schema accepts any `3.x.y` (no trailing newline). |
 | `smolf_version` | string | no | smolf version that wrote the file. |
 | `run_id` | string | no | Series run. |
 | `series_sha256` | string, 64 hex | no | sha256 of the run's `series.csv`. |
@@ -479,11 +509,13 @@ one of a same-month scene. All of them:
   re-classified with the run's water mirror, rebuilt from the row's
   `level_m` when the exposed-bed correction applied, and without one
   otherwise);
+- the committed stage–area curve differs (sha256) from the one the run's
+  manifest recorded (`stage_area_curve_csv`). Checked on every publish,
+  since 3.4.0: `series.json` publishes the curve itself;
 - the exposed-bed correction was applied to the latest scene and the
-  flood-stage map or the stage–area curve differs (sha256) from the one
-  the run's manifest recorded. These two hashes are checked only in that
-  case: without the correction no class 5 exists, and neither input
-  touches the published figures;
+  flood-stage map differs (sha256) from the one the run's manifest
+  recorded. This hash is checked only in that case: without the
+  correction no class 5 exists, and the map touches no published figure;
 - the exposed-bed margin recomputed from the row's `level_m` with the
   committed stage–area curve does not round to the row's margin, or the
   class-5 area differs from `removed_ha` at the hundredth;
@@ -556,11 +588,23 @@ one of a same-month scene. All of them:
     accepts 3.3.0 files and ignores the unknown field, so consumers
     pinned to 3.2 keep validating. The raw hectares of a 3.3.0 run exceed
     those of a 3.2.0 run of the same scene by `hyacinth_under_haze_ha`.
+  - `schema_version` 3.4.0 — smolf `v0.10.0` (minor; issue #86, spec
+    #85): `series.json` carries `stage_area_curve`, the committed
+    stage–area curve in hectares (`stage_m`, `area_ha`, `area_ha_p2_5`,
+    `area_ha_p97_5`, `stage_min_m`, `stage_max_m`, `anchors`, `sha256`).
+    It is required in the 3.4.0 schema, following the ruling of 3.3.0: a
+    3.3 schema accepts 3.4.0 files and ignores the unknown property.
+    `latest.json` and `publish.json` are unchanged. Publish now checks
+    the curve's sha256 against the run manifest on every publish, not
+    only when the latest scene applied the correction. `smolf export
+    series-csv` validates against the packaged schemas, so after
+    upgrading, re-run `smolf publish` before exporting (an older 3.3.0
+    publish is refused for the missing `stage_area_curve`).
 - **Breaking (major `schema_version`):** removing or renaming a field,
   changing a type, unit or meaning, adding or removing an enum value
   (enums are closed, so a new value fails an older schema), making a
-  required field optional, or adding a required field (one exception,
-  3.3.0: a new required field that older minor schemas ignore as an
+  required field optional, or adding a required field (exceptions, 3.3.0
+  and 3.4.0: a new required field that older minor schemas ignore as an
   additional property).
 - **Additive (minor `schema_version`):** adding an optional field, or
   changing how a published photo is rendered (stretch, gamma, clipping)

@@ -7,6 +7,7 @@ documents directly against the packaged schema.
 """
 
 import copy
+import csv
 import hashlib
 import json
 import os
@@ -21,6 +22,7 @@ import geopandas as gpd
 import numpy as np
 import pytest
 import rasterio
+from jsonschema import Draft202012Validator
 from rasterio.features import rasterize
 from rasterio.warp import (
     Resampling,
@@ -433,7 +435,7 @@ def test_publish_latest_golden_values(
         "cover_band": "RED",
         "display_status": "FULL",
         "display_ha": {"total": 631, "dense": 400, "interface": 231},
-        "schema_version": "3.3.0",
+        "schema_version": "3.4.0",
         "smolf_version": __version__,
         "newest_acquisition": {
             "date": "2024-01-05",
@@ -1046,7 +1048,7 @@ def test_publish_series_entries_and_order(series_root: Path, tmp_path: Path) -> 
     ]
     assert doc["run_id"] == RUN_ID
     assert doc["series_sha256"] == "cd" * 32
-    assert doc["schema_version"] == "3.3.0"
+    assert doc["schema_version"] == "3.4.0"
     assert doc["smolf_version"] == __version__
     assert [
         (s["quality_light"], s["bed_applied"], s["display_status"]) for s in scenes
@@ -1308,13 +1310,149 @@ def test_publish_series_schema_rejects_bad_monthly(
 
 
 @pytest.mark.parametrize(
-    "key", ["scenes", "monthly", "run_id", "series_sha256", "schema_version"]
+    "key",
+    [
+        "scenes",
+        "monthly",
+        "run_id",
+        "series_sha256",
+        "schema_version",
+        "stage_area_curve",
+    ],
 )
 def test_publish_series_schema_rejects_missing_top_level(
     series_root: Path, tmp_path: Path, key: str
 ) -> None:
     doc = copy.deepcopy(_series_run(series_root, tmp_path))
     del doc[key]
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", doc)
+
+
+# --- stage-area curve block (series.json) ---------------------------------
+
+# WHY: the 3.3.0 series schema as tagged v0.9.0 (git show), committed so the
+#   additivity check needs no git and no network.
+SCHEMA_3_3_0 = Path(__file__).parent / "fixtures/schemas_3_3_0/series.schema.json"
+COMMITTED_CURVE = PROJECT_ROOT / "data/hydro/stage_area_curve.csv"
+
+
+def _curve_rows(path: Path) -> list[dict[str, str]]:
+    with path.open(encoding="utf-8", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
+def _expected_curve_block(path: Path) -> dict:
+    rows = _curve_rows(path)
+    return {
+        "stage_m": [round(float(r["stage_m"]), 3) for r in rows],
+        "area_ha": [round(float(r["area_km2"]) * 100, 2) for r in rows],
+        "area_ha_p2_5": [round(float(r["area_km2_p2_5"]) * 100, 2) for r in rows],
+        "area_ha_p97_5": [round(float(r["area_km2_p97_5"]) * 100, 2) for r in rows],
+        "stage_min_m": round(float(rows[0]["stage_m"]), 3),
+        "stage_max_m": round(float(rows[-1]["stage_m"]), 3),
+        "anchors": [
+            {
+                "stage_m": stage,
+                "volume_hm3": volume,
+                "source": publish.CURVE_ANCHOR_SOURCE,
+            }
+            for stage, volume in settings.CURVE_ANCHORS
+        ],
+        "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+    }
+
+
+def test_publish_series_stage_area_curve_is_the_fixture_curve(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    doc = _series_run(series_root, tmp_path)
+    block = doc["stage_area_curve"]
+    assert block == _expected_curve_block(scene_env.curve_path)
+    assert block["area_ha"] == [0.0, 1922.0]
+    assert block["sha256"] == series.sha256_file(scene_env.curve_path)
+    assert "stage_area_curve" not in _latest(tmp_path / "pub")
+
+
+def test_publish_series_stage_area_curve_is_the_committed_curve(
+    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(curve, "DEFAULT_CURVE_CSV_PATH", COMMITTED_CURVE)
+    record = _record(
+        "2024-01-04",
+        LATEST_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-01-04",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    _write_run(series_root, records=[record])
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 0, result.output
+    block = _series(out)["stage_area_curve"]
+    assert block == _expected_curve_block(COMMITTED_CURVE)
+    assert len(block["stage_m"]) == len(_curve_rows(COMMITTED_CURVE)) == 400
+    assert block["stage_max_m"] == settings.CURVE_GRID_TOP
+    assert [a["stage_m"] for a in block["anchors"]] == [2003.16, 2018.0, 2020.0]
+    assert [a["volume_hm3"] for a in block["anchors"]] == [52.1, 182.0, 208.0]
+
+
+def test_publish_curve_hash_mismatch_exit_2_without_bed_correction(
+    series_root: Path, tmp_path: Path
+) -> None:
+    record = _record(
+        "2024-01-04",
+        LATEST_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-01-04",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    run_dir = _write_run(series_root, records=[record])
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    manifest["inputs"]["stage_area_curve_csv"] = "0" * 64
+    (run_dir / "manifest.json").write_text(json.dumps(manifest))
+    out = tmp_path / "pub"
+    result = _publish(out)
+    assert result.exit_code == 2
+    lines = result.output.strip().splitlines()
+    assert len(lines) == 1
+    assert "stage-area curve" in lines[0]
+    assert not out.exists()
+
+
+def test_publish_series_3_3_0_schema_accepts_the_curve_block(
+    series_root: Path, tmp_path: Path
+) -> None:
+    doc = _series_run(series_root, tmp_path)
+    assert doc["schema_version"] == "3.4.0"
+    schema = json.loads(SCHEMA_3_3_0.read_text(encoding="utf-8"))
+    assert "stage_area_curve" not in schema["properties"]
+    Draft202012Validator(schema).validate(doc)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("stage_m", "2000"),
+        ("area_ha", [-1.0, 0.0]),
+        ("sha256", "XYZ"),
+        ("anchors", [{"stage_m": 2003.16, "volume_hm3": 52.1}]),
+        ("stage_min_m", None),
+    ],
+)
+def test_publish_series_schema_rejects_bad_curve_block(
+    series_root: Path, tmp_path: Path, key: str, value: object
+) -> None:
+    doc = copy.deepcopy(_series_run(series_root, tmp_path))
+    doc["stage_area_curve"][key] = value
     with pytest.raises(publish.ContractInvalid):
         publish.validate("series", doc)
 
@@ -2303,7 +2441,7 @@ def _valid_index() -> dict:
         "files": [{"path": "latest.json", "sha256": "ab" * 32}],
         "generated_utc": "2026-11-16T10:00:00Z",
         "run_id": RUN_ID,
-        "schema_version": "3.3.0",
+        "schema_version": "3.4.0",
         "series_sha256": "cd" * 32,
         "smolf_version": "0.5.0",
     }
@@ -3042,10 +3180,11 @@ def test_publish_malformed_row_is_contract_invalid() -> None:
     record = _record("2024-01-01", "A", "ok")
     record["row"] = ["not", "a", "row"]
     manifest = {"run_id": RUN_ID, "counts": {"ok": 1, "skipped": 0, "errors": 0}}
+    committed = publish.CommittedCurve(curve.load_curve(), "ab" * 32)
     with pytest.raises(publish.ContractInvalid, match="row of A"):
         publish.latest_document([record], manifest)
     with pytest.raises(publish.ContractInvalid, match="row of A"):
-        publish.series_document([record], manifest)
+        publish.series_document([record], manifest, committed)
 
 
 # --- map-name patterns ------------------------------------------------------------

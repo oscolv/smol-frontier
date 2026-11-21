@@ -22,7 +22,7 @@ from smol_frontier.publish.aggregates import (
     same_month,
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
-from smol_frontier.publish.map import map_path, png_path
+from smol_frontier.publish.map import CommittedCurve, map_path, png_path
 from smol_frontier.publish.truecolour import (
     attribution,
     clipped_image_path,
@@ -55,12 +55,32 @@ from smol_frontier.publish.truecolour import (
 #   rescued under thin haze (issue #69, spec #70). Required in the schemas
 #   although the bump is minor: the ^3.x pattern accepts it and a consumer
 #   pinned to 3.2 ignores the unknown field (ruling of spec #70).
-SCHEMA_VERSION = "3.3.0"
+#   3.4.0: series.json carries stage_area_curve, the committed A(h) grid in
+#   hectares with its bootstrap band and the official anchors (issue #86,
+#   spec #85). Required in the 3.4.0 schema; a 3.3 schema ignores it.
+SCHEMA_VERSION = "3.4.0"
 
 # WHY: contract decimals follow series.csv — hectares, percentages and water
 #   levels to 2 decimals, fractions to 4.
 _DECIMALS_FRACTION = 4
 _DECIMALS_DEFAULT = 2
+# WHY: curve stages to the mm, the resolution the curve CSV is written at.
+_DECIMALS_STAGE = 3
+# WHY: km² to hectares, so the curve shares the unit of every contract area.
+_HA_PER_KM2 = 100.0
+
+# WHY: every CURVE_ANCHORS point (level m, volume hm³) comes from the SRH
+#   descriptive report of the dam, section "Características del
+#   almacenamiento" (config.py); the contract names that document so a
+#   consumer can label and cite the anchors without knowing the config.
+# HOW: the document's own Spanish title, kept as-is; it is undated (its
+#   latest cited figure is from 1969), hence "n.d.".
+CURVE_ANCHOR_SOURCE = (
+    "Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la "
+    "presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. "
+    "(CONAGUA dam inventory)"
+)
+
 # WHY: 6 decimals of a degree are ~0.1 m at Endhó, two orders below the
 #   10 m pixel the GSW polygon was traced on, and keep latest.json small.
 _DECIMALS_OUTLINE = 6
@@ -359,8 +379,33 @@ def _scene_entries(records: list[dict[str, object]]) -> list[dict[str, object]]:
     ]
 
 
+def stage_area_curve(committed: CommittedCurve) -> dict[str, object]:
+    """The ``series.json`` curve block: the committed grid, never a refit."""
+    grid = committed.grid
+
+    def hectares(values: object) -> list[float]:
+        return [round(float(v) * _HA_PER_KM2, _DECIMALS_DEFAULT) for v in values]
+
+    stages = [round(float(v), _DECIMALS_STAGE) for v in grid.stage_m]
+    return {
+        "stage_m": stages,
+        "area_ha": hectares(grid.area_km2),
+        "area_ha_p2_5": hectares(grid.area_p2_5),
+        "area_ha_p97_5": hectares(grid.area_p97_5),
+        "stage_min_m": stages[0],
+        "stage_max_m": stages[-1],
+        "anchors": [
+            {"stage_m": stage, "volume_hm3": volume, "source": CURVE_ANCHOR_SOURCE}
+            for stage, volume in settings.CURVE_ANCHORS
+        ],
+        "sha256": committed.sha256,
+    }
+
+
 def series_document(
-    records: list[dict[str, object]], manifest: dict[str, object]
+    records: list[dict[str, object]],
+    manifest: dict[str, object],
+    committed: CommittedCurve,
 ) -> dict:
     """``series.json``: every ok and skipped scene, sorted by date.
 
@@ -375,4 +420,5 @@ def series_document(
         "series_sha256": manifest["series_sha256"],
         "scenes": scenes,
         "monthly": monthly_medians(scenes),
+        "stage_area_curve": stage_area_curve(committed),
     }

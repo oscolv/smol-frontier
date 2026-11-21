@@ -24,6 +24,7 @@ byte-identical files; only the integrity index `publish.json` carries a timestam
 
 from smol_frontier.config import settings as settings  # re-exported (tests read it)
 from smol_frontier.publish.documents import (
+    CURVE_ANCHOR_SOURCE,
     SCHEMA_VERSION,
     canonical_json,
     current_level,
@@ -31,13 +32,21 @@ from smol_frontier.publish.documents import (
     latest_record,
     reservoir_outline,
     series_document,
+    stage_area_curve,
     validate,
 )
 from smol_frontier.publish.documents import (
     _validator as _validator,  # re-exported (tests read it)
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused
-from smol_frontier.publish.map import PublishedMap, build_map, map_path, png_path
+from smol_frontier.publish.map import (
+    CommittedCurve,
+    PublishedMap,
+    build_map,
+    committed_curve,
+    map_path,
+    png_path,
+)
 from smol_frontier.publish.select import select_run
 from smol_frontier.publish.truecolour import guard_true_colour, image_path
 from smol_frontier.publish.writer import (
@@ -55,14 +64,17 @@ __all__ = [
     "ALLOWED_FILES",
     "ALLOWED_IMAGE_PATTERN",
     "ALLOWED_MAP_PATTERN",
+    "CURVE_ANCHOR_SOURCE",
     "INDEX_FILE",
     "SCHEMA_VERSION",
+    "CommittedCurve",
     "ContractInvalid",
     "PublishRefused",
     "PublishedMap",
     "build_map",
     "canonical_json",
     "check_out_dir",
+    "committed_curve",
     "current_level",
     "guard_true_colour",
     "image_path",
@@ -76,5 +88,6 @@ __all__ = [
     "reservoir_outline",
     "select_run",
     "series_document",
+    "stage_area_curve",
     "validate",
 ]

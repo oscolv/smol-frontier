@@ -207,9 +207,13 @@ class Settings:
     # HOW: fixed cutoff from the author's prior research (stage–area curve).
     CURVE_FIT_H_MAX: float = 2017.5
 
-    # WHY: official (level m, volume hm³) points from the dam's design
-    #   report — they anchor the fit where SIH bins are absent or suspect.
-    # HOW: design-report values, fixed per project spec.
+    # WHY: official (level m, volume hm³) points of the dam — they anchor
+    #   the fit where SIH bins are absent or suspect.
+    # HOW: quoted from the "Características del almacenamiento" section of
+    #   SRH, Memoria descriptiva de la presa Endó (Endhó), ID 1583, n.d.
+    #   (latest cited figure 1969): dead storage 52.1 at 2003.16 m (main
+    #   canal invert), total 182.0 at 2018.00 m (spillway crest, NAMO), and
+    #   208.0 at 2020.00 m (NAME), the stated 182.0 plus the 26.0 surcharge.
     CURVE_ANCHORS: tuple[tuple[float, float], ...] = (
         (2003.16, 52.1),
         (2018.0, 182.0),

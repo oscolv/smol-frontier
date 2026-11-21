@@ -343,13 +343,15 @@ neither or both exits 2) into `outputs/publish/` (or
 `$SMOLF_DATA_DIR/outputs/publish/`; `--out` overrides): `latest.json` (the
 last `ok` scene plus run context, constants, the reservoir outline as an
 RFC 7946 MultiPolygon and the current SIH level),
-`series.json` (every `ok` and POOR scene; errors excluded),
+`series.json` (every `ok` and POOR scene; errors excluded; the committed
+stage–area curve),
 `map/<date>_<item_id>.tif` and `.png` for the
 latest scene, and the integrity index `publish.json`. Field by field:
 `docs/contract.md`; schemas: `src/smol_frontier/schemas/`
-(`SCHEMA_VERSION = "3.2.0"`, written exactly; each schema accepts any
-`3.x.y`, and only a new optional field or a change in how a photo is
-rendered is a minor change — see the
+(`SCHEMA_VERSION = "3.4.0"`, written exactly; each schema accepts any
+`3.x.y`, and only a new optional field, a change in how a photo is
+rendered, or a required field older minor schemas ignore (3.3.0, 3.4.0)
+is a minor change — see the
 versioning rules in `docs/contract.md`). Scene records are sorted by date,
 then requested item id. Figures are copied from the run rows and rounded
 like `series.csv` (2 decimals; fractions 4); nothing is filtered. Each
@@ -377,7 +379,13 @@ scene's, the lower median of the month's non-HIDDEN scenes
 item id), so each year's figure is a real scene. Each year carries `featured`
 (`_featured_indices()`: the current year plus the first, middle and last
 prior years, chosen by scene count only, never hectares; ADR 0002); its photo is clipped to
-the reservoir polygon on the `map.png` grid.
+the reservoir polygon on the `map.png` grid. `series.json`'s
+`stage_area_curve` (`publish.documents.stage_area_curve()`) is the
+committed curve as `hydro.curve.load_curve()` reads it, never refitted:
+parallel `stage_m` (3 decimals) and `area_ha`, `area_ha_p2_5`,
+`area_ha_p97_5` arrays (km² × 100, 2 decimals), the grid's first and last
+stage, the `CURVE_ANCHORS` level–volume points with their source, and the
+file's sha256.
 
 Runs do not persist class maps, so the latest scene is re-classified from
 the scene cache after its sha256 matches the record's `cache_sha256` (a
@@ -390,10 +398,11 @@ committed stage–area curve — the run's own code path (`bed_margin()`).
 The row's `margin_m` is rounded to 2 decimals and cannot reproduce the
 run's removal: pixels whose stage lies between the rounded and the
 full-precision margin would flip. Publish therefore refuses (exit 2) when
-the curve's or the flood-stage map's sha256 differs from the run
-manifest's inputs (verified only when the correction was applied to the
-latest scene: without it no class 5 exists and neither input touches the
-published figures), when the recomputed margin does not round to the row's
+the curve's sha256 differs from the run manifest's input (on every
+publish, since `series.json` publishes the curve), when the flood-stage
+map's does (verified only when the correction was applied to the latest
+scene: without it no class 5 exists and the map touches no published
+figure), when the recomputed margin does not round to the row's
 `margin_m`, or when class-5 pixels × `PIXEL_HA = 0.01` differ from
 `removed_ha` at the hundredth. Other refusals (exit 2): incomplete or dirty
 run, unreadable manifest of an explicit `--run` (`--latest` selection skips

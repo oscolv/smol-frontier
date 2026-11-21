@@ -19,8 +19,9 @@ import pytest
 from typer.testing import CliRunner
 
 import smol_frontier
-from smol_frontier import paths, publish
+from smol_frontier import paths, publish, series
 from smol_frontier.cli import app
+from smol_frontier.hydro import curve
 from smol_frontier.publish import export
 from smol_frontier.publish.writer import publish_index
 
@@ -110,6 +111,9 @@ def _manifest(run_id: str = RUN_ID, series_sha: str = SERIES_SHA) -> dict:
             "skipped": sum(r["status"] == "skipped" for r in records),
             "errors": 0,
         },
+        "inputs": {
+            "stage_area_curve_csv": series.sha256_file(curve.DEFAULT_CURVE_CSV_PATH)
+        },
     }
 
 
@@ -153,7 +157,10 @@ def pub(tmp_path: Path, levels: Path) -> Path:
     """A synthetic publish directory: latest.json, series.json, publish.json."""
     pub = tmp_path / "publish"
     pub.mkdir()
-    series_doc = publish.series_document(_records(), _manifest())
+    manifest = _manifest()
+    series_doc = publish.series_document(
+        _records(), manifest, publish.committed_curve(manifest)
+    )
     publish.validate("series", series_doc)
     for name, document in (
         ("series.json", series_doc),

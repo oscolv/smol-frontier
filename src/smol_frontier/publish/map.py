@@ -96,8 +96,11 @@ def _cached_scene(record: dict[str, object]) -> ingest.IngestedScene:
     return ingest_scene(stub, cache_dir=cache_dir)
 
 
-def _check_input(manifest: dict[str, object], key: str, path: Path, label: str) -> None:
-    """Refuse unless ``path`` hashes to the run manifest's ``inputs[key]``."""
+def _check_input(manifest: dict[str, object], key: str, path: Path, label: str) -> str:
+    """Refuse unless ``path`` hashes to the run manifest's ``inputs[key]``.
+
+    Returns the verified sha256.
+    """
     inputs = manifest.get("inputs")
     expected = inputs.get(key) if isinstance(inputs, dict) else None
     actual = series.sha256_file(path)
@@ -107,21 +110,38 @@ def _check_input(manifest: dict[str, object], key: str, path: Path, label: str) 
             f"inputs ({expected})"
         )
         raise PublishRefused(msg)
+    return actual
 
 
-def _run_margin(manifest: dict[str, object], row: dict[str, object]) -> float:
+@dataclass(frozen=True, eq=False)
+class CommittedCurve:
+    """The committed stage-area curve, verified against the run manifest."""
+
+    grid: curve.StageAreaCurve
+    sha256: str
+
+
+def committed_curve(manifest: dict[str, object]) -> CommittedCurve:
+    """The committed stage-area curve, if it is the curve the run used.
+
+    WHY on every publish: series.json publishes the curve itself, so it must
+    be the run's input even when no scene's correction read it.
+    """
+    path = curve.DEFAULT_CURVE_CSV_PATH
+    sha256 = _check_input(manifest, "stage_area_curve_csv", path, "stage-area curve")
+    return CommittedCurve(curve.load_curve(path), sha256)
+
+
+def _run_margin(grid: curve.StageAreaCurve, row: dict[str, object]) -> float:
     """Full-precision margin the run's bed correction used for the row level.
 
     WHY recomputed: the run row stores ``margin_m`` rounded to 2 dp, while
     the correction removed pixels with the full-precision margin; masking
     with the rounded value moves pixels whose stage lies between the two
     and breaks the removed_ha check. So the margin is recomputed from the
-    row's ``level_m`` (no level lookup) with the committed stage-area curve,
-    which must be the curve the run used and must reproduce the row margin.
+    row's ``level_m`` (no level lookup) with the committed stage-area curve
+    (``grid``, from ``committed_curve``), which must reproduce the row margin.
     """
-    path = curve.DEFAULT_CURVE_CSV_PATH
-    _check_input(manifest, "stage_area_curve_csv", path, "stage-area curve")
-    grid = curve.load_curve(path)
     margin = bed_margin(
         float(row["level_m"]),
         grid.stage_m,
@@ -155,11 +175,16 @@ def _flood_stage_for(
     return flood
 
 
-def build_map(record: dict[str, object], manifest: dict[str, object]) -> PublishedMap:
+def build_map(
+    record: dict[str, object],
+    manifest: dict[str, object],
+    committed: CommittedCurve,
+) -> PublishedMap:
     """Re-classify the record's scene and overlay class 5 (C17-C19).
 
     Refuses (PublishRefused) when the cache hash, the per-class hectares,
     the flood-stage map hash or the removed hectares disagree with the run.
+    ``committed`` is the curve ``committed_curve`` verified for this run.
     Class 5 and the haze-rescue mirror use the run row's level and the
     margin recomputed from it (never a fresh level lookup), and only when
     the correction was applied.
@@ -173,7 +198,7 @@ def build_map(record: dict[str, object], manifest: dict[str, object]) -> Publish
     flood = margin = mirror = None
     if row["bed_applied"]:
         flood = _flood_stage_for(manifest, ing, np.shape(ing.inside))
-        margin = _run_margin(manifest, row)
+        margin = _run_margin(committed.grid, row)
         mirror = day_mirror(flood, margin)
     result = classify_scene(ing, mirror)
     mismatches = [

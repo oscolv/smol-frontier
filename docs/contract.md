@@ -323,6 +323,8 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. (CONAGUA dam inventory)`. |
 | `stage_area_curve.sha256` | string, 64 hex | no | sha256 of the committed curve CSV (`data/hydro/stage_area_curve.csv`); equals the run manifest's `stage_area_curve_csv` input. |
 | `exposed_bed_example` | object | when the run has no example scene | The dry-season control scene with its raw and corrected maps, to show the exposed-bed correction on a real scene (see below). Since 3.4.0. |
+| `exposed_bed_example.margin_m` | number, m a.s.l. | no | Margin stage of the correction: `level_m` plus the uncertainty cushion; hyacinth on bed whose flood stage lies above it was removed. Copied from the run row, 2 decimals. Only in this block, not in `scenes`. |
+| `exposed_bed_example.expected_bed_ha` | number ≥ 0, ha | no | Expected exposed bed: the staged area of the flood-stage map above `level_m`. Copied from the run row, 2 decimals. Only in this block, not in `scenes`. |
 | `exposed_bed_example.map_raw` | object | no | The scene's raw map: classes 0–4, before the correction. |
 | `exposed_bed_example.map_raw.path` | string | no | `map/<date>_<item_id>.raw.png`. |
 | `exposed_bed_example.map_raw.bounds` | `[[south, west], [north, east]]` | no | EPSG:4326 extent of the PNG, in the format of `map.bounds`. |
@@ -368,8 +370,11 @@ The scene of `EXPOSED_BED_EXAMPLE_DATE` (`config.py`, 2024-06-09): the
 dry-season control (estiaje, level 2004.60 m) whose raw hyacinth is
 almost all exposed bed. The block is the run's first `ok` record of that
 date (in `scenes` order), exactly as its `scenes` entry (same fields,
-same values), plus `map_raw` and `map_corrected`. Its `bed_applied` is
-always `true` and its `removed_ha` a number: the block is `null` when
+same values), plus `margin_m` and `expected_bed_ha` (copied from the run
+row and rounded to 2 decimals like `level_m`, so the rule can be
+explained: hyacinth above `margin_m` was removed) and `map_raw` and
+`map_corrected`. Its `bed_applied` is always `true`, and its
+`removed_ha`, `margin_m` and `expected_bed_ha` are numbers: the block is `null` when
 the run has no `ok` record of that date or when the correction did not
 apply to it, and smolf never substitutes another scene. Publish copies
 the run's figures; it carries no dense/interface split of `removed_ha`,
@@ -636,7 +641,8 @@ one of a same-month scene. All of them:
     `area_ha_p97_5`, `stage_min_m`, `stage_max_m`, `anchors`, `sha256`).
     `series.json` also carries `exposed_bed_example` (issue #87), the
     2024-06-09 dry-season control scene as its `scenes` entry plus
-    `map_raw` and `map_corrected` (`path`, `bounds`), or `null`; its two
+    `margin_m`, `expected_bed_ha`, `map_raw` and `map_corrected` (`path`,
+    `bounds`), or `null`; its two
     PNGs, `map/<date>_<item_id>.raw.png` and `map/<date>_<item_id>.png`,
     are published next to the latest map and listed in `publish.json`
     (whose closed `files[].path` pattern already admits both names).

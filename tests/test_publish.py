@@ -2059,6 +2059,8 @@ def test_publish_exposed_bed_example_is_the_record_entry_plus_maps(
     bounds = _latest(out)["map"]["bounds"]
     assert block == {
         **entry,
+        "margin_m": 2010.55,
+        "expected_bed_ha": 120.0,
         "map_raw": {"path": EXAMPLE_RAW_PNG, "bounds": bounds},
         "map_corrected": {"path": EXAMPLE_PNG, "bounds": bounds},
     }
@@ -2066,6 +2068,9 @@ def test_publish_exposed_bed_example_is_the_record_entry_plus_maps(
     assert block["bed_applied"] is True
     assert block["removed_ha"] == 0.56
     assert "exposed_bed_example" not in _latest(out)
+    assert all(
+        "margin_m" not in s and "expected_bed_ha" not in s for s in doc["scenes"]
+    )
     assert _latest(out)["item_id"] == AFTER_EXAMPLE_ITEM
 
 
@@ -2243,6 +2248,10 @@ def test_publish_exposed_bed_example_schema(series_root: Path, tmp_path: Path) -
         {**block, "map_corrected": {**block["map_corrected"], "bounds": [[0, 0]]}},
         {k: v for k, v in block.items() if k != "map_corrected"},
         {k: v for k, v in block.items() if k != "removed_ha"},
+        {k: v for k, v in block.items() if k != "margin_m"},
+        {k: v for k, v in block.items() if k != "expected_bed_ha"},
+        {**block, "margin_m": None},
+        {**block, "expected_bed_ha": None},
         {**block, "bed_applied": False},
     ):
         with pytest.raises(publish.ContractInvalid):

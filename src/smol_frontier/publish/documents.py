@@ -421,15 +421,19 @@ def exposed_bed_record(
 
 
 def _exposed_bed_example(records: list[dict[str, object]]) -> dict[str, object] | None:
-    """``exposed_bed_example``: the record's scene entry plus its two maps.
+    """``exposed_bed_example``: the record's scene entry plus the margin and
+    expected bed of its correction (copied from the run row) and its two maps.
 
     Map bounds come from the warped PNGs, so publish_run fills them in.
     """
     record = exposed_bed_record(records)
     if record is None:
         return None
+    row = _require_dict(record["row"], f"row of {record['item_id_used']}")
     return {
         **_scene_entry(record),
+        "margin_m": _round(row["margin_m"], _DECIMALS_DEFAULT),
+        "expected_bed_ha": _round(row["expected_bed_ha"], _DECIMALS_DEFAULT),
         "map_raw": {"path": raw_png_path(record)},
         "map_corrected": {"path": png_path(record)},
     }

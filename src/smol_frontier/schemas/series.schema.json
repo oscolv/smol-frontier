@@ -116,7 +116,7 @@
       }
     },
     "exposed_bed_example": {
-      "description": "The scene of EXPOSED_BED_EXAMPLE_DATE (2024-06-09, the dry-season control): the run's first ok record of that date, as its scenes entry plus map_raw and map_corrected. Null when the run has no such record or its correction did not apply; never another scene. Since 3.4.0.",
+      "description": "The scene of EXPOSED_BED_EXAMPLE_DATE (2024-06-09, the dry-season control): the run's first ok record of that date, as its scenes entry plus margin_m, expected_bed_ha, map_raw and map_corrected. Null when the run has no such record or its correction did not apply; never another scene. Since 3.4.0.",
       "anyOf": [
         {
           "allOf": [
@@ -128,6 +128,8 @@
               "required": [
                 "bed_applied",
                 "removed_ha",
+                "margin_m",
+                "expected_bed_ha",
                 "map_raw",
                 "map_corrected"
               ],
@@ -136,6 +138,14 @@
                   "const": true
                 },
                 "removed_ha": {
+                  "$ref": "#/$defs/area"
+                },
+                "margin_m": {
+                  "description": "Margin stage (level_m plus the uncertainty cushion): hyacinth on bed whose flood stage lies above it was removed; m a.s.l., 2 decimals, copied from the run row.",
+                  "type": "number"
+                },
+                "expected_bed_ha": {
+                  "description": "Expected exposed bed: staged area of the flood-stage map above level_m, ha, 2 decimals, copied from the run row.",
                   "$ref": "#/$defs/area"
                 },
                 "map_raw": {

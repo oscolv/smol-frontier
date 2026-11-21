@@ -179,21 +179,17 @@ def test_publish_regression_exposed_bed_example_2024_06_09(tmp_path: Path) -> No
     series_doc = json.loads((out_dir / "series.json").read_text(encoding="utf-8"))
     block = series_doc["exposed_bed_example"]
     [entry] = series_doc["scenes"]
-    assert {k: v for k, v in block.items() if not k.startswith("map_")} == entry
+    extras = ("map_raw", "map_corrected", "margin_m", "expected_bed_ha")
+    assert {k: v for k, v in block.items() if k not in extras} == entry
     assert block["item_id"] == SCENE_2024_06_09_ES
     assert block["hyacinth_raw_ha"] == 434.35
     assert block["hyacinth_under_haze_ha"] == 1.9
     assert block["hyacinth_corrected_ha"] == 15.66
     assert block["removed_ha"] == 418.69
     assert block["level_m"] == 2004.6
+    assert block["margin_m"] == 2005.54
+    assert block["expected_bed_ha"] == 696.8
     assert block["regime"] == "EXPOSED_BED"
-    # the block carries the series.json scene fields, which have no margin:
-    #   the margin is the record's, re-checked by publish (recomputed from
-    #   level_m, it must round to the row's margin_m)
-    record = json.loads(
-        (FIXTURES / f"{SCENE_2024_06_09_ES}.json").read_text(encoding="utf-8")
-    )
-    assert record["row"]["margin_m"] == 2005.54
     # the example is the latest scene here: its corrected PNG is map.png
     assert block["map_corrected"] == {
         "path": latest["map"]["png"],

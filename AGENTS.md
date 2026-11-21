@@ -41,7 +41,9 @@ The pipeline in order, one line per stage:
   `map`, `truecolour`, `writer`) + `schemas/` (`smolf publish`; neutral,
   versioned JSON + latest map + its Sentinel-2 true-colour photo and
   reservoir-clipped same-month photos, read from the items' COGs at
-  publish time, from one complete run; see
+  publish time, from one complete run; `series.json` also carries the
+  committed `stage_area_curve` and the 2024-06-09 `exposed_bed_example`
+  with its raw and corrected PNGs; see
   `docs/contract.md`)
 - Download bundle — `publish/export.py` (`smolf export series-csv`;
   `series.csv`, `series_monthly.csv`, `README.txt`, `LEEME.txt` and

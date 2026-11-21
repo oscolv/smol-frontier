@@ -322,7 +322,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `stage_area_curve.anchors[].volume_hm3` | number ≥ 0, hm³ | no | Stored volume at the anchor level (a volume, not an area: the fit is V(h)). |
 | `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. (CONAGUA dam inventory)`. |
 | `stage_area_curve.sha256` | string, 64 hex | no | sha256 of the committed curve CSV (`data/hydro/stage_area_curve.csv`); equals the run manifest's `stage_area_curve_csv` input. |
-| `exposed_bed_example` | object | when the run has no example scene | The dry-season control scene with its raw and corrected maps, to show the exposed-bed correction on a real scene (see below). Since 3.4.0. |
+| `exposed_bed_example` | object | when the run has no `ok` record of the example date, or that record's correction did not apply | The dry-season control scene with its raw and corrected maps, to show the exposed-bed correction on a real scene (see below). Since 3.4.0. |
 | `exposed_bed_example.margin_m` | number, m a.s.l. | no | Margin stage of the correction: `level_m` plus the uncertainty cushion; hyacinth on bed whose flood stage lies above it was removed. Copied from the run row, 2 decimals. Only in this block, not in `scenes`. |
 | `exposed_bed_example.expected_bed_ha` | number ≥ 0, ha | no | Expected exposed bed: the staged area of the flood-stage map above `level_m`. Copied from the run row, 2 decimals. Only in this block, not in `scenes`. |
 | `exposed_bed_example.map_raw` | object | no | The scene's raw map: classes 0–4, before the correction. |
@@ -388,7 +388,10 @@ class-5 area of its 10 m map equals `removed_ha` to the hundredth; the
 warped PNG keeps that area to within a fraction of a percent (41 768
 display pixels for 41 869 on the 2024-06-09 control). The raw map has no
 class-5 pixel: it shows that hyacinth with its classifier class instead.
-There is no GeoTIFF of the example scene.
+There is no GeoTIFF of the example scene. No size budget is set for the
+map PNGs; on the production control (2024-06-09, Earth Search) the raw
+PNG is about 38 KB and the corrected one, there also the latest
+`map.png`, about 31 KB.
 
 Quality flags (degrading/informational) are not part of 3.4.0.
 

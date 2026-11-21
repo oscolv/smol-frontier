@@ -407,6 +407,8 @@ def publish_run(
     series_doc = series_document(records, manifest, committed)
     record = latest_record(records)
     layer = build_map(record, manifest, committed)
+    # WHY here: a refused example fails before the network photo reads
+    pngs = _example_maps(series_doc, records, record, layer, manifest, committed)
     latest_map = _require_dict(latest["map"], "latest.json map")
     latest_map["bounds"] = layer.display.bounds
     photos: dict[str, TrueColour] = {}
@@ -416,7 +418,6 @@ def publish_run(
     rgba = to_rgba(photo.reflectance, layer.display.transform)
     images = [(image_path(record), rgba, photo.collection)]
     images += _clipped_images(latest, records, layer.display, photos)
-    pngs = _example_maps(series_doc, records, record, layer, manifest, committed)
     validate("latest", latest)
     validate("series", series_doc)
     _write_contract(

@@ -2190,7 +2190,10 @@ def test_publish_exposed_bed_example_is_the_latest_scene_written_once(
 
 
 def test_publish_exposed_bed_example_off_the_latest_grid_exit_2(
-    series_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    series_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scene_env: SimpleNamespace,
 ) -> None:
     records = _example_records()
     # a latest scene without the correction is not pinned to the flood grid
@@ -2222,6 +2225,7 @@ def test_publish_exposed_bed_example_off_the_latest_grid_exit_2(
     assert result.exit_code == 2
     assert "not on the grid of the latest map" in result.output
     assert not out.exists()
+    assert scene_env.photo_calls == []  # refused before any photo read
 
 
 def test_publish_exposed_bed_example_allowlist() -> None:

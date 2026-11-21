@@ -305,7 +305,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `monthly[].median_ha` | number ≥ 0, ha | when `n_scenes` is 0 | Ordinary median of the month's non-HIDDEN `hyacinth_corrected_ha`. |
 | `monthly[].n_scenes` | integer ≥ 0 | no | The month's scenes with `display_status` `FULL` or `LOWER_BOUND`. |
 | `stage_area_curve` | object | no | The committed stage–area curve A(h) the exposed-bed correction reads (see below). Since 3.4.0. |
-| `stage_area_curve.stage_m` | array of numbers, m a.s.l. | no | Grid stages, ascending, one per row of the committed curve grid (400 rows), 3 decimals. |
+| `stage_area_curve.stage_m` | array of numbers, m a.s.l. | no | Grid stages, ascending, one entry per row of the committed grid, 3 decimals. |
 | `stage_area_curve.area_ha` | array of numbers ≥ 0, ha | no | Fitted water-surface area at each `stage_m`, 2 decimals. |
 | `stage_area_curve.area_ha_p2_5` | array of numbers ≥ 0, ha | no | Lower bound (bootstrap 2.5th percentile) of the area at each `stage_m`, 2 decimals. |
 | `stage_area_curve.area_ha_p97_5` | array of numbers ≥ 0, ha | no | Upper bound (bootstrap 97.5th percentile) of the area at each `stage_m`, 2 decimals. |
@@ -345,7 +345,9 @@ the unit of every other contract figure. The grid ends at
 draw the curve only between `stage_min_m` and `stage_max_m`. The
 `anchors` are the official level–volume points of the dam's design
 report (`CURVE_ANCHORS`); A(h) is the derivative of the fitted V(h), so
-they mark where the fit is pinned rather than points on the area curve.
+they mark where the fit is pinned rather than points on the area curve. Anchors can lie outside `stage_min_m`..`stage_max_m` (today
+2003.16 m and 2020.0 m do), because they pin V(h), not the published
+A(h) grid.
 
 Quality flags (degrading/informational) are not part of 3.4.0.
 

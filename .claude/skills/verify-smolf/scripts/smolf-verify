@@ -93,6 +93,7 @@ cmd_doctor() {
     --net) net=1 ;;
     *) die "doctor: unknown option $1" ;;
   esac
+  [ $# -le 1 ] || die "doctor: unexpected argument $2"
   echo "run:        $run"
   echo "code:       $SMOLF_CODE ($(git -C "$SMOLF_CODE" rev-parse --short HEAD))"
   echo "data dir:   $SMOLF_DATA_DIR"
@@ -214,6 +215,7 @@ cmd_hectares() {
   load_run "${1:-}"; shift
   [ -n "${1:-}" ] || die "hectares: classified GeoTIFF required"
   local tif=$1
+  [ $# -eq 1 ] || die "hectares: unexpected argument $2"
   local py; py=$(dirname "$SMOLF")/python
   (cd /tmp && "$py" - "$tif" <<'PY'
 import sys
@@ -234,6 +236,7 @@ PY
 
 cmd_cleanup() {
   load_run "${1:-}"
+  [ $# -le 1 ] || die "cleanup: unexpected argument $2"
   if [ -d "$run/checkout" ]; then
     chmod -R u+w "$run/checkout"
     # A checkout whose worktree record is already gone is not a working tree

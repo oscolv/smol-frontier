@@ -20,7 +20,7 @@ The level record is the reservoir's daily water level from Mexico's SIH. `smolf 
 
 Preconditions:
 
-- Fresh run (empty `$RUN/data/hydro/`). Doctor shows 200 for the SIH.
+- Fresh run (empty `$RUN/data/hydro/`). `doctor --net` shows 200 for the SIH.
 
 - **Fallback read.** Run `$V run "$RUN" levels-show-fallback -- levels show 2026-11-18`. `.rc` `0`, with `level_m: 2018.03`. `$RUN/data/hydro/` does not exist.
 - **Dry run.** Run `$V run "$RUN" levels-check -- levels update --check`. `.rc` `0`, with `days:`, `last_day_with_level:`, `level_revisions: 0` and `check only: not written`. `$RUN/data/hydro/` still does not exist.

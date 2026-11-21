@@ -11,7 +11,7 @@ The scheduled daily job is three commands in order: `smolf levels update`, then 
 ## How to get to it (user POV)
 
 - A scheduler runs, with `SMOLF_DATA_DIR=<absolute dir outside the checkout>`:
-  `smolf levels update && smolf series build --extend && smolf publish --latest`. Exit 2 from the build means retry later (stale level record or Earth Search unreachable; nothing written). `levels update` exits 1 when the SIH download fails, even for a passing outage, and also when it rejects the download (parse failure, fewer days, a level revision over 0.05 m), which no retry fixes without `--force`. `publish` exits 2 when it refuses a run or cannot read a Sentinel-2 photo (network outage; retry later).
+  `smolf levels update && smolf series build --extend && smolf publish --latest`. Exit 2 from the build means retry later (stale level record or Earth Search unreachable; nothing written). `levels update` exits 1 when the SIH download fails, even for a passing outage, and also when it rejects the download: a parse failure, fewer days, an earlier last day or a missing day (no retry and no flag fixes these), or a level revision over 0.05 m (only `--force` accepts it). `publish` exits 2 when it refuses a run or cannot read a Sentinel-2 photo (network outage; retry later).
 
 ## Driving it with smolf-verify
 

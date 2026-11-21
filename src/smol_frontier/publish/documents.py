@@ -22,7 +22,7 @@ from smol_frontier.publish.aggregates import (
     same_month,
 )
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused, _require_dict
-from smol_frontier.publish.map import CommittedCurve, map_path, png_path
+from smol_frontier.publish.map import CommittedCurve, map_path, png_path, raw_png_path
 from smol_frontier.publish.truecolour import (
     attribution,
     clipped_image_path,
@@ -402,6 +402,43 @@ def stage_area_curve(committed: CommittedCurve) -> dict[str, object]:
     }
 
 
+def exposed_bed_record(
+    records: list[dict[str, object]],
+) -> dict[str, object] | None:
+    """The run's exposed-bed example: its first ``ok`` record of
+    ``EXPOSED_BED_EXAMPLE_DATE`` (record order), if it applied the correction.
+
+    None when the run has no such record or the correction did not apply to
+    it; another scene is never substituted.
+    """
+    day = settings.EXPOSED_BED_EXAMPLE_DATE.isoformat()
+    ordered = sorted(records, key=series.record_sort_key)
+    found = next((r for r in ordered if r["status"] == "ok" and r["date"] == day), None)
+    if found is None:
+        return None
+    row = _require_dict(found["row"], f"row of {found['item_id_used']}")
+    return found if row["bed_applied"] else None
+
+
+def _exposed_bed_example(records: list[dict[str, object]]) -> dict[str, object] | None:
+    """``exposed_bed_example``: the record's scene entry plus the margin and
+    expected bed of its correction (copied from the run row) and its two maps.
+
+    Map bounds come from the warped PNGs, so publish_run fills them in.
+    """
+    record = exposed_bed_record(records)
+    if record is None:
+        return None
+    row = _require_dict(record["row"], f"row of {record['item_id_used']}")
+    return {
+        **_scene_entry(record),
+        "margin_m": _round(row["margin_m"], _DECIMALS_DEFAULT),
+        "expected_bed_ha": _round(row["expected_bed_ha"], _DECIMALS_DEFAULT),
+        "map_raw": {"path": raw_png_path(record)},
+        "map_corrected": {"path": png_path(record)},
+    }
+
+
 def series_document(
     records: list[dict[str, object]],
     manifest: dict[str, object],
@@ -410,7 +447,8 @@ def series_document(
     """``series.json``: every ok and skipped scene, sorted by date.
 
     Error scenes are excluded. No quality flags (C16): runs do not persist
-    them and publish never recomputes them.
+    them and publish never recomputes them. The bounds of
+    ``exposed_bed_example``'s maps are filled in by publish_run.
     """
     scenes = _scene_entries(records)
     return {
@@ -421,4 +459,5 @@ def series_document(
         "scenes": scenes,
         "monthly": monthly_medians(scenes),
         "stage_area_curve": stage_area_curve(committed),
+        "exposed_bed_example": _exposed_bed_example(records),
     }

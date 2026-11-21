@@ -80,6 +80,16 @@ class Settings:
     GREEN_MAX_PCT: float = 30.0
     RED_MIN_PCT: float = 50.0
 
+    # WHY: the scene series.json publishes as exposed_bed_example, with its
+    #   raw and corrected maps, so a reader can see the exposed-bed
+    #   correction on a real scene. It is the dry-season control (estiaje,
+    #   level 2004.60 m) that docs/method.md §8 and §11 and the AGENTS.md
+    #   control values cite: almost all of its raw hyacinth is exposed bed.
+    # HOW: fixed by spec #85; never substituted by another scene — a run
+    #   without an ok record of this date (or whose record did not apply the
+    #   correction) publishes the block as null.
+    EXPOSED_BED_EXAMPLE_DATE: date = date(2024, 6, 9)
+
     # WHY: minimum valid fraction of the reservoir for a scene to be
     #   classified at all — below it too little of the reservoir is observed
     #   to trust any coverage number.

@@ -2016,6 +2016,311 @@ def test_publish_png_schema_requires_png_and_bounds(
             )
 
 
+# --- exposed-bed example ----------------------------------------------------
+
+EXAMPLE_ITEM = "S2A_14QMH_20240609_0_L2A"
+EXAMPLE_PNG = f"map/2024-06-09_{EXAMPLE_ITEM}.png"
+EXAMPLE_RAW_PNG = f"map/2024-06-09_{EXAMPLE_ITEM}.raw.png"
+AFTER_EXAMPLE_ITEM = "S2B_14QMH_20240701_0_L2A"
+
+
+def _example_records() -> list[dict]:
+    """The default run plus a 2024-06-09 record that applied the correction
+    and a later scene, so the example is not the latest scene."""
+    return [
+        *_default_records(),
+        _record("2024-06-09", EXAMPLE_ITEM, "ok", regime="EXPOSED_BED"),
+        _record("2024-07-01", AFTER_EXAMPLE_ITEM, "ok"),
+    ]
+
+
+def _publish_records(series_root: Path, tmp_path: Path, records: list[dict]) -> Path:
+    _write_run(series_root, records=records)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 0, result.output
+    return out
+
+
+def _read_png(path: Path) -> np.ndarray:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", rasterio.errors.NotGeoreferencedWarning)
+        with rasterio.open(path) as src:
+            return src.read()
+
+
+def test_publish_exposed_bed_example_is_the_record_entry_plus_maps(
+    series_root: Path, tmp_path: Path
+) -> None:
+    out = _publish_records(series_root, tmp_path, _example_records())
+    doc = _series(out)
+    block = doc["exposed_bed_example"]
+    [entry] = [s for s in doc["scenes"] if s["date"] == "2024-06-09"]
+    bounds = _latest(out)["map"]["bounds"]
+    assert block == {
+        **entry,
+        "margin_m": 2010.55,
+        "expected_bed_ha": 120.0,
+        "map_raw": {"path": EXAMPLE_RAW_PNG, "bounds": bounds},
+        "map_corrected": {"path": EXAMPLE_PNG, "bounds": bounds},
+    }
+    assert block["item_id"] == EXAMPLE_ITEM
+    assert block["bed_applied"] is True
+    assert block["removed_ha"] == 0.56
+    assert "exposed_bed_example" not in _latest(out)
+    assert all(
+        "margin_m" not in s and "expected_bed_ha" not in s for s in doc["scenes"]
+    )
+    assert _latest(out)["item_id"] == AFTER_EXAMPLE_ITEM
+
+
+def test_publish_exposed_bed_example_pngs_raw_and_corrected(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    out = _publish_records(series_root, tmp_path, _example_records())
+    block = _series(out)["exposed_bed_example"]
+    raw = _read_png(out / block["map_raw"]["path"])
+    corrected = _read_png(out / block["map_corrected"]["path"])
+    latest_png = _read_png(out / _latest(out)["map"]["png"])
+    assert raw.shape == corrected.shape == latest_png.shape
+    raw_counts = _png_class_counts(raw)
+    counts = _png_class_counts(corrected)
+    assert raw_counts[REMOVED] == 0
+    assert round(counts[REMOVED] * flood_map.PIXEL_HA, 2) == block["removed_ha"]
+    # the raw map shows as hyacinth exactly what the corrected one removed
+    raw_hyacinth = raw_counts[DENSE] + raw_counts[INTERFACE]
+    assert raw_hyacinth == counts[DENSE] + counts[INTERFACE] + counts[REMOVED]
+    for code in (settings.CLASS_NODATA, WATER, SOIL):
+        assert raw_counts[code] == counts[code]
+    # the example and the latest scene are each classified once
+    assert len(scene_env.classify_mirrors) == 2
+
+
+def test_publish_exposed_bed_example_pngs_listed_with_sha256(
+    series_root: Path, tmp_path: Path
+) -> None:
+    out = _publish_records(series_root, tmp_path, _example_records())
+    listed = {f["path"]: f["sha256"] for f in _index(out)["files"]}
+    for rel in (EXAMPLE_PNG, EXAMPLE_RAW_PNG):
+        assert listed[rel] == hashlib.sha256((out / rel).read_bytes()).hexdigest()
+    # PNG only: no GeoTIFF of the example scene
+    assert sorted(p.name for p in (out / "map").iterdir()) == sorted(
+        [
+            EXAMPLE_PNG.split("/")[1],
+            EXAMPLE_RAW_PNG.split("/")[1],
+            f"2024-07-01_{AFTER_EXAMPLE_ITEM}.png",
+            f"2024-07-01_{AFTER_EXAMPLE_ITEM}.tif",
+        ]
+    )
+
+
+def test_publish_exposed_bed_example_null_without_the_control_date(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root)
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", RUN_ID).exit_code == 0
+    assert _series(out)["exposed_bed_example"] is None
+    assert sorted(p.name for p in (out / "map").iterdir()) == sorted(
+        [MAP_REL.split("/")[1], PNG_REL.split("/")[1]]
+    )
+    assert len(scene_env.classify_mirrors) == 1
+
+
+def test_publish_exposed_bed_example_null_when_correction_not_applied(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    records = _example_records()
+    records[-2] = _record(
+        "2024-06-09",
+        EXAMPLE_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-06-09",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    out = _publish_records(series_root, tmp_path, records)
+    assert _series(out)["exposed_bed_example"] is None
+    assert not (out / EXAMPLE_PNG).exists()
+    assert not (out / EXAMPLE_RAW_PNG).exists()
+    assert len(scene_env.classify_mirrors) == 1
+
+
+def test_publish_exposed_bed_example_first_ok_record_of_the_date(
+    series_root: Path, tmp_path: Path
+) -> None:
+    records = [
+        _record("2024-06-09", "S2A_14QMH_20240609_0_L2A", "skipped"),
+        _record("2024-06-09", "S2B_14QMH_20240609_0_L2A", "ok"),
+        _record("2024-06-09", "S2C_14QMH_20240609_0_L2A", "ok", bed_applied=False),
+        _record("2024-07-01", AFTER_EXAMPLE_ITEM, "ok"),
+    ]
+    out = _publish_records(series_root, tmp_path, records)
+    block = _series(out)["exposed_bed_example"]
+    assert block["item_id"] == "S2B_14QMH_20240609_0_L2A"
+    assert block["map_raw"]["path"] == (
+        "map/2024-06-09_S2B_14QMH_20240609_0_L2A.raw.png"
+    )
+
+
+def test_publish_exposed_bed_example_is_the_latest_scene_written_once(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    records = _example_records()[:-1]
+    out = _publish_records(series_root, tmp_path, records)
+    block = _series(out)["exposed_bed_example"]
+    latest_map = _latest(out)["map"]
+    assert block["map_corrected"] == {
+        "path": latest_map["png"],
+        "bounds": latest_map["bounds"],
+    }
+    assert sorted(p.name for p in (out / "map").iterdir()) == sorted(
+        [
+            EXAMPLE_PNG.split("/")[1],
+            EXAMPLE_RAW_PNG.split("/")[1],
+            f"2024-06-09_{EXAMPLE_ITEM}.tif",
+        ]
+    )
+    listed = [f["path"] for f in _index(out)["files"]]
+    assert listed.count(EXAMPLE_PNG) == 1
+    assert len(scene_env.classify_mirrors) == 1
+
+
+def test_publish_exposed_bed_example_off_the_latest_grid_exit_2(
+    series_root: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    scene_env: SimpleNamespace,
+) -> None:
+    records = _example_records()
+    # a latest scene without the correction is not pinned to the flood grid
+    records[-1] = _record(
+        "2024-07-01",
+        AFTER_EXAMPLE_ITEM,
+        "ok",
+        bed_applied=False,
+        bed_reason="no SIH level for 2024-07-01",
+        level_m=None,
+        margin_m=None,
+        expected_bed_ha=None,
+        removed_ha=None,
+    )
+    _write_run(series_root, records=records)
+    real = publish.map.ingest_scene
+
+    def shifted(scene: SceneMeta, *args: object, **kwargs: object):
+        ing = real(scene, *args, **kwargs)
+        if scene.id == AFTER_EXAMPLE_ITEM:
+            ing.transform = rasterio.Affine(
+                10.0, 0.0, 460_005.0, 0.0, -10.0, 2_250_000.0
+            )
+        return ing
+
+    monkeypatch.setattr(publish.map, "ingest_scene", shifted)
+    out = tmp_path / "pub"
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    assert "not on the grid of the latest map" in result.output
+    assert not out.exists()
+    assert scene_env.photo_calls == []  # refused before any photo read
+
+
+def test_publish_exposed_bed_example_removed_ha_mismatch_exit_2_keeps_previous(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    _write_run(series_root, "20240101T000000", [_record("2024-01-01", "A", "ok")])
+    out = tmp_path / "pub"
+    assert _publish(out, "--run", "20240101T000000").exit_code == 0
+    before = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    scene_env.photo_calls.clear()
+    records = _example_records()
+    # only the example (not the latest scene) disagrees with its class-5 area
+    records[-2] = _record(
+        "2024-06-09", EXAMPLE_ITEM, "ok", regime="EXPOSED_BED", removed_ha=0.57
+    )
+    _write_run(series_root, records=records)
+    result = _publish(out, "--run", RUN_ID)
+    assert result.exit_code == 2
+    assert EXAMPLE_ITEM in result.output and "removed_ha" in result.output
+    after = {
+        p.relative_to(out).as_posix(): p.read_bytes()
+        for p in out.rglob("*")
+        if p.is_file()
+    }
+    assert after == before
+    assert scene_env.photo_calls == []
+
+
+def test_publish_exposed_bed_example_null_when_first_ok_record_uncorrected(
+    series_root: Path, tmp_path: Path, scene_env: SimpleNamespace
+) -> None:
+    records = [
+        _record(
+            "2024-06-09",
+            "S2A_14QMH_20240609_0_L2A",
+            "ok",
+            bed_applied=False,
+            bed_reason="no SIH level for 2024-06-09",
+            level_m=None,
+            margin_m=None,
+            expected_bed_ha=None,
+            removed_ha=None,
+        ),
+        _record("2024-06-09", "S2B_14QMH_20240609_0_L2A", "ok"),
+        _record("2024-07-01", AFTER_EXAMPLE_ITEM, "ok"),
+    ]
+    out = _publish_records(series_root, tmp_path, records)
+    assert _series(out)["exposed_bed_example"] is None
+    assert not list((out / "map").glob("2024-06-09_*"))
+    assert len(scene_env.classify_mirrors) == 1
+
+
+def test_publish_exposed_bed_example_allowlist() -> None:
+    assert publish.is_allowed(EXAMPLE_RAW_PNG)
+    assert publish.is_allowed(EXAMPLE_PNG)
+    assert publish.raw_png_path({"date": "2024-06-09", "item_id_used": "X"}) == (
+        "map/2024-06-09_X.raw.png"
+    )
+
+
+def test_publish_exposed_bed_example_schema(series_root: Path, tmp_path: Path) -> None:
+    good = _series(_publish_records(series_root, tmp_path, _example_records()))
+    publish.validate("series", good)
+    publish.validate("series", {**good, "exposed_bed_example": None})
+    missing = {k: v for k, v in good.items() if k != "exposed_bed_example"}
+    with pytest.raises(publish.ContractInvalid):
+        publish.validate("series", missing)
+    block = good["exposed_bed_example"]
+    raw_path = block["map_raw"]["path"]
+    for bad in (
+        {**block, "map_raw": {"path": raw_path}},
+        {**block, "map_raw": {**block["map_raw"], "path": EXAMPLE_PNG}},
+        {**block, "map_corrected": {**block["map_raw"]}},
+        {**block, "map_corrected": {**block["map_corrected"], "bounds": [[0, 0]]}},
+        {k: v for k, v in block.items() if k != "map_corrected"},
+        {k: v for k, v in block.items() if k != "removed_ha"},
+        {k: v for k, v in block.items() if k != "margin_m"},
+        {k: v for k, v in block.items() if k != "expected_bed_ha"},
+        {**block, "margin_m": None},
+        {**block, "level_m": None},
+        {k: v for k, v in block.items() if k != "level_m"},
+        {**block, "expected_bed_ha": None},
+        {**block, "bed_applied": False},
+    ):
+        with pytest.raises(publish.ContractInvalid):
+            publish.validate("series", {**good, "exposed_bed_example": bad})
+    schema = json.loads(SCHEMA_3_3_0.read_text(encoding="utf-8"))
+    assert "exposed_bed_example" not in schema["properties"]
+    Draft202012Validator(schema).validate(good)
+
+
 IMAGE_REL = f"image/2024-01-04_{LATEST_ITEM}.webp"
 
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/oscolv/smol-frontier/schemas/series.schema.json",
   "title": "smolf series.json",
-  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). monthly is the per-month median of hyacinth_corrected_ha over non-HIDDEN scenes. stage_area_curve is the committed stage–area curve A(h) the exposed-bed correction reads, in hectares. Additional properties are allowed.",
+  "description": "Every ok and every POOR (skipped) scene of a series run, sorted by date; error scenes are excluded. A POOR entry carries date, item_id, quality_light, valid_frac, display_status HIDDEN and null for every other field (display_ha included). Entries share the per-scene fields of latest.json (the field definitions are duplicated here, not referenced). monthly is the per-month median of hyacinth_corrected_ha over non-HIDDEN scenes. stage_area_curve is the committed stage–area curve A(h) the exposed-bed correction reads, in hectares. exposed_bed_example is the dry-season control scene with its raw and corrected maps, or null. Additional properties are allowed.",
   "type": "object",
   "required": [
     "schema_version",
@@ -11,7 +11,8 @@
     "series_sha256",
     "scenes",
     "monthly",
-    "stage_area_curve"
+    "stage_area_curve",
+    "exposed_bed_example"
   ],
   "properties": {
     "schema_version": {
@@ -113,6 +114,90 @@
           "pattern": "^[0-9a-f]{64}$"
         }
       }
+    },
+    "exposed_bed_example": {
+      "description": "The scene of EXPOSED_BED_EXAMPLE_DATE (2024-06-09, the dry-season control): the run's first ok record of that date, as its scenes entry plus margin_m, expected_bed_ha, map_raw and map_corrected. Null when the run has no such record or its correction did not apply; never another scene. Since 3.4.0.",
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/scene"
+            },
+            {
+              "type": "object",
+              "required": [
+                "bed_applied",
+                "level_m",
+                "removed_ha",
+                "margin_m",
+                "expected_bed_ha",
+                "map_raw",
+                "map_corrected"
+              ],
+              "properties": {
+                "bed_applied": {
+                  "const": true
+                },
+                "level_m": {
+                  "description": "The day's SIH level the correction used, m a.s.l.; never null here.",
+                  "type": "number"
+                },
+                "removed_ha": {
+                  "$ref": "#/$defs/area"
+                },
+                "margin_m": {
+                  "description": "Margin stage (level_m plus the uncertainty cushion): hyacinth on bed whose flood stage lies above it was removed; m a.s.l., 2 decimals, copied from the run row.",
+                  "type": "number"
+                },
+                "expected_bed_ha": {
+                  "description": "Expected exposed bed: staged area of the flood-stage map above level_m, ha, 2 decimals, copied from the run row.",
+                  "$ref": "#/$defs/area"
+                },
+                "map_raw": {
+                  "description": "RGBA PNG of the classifier's classes 0-4, before the exposed-bed correction, on the map.png grid.",
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "bounds"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.raw\\.png$"
+                    },
+                    "bounds": {
+                      "$ref": "#/$defs/bounds"
+                    }
+                  }
+                },
+                "map_corrected": {
+                  "description": "RGBA PNG of classes 0-5 (class 5 = removed by the exposed-bed correction), on the map.png grid; the latest map.png when the example is the latest scene.",
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "bounds"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "pattern": "^map/[0-9]{4}-[0-9]{2}-[0-9]{2}_[A-Za-z0-9_.-]+\\.png$",
+                      "not": {
+                        "pattern": "\\.raw\\.png$"
+                      }
+                    },
+                    "bounds": {
+                      "$ref": "#/$defs/bounds"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "$defs": {
@@ -649,6 +734,29 @@
           "type": "string",
           "minLength": 1
         }
+      }
+    },
+    "bounds": {
+      "description": "EPSG:4326 extent of a PNG as [[south, west], [north, east]], 6 decimals.",
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "prefixItems": [
+          {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          }
+        ]
       }
     }
   }

@@ -69,10 +69,17 @@ _DECIMALS_STAGE = 3
 # WHY: km² to hectares, so the curve shares the unit of every contract area.
 _HA_PER_KM2 = 100.0
 
-# WHY: every CURVE_ANCHORS point (level m, volume hm³) is an official value
-#   of the dam's design report (config.py); the contract names that source
-#   so a consumer can label the anchors without knowing the config.
-CURVE_ANCHOR_SOURCE = "Endhó dam design report"
+# WHY: every CURVE_ANCHORS point (level m, volume hm³) comes from the SRH
+#   descriptive report of the dam, section "Características del
+#   almacenamiento" (config.py); the contract names that document so a
+#   consumer can label and cite the anchors without knowing the config.
+# HOW: the document's own Spanish title, kept as-is; it is undated (its
+#   latest cited figure is from 1969), hence "n.d.".
+CURVE_ANCHOR_SOURCE = (
+    "Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la "
+    "presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. "
+    "(CONAGUA dam inventory)"
+)
 
 # WHY: 6 decimals of a degree are ~0.1 m at Endhó, two orders below the
 #   10 m pixel the GSW polygon was traced on, and keep latest.json small.

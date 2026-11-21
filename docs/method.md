@@ -215,7 +215,11 @@ class map itself is never changed — only the reported figures.
   `CURVE_DATA_END = 2026-09-20`, `CURVE_BIN_M = 0.10` m bins with at least
   `CURVE_BIN_MIN_N = 5` days, fit up to `CURVE_FIT_H_MAX = 2017.5` m,
   official anchors `CURVE_ANCHORS = (2003.16, 52.1), (2018.0, 182.0),
-  (2020.0, 208.0)` weighted `CURVE_W_ANCHOR = 50.0`, bootstrap
+  (2020.0, 208.0)` (m, hm³: dead storage, spillway crest/NAMO, and
+  NAME = 182.0 + 26.0 surcharge; from "Características del
+  almacenamiento" of SRH, *Memoria descriptiva de la presa Endó
+  (Endhó)*, ID 1583, n.d., latest cited figure 1969) weighted
+  `CURVE_W_ANCHOR = 50.0`, bootstrap
   `CURVE_BOOTSTRAP_B = 300` at seed `CURVE_BOOTSTRAP_SEED = 42`, grid top
   `CURVE_GRID_TOP = 2018.5` m.
 - Flood-stage map (`data/hydro/flood_stage.tif`): JRC surface-water

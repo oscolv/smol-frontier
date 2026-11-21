@@ -3,7 +3,7 @@
 The SIH computes stored volume from the level with the official
 elevation–area–capacity table, so the (h, V) pairs reproduce that table and
 the water-surface area is A(h) = dV/dh. Method reproduced from the author's
-prior research: 0.10 m median bins, official design-report anchors, isotonic
+prior research: 0.10 m median bins, official SRH descriptive-report anchors, isotonic
 regression, then a smoothing spline with the smallest factor giving a
 positive derivative; bootstrap bands by days. A later check compares the
 output with the author's curve, so every step below is spec-literal.
@@ -174,7 +174,7 @@ def fit_curve(
 ) -> FittedCurve:
     """Fit V(h): bins + anchors, isotonic, smoothing spline.
 
-    ``anchors`` defaults to the official design-report points from config;
+    ``anchors`` defaults to the official SRH descriptive-report points from config;
     pass ``()`` for an anchor-free fit (synthetic tests) or points on a
     synthetic line/curve. Each anchor carries weight ``w_anchor``.
     """

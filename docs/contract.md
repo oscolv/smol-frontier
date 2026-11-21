@@ -314,7 +314,7 @@ not expressible in JSON Schema and is enforced by smolf's tests.
 | `stage_area_curve.anchors` | array of anchor objects | no | The official points the fit is pinned to. |
 | `stage_area_curve.anchors[].stage_m` | number, m a.s.l. | no | Anchor level. |
 | `stage_area_curve.anchors[].volume_hm3` | number ≥ 0, hm³ | no | Stored volume at the anchor level (a volume, not an area: the fit is V(h)). |
-| `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Endhó dam design report`. |
+| `stage_area_curve.anchors[].source` | string | no | Where the point comes from; smolf writes `Secretaría de Recursos Hidráulicos (SRH), Memoria descriptiva de la presa Endó (Endhó), ID 1583, Tepetitlán, Hidalgo, n.d. (CONAGUA dam inventory)`. |
 | `stage_area_curve.sha256` | string, 64 hex | no | sha256 of the committed curve CSV (`data/hydro/stage_area_curve.csv`); equals the run manifest's `stage_area_curve_csv` input. |
 
 ### `monthly`
@@ -343,8 +343,8 @@ the file's km² to hectares (× 100) before rounding, so the areas share
 the unit of every other contract figure. The grid ends at
 `CURVE_GRID_TOP` (2018.5 m) because the spline extrapolates above it;
 draw the curve only between `stage_min_m` and `stage_max_m`. The
-`anchors` are the official level–volume points of the dam's design
-report (`CURVE_ANCHORS`); A(h) is the derivative of the fitted V(h), so
+`anchors` are the official level–volume points of the SRH descriptive
+report of the dam (`CURVE_ANCHORS`, see `source`); A(h) is the derivative of the fitted V(h), so
 they mark where the fit is pinned rather than points on the area curve.
 Anchors can lie outside `stage_min_m`..`stage_max_m` (today 2003.16 m
 and 2020.0 m do), because they pin V(h), not the published A(h) grid.

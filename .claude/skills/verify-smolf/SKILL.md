@@ -66,7 +66,7 @@ All proof lives in `$RUN/evidence/` (default root `~/.local/state/smolf-verify/`
 $V cleanup "$RUN"
 ```
 
-Restores write permission on and removes the run's own worktree (`$RUN/checkout`), prunes worktree records, and deletes `$RUN/data/`. The shared cache is only a symlink, so its target is untouched. It also removes a checkout whose worktree record is already gone (pruned elsewhere). It keeps `$RUN/evidence/` and prints its path. It touches nothing it did not create. Run it after every failed attempt too. Remove old evidence dirs by hand when no longer needed.
+Restores write permission on and removes the run's own worktree (`$RUN/checkout`), runs `git worktree prune` (repo-wide: it also drops any other worktree record whose directory is already gone), and deletes `$RUN/data/`. The shared cache is only a symlink, so its target is untouched. It also removes a checkout whose worktree record is already gone (pruned elsewhere). It keeps `$RUN/evidence/` and prints its path. Apart from that prune, it touches nothing it did not create. Run it after every failed attempt too. Remove old evidence dirs by hand when no longer needed.
 
 ## Helpers
 

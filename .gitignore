@@ -20,3 +20,7 @@ data/cache/
 outputs/
 .env
 data/hydro/*.tmp
+
+# Local agent state (never commit)
+.claude/settings.local.json
+.superpowers/

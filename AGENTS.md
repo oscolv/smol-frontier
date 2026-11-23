@@ -46,9 +46,15 @@ The pipeline in order, one line per stage:
   with its raw and corrected PNGs; see
   `docs/contract.md`)
 - Download bundle — `publish/export.py` (`smolf export series-csv`;
-  `series.csv`, `series_monthly.csv`, `README.txt`, `LEEME.txt` and
-  `SHA256SUMS` from a verified publish; outside the contract, see
+  `series.csv`, `series_monthly.csv`, `README.txt`, `LEEME.txt`,
+  `reservoir_outline.zip` (`publish/outline.py`, the AOI as a shapefile)
+  and `SHA256SUMS` from a verified publish; outside the contract, see
   `docs/downloads.md`)
+- Per-scene maps — `publish/map_export.py` (`smolf export maps`; one
+  published-format class map per scene with figures, rebuilt with
+  `build_map` from the publish's run and the scene cache, checked against
+  `series.json`, plus `index.csv`, `README.txt`, `SHA256SUMS`; outside the
+  contract, see `docs/downloads.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene
@@ -86,12 +92,16 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
   regenerable via `smolf publish`).
 - `outputs/downloads/` — the download bundle derived from the publish
   (`series.csv`, `series_monthly.csv`, `README.txt`, `LEEME.txt`,
-  `SHA256SUMS`; gitignored, regenerable via `smolf export series-csv`).
+  `reservoir_outline.zip`, `SHA256SUMS`; gitignored, regenerable via
+  `smolf export series-csv`).
+- `outputs/maps/` — the per-scene class maps of the publish
+  (`<date>_<item_id>.tif`, `index.csv`, `README.txt`, `SHA256SUMS`;
+  gitignored, regenerable via `smolf export maps`).
 - `$SMOLF_DATA_DIR/` — when set (read at call time by `paths.py`), holds
   every write instead: `cache/`, `outputs/…` (same subfolders as above,
-  `outputs/downloads/` included) and `hydro/ENDHD.csv[.json]` (the
-  refreshed SIH record; readers fall back to the committed copy until it
-  exists). Other inputs stay in the checkout.
+  `outputs/downloads/` and `outputs/maps/` included) and
+  `hydro/ENDHD.csv[.json]` (the refreshed SIH record; readers fall back to
+  the committed copy until it exists). Other inputs stay in the checkout.
 
 ## Parameters and provenance
 

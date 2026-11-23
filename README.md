@@ -5,7 +5,7 @@ covered by water hyacinth. It reads Sentinel-2 satellite scenes and reports
 the covered area in hectares for each scene. The pipeline is deterministic,
 and every input is public, so anyone can rerun it and get the same figures.
 
-The current release is smolf 0.10.0. A verification layer and an agent that
+The current release is smolf 0.11.0. A verification layer and an agent that
 explain change over time will run on top of these figures. They are not
 built yet.
 
@@ -114,7 +114,8 @@ To classify a recent day, run `uv run smolf levels update` first.
 | `smolf series build` | Build the hyacinth time series. `--extend` adds scenes from 2026-10-13 on that the reference series lacks. `--resume <run_id>` continues an interrupted run. |
 | `smolf gate identity` | Compare a 30-scene sample with the reference series. `--all` compares every scene. `--baseline` turns the haze rescue off and compares with the earlier series v2026-10-22. |
 | `smolf publish --latest` | Publish the newest complete series run. `--run <run_id>` names a run instead. |
-| `smolf export series-csv` | Write the download bundle of the publish into `outputs/downloads/`: two CSV files, a README in English and in Spanish, and a checksum file. See [`docs/downloads.md`](docs/downloads.md). |
+| `smolf export series-csv` | Write the download bundle of the publish into `outputs/downloads/`: two CSV files, a README in English and in Spanish, the reservoir outline as a zipped shapefile, and a checksum file. See [`docs/downloads.md`](docs/downloads.md). |
+| `smolf export maps` | Write one classified GeoTIFF per scene of the publish into `outputs/maps/`, with an index and a checksum file. It needs the scene cache. See [`docs/downloads.md`](docs/downloads.md). |
 | `smolf version` | Print the package version. |
 
 Prefix each command with `uv run`. Run `uv run smolf <command> --help` for
@@ -148,6 +149,7 @@ With `SMOLF_DATA_DIR` set, every write goes under that folder:
 | `outputs/series/<run_id>/` | Series runs: one JSON file per scene, `series.csv`, and `manifest.json`. |
 | `outputs/publish/` | The published JSON files, map, and photos. |
 | `outputs/downloads/` | The download bundle written by `smolf export series-csv`. |
+| `outputs/maps/` | The per-scene maps written by `smolf export maps`. |
 | `outputs/identity_gate/` | Identity gate reports. |
 | `hydro/ENDHD.csv` and `hydro/ENDHD.csv.json` | The refreshed SIH level record and its provenance file. |
 

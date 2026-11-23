@@ -12,10 +12,13 @@ import io
 import itertools
 import json
 import re
+import zipfile
 from importlib import resources
 from pathlib import Path
 
+import geopandas as gpd
 import pytest
+from shapely.geometry import shape
 from typer.testing import CliRunner
 
 import smol_frontier
@@ -492,10 +495,81 @@ def test_export_refuses_out_holding_a_foreign_file(
     ]
 
 
-def test_export_allowlist_is_the_five_bundle_files() -> None:
+def test_export_allowlist_is_the_six_bundle_files() -> None:
     assert export.EXPORT_FILES == frozenset(
-        {"series.csv", "series_monthly.csv", "README.txt", "LEEME.txt", "SHA256SUMS"}
+        {
+            "series.csv",
+            "series_monthly.csv",
+            "README.txt",
+            "LEEME.txt",
+            "reservoir_outline.zip",
+            "SHA256SUMS",
+        }
     )
+
+
+def _outline_frame(out: Path, tmp_path: Path) -> gpd.GeoDataFrame:
+    """The bundle's shapefile, read back from its zip."""
+    unpacked = tmp_path / "unpacked"
+    with zipfile.ZipFile(out / "reservoir_outline.zip") as archive:
+        archive.extractall(unpacked)
+    return gpd.read_file(unpacked / "reservoir_outline.shp")
+
+
+def test_outline_zip_holds_the_shapefile_and_its_readme(
+    pub: Path, tmp_path: Path
+) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    with zipfile.ZipFile(out / "reservoir_outline.zip") as archive:
+        names = archive.namelist()
+        readme = archive.read("README.txt").decode("utf-8")
+    assert names == [
+        f"reservoir_outline.{ext}" for ext in ("shp", "shx", "dbf", "prj", "cpg")
+    ] + ["README.txt"]
+    for needle in (
+        "JRC Global Surface Water v1.4",
+        "Pekel et al., 2016",
+        "1261.75 ha",
+        "EPSG:4326",
+        "CC BY 4.0",
+        "https://creativecommons.org/licenses/by/4.0/",
+    ):
+        assert needle in readme
+
+
+def test_outline_is_the_published_reservoir_outline(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    frame = _outline_frame(out, tmp_path)
+    latest = json.loads((pub / "latest.json").read_text(encoding="utf-8"))
+    assert frame.crs.to_epsg() == 4326
+    assert len(frame) == 1
+    assert list(frame.columns) == ["area_ha", "geometry"]
+    assert frame["area_ha"].iloc[0] == latest["reservoir_area_ha"]
+    published = shape(latest["reservoir_outline"])
+    outline = frame.geometry.iloc[0]
+    # WHY 1e-6: latest.json rounds to 6 decimals; the zip keeps full precision.
+    assert outline.hausdorff_distance(published) < 1e-6
+
+
+def test_outline_zip_is_listed_in_sha256sums(pub: Path, tmp_path: Path) -> None:
+    out = tmp_path / "downloads"
+    assert _export(pub, out).exit_code == 0
+    digest = hashlib.sha256((out / "reservoir_outline.zip").read_bytes()).hexdigest()
+    sums = (out / "SHA256SUMS").read_text(encoding="ascii")
+    assert f"{digest}  reservoir_outline.zip\n" in sums
+
+
+def test_export_refuses_an_aoi_other_than_the_published_one(
+    pub: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(export.aoi, "reservoir_area_ha", lambda: 1300.0)
+    out = tmp_path / "downloads"
+    result = _export(pub, out)
+    assert result.exit_code == 2
+    assert "AOI polygon" in result.stderr
+    assert not out.exists()
 
 
 def test_refused_export_leaves_stale_staging_alone(pub: Path, tmp_path: Path) -> None:
@@ -868,7 +942,13 @@ def test_sha256sums_verify_the_bundle(pub: Path, tmp_path: Path) -> None:
     lines = text.splitlines()
     names = [line.split("  ", 1)[1] for line in lines]
     assert names == sorted(
-        ["LEEME.txt", "README.txt", "series.csv", "series_monthly.csv"]
+        [
+            "LEEME.txt",
+            "README.txt",
+            "reservoir_outline.zip",
+            "series.csv",
+            "series_monthly.csv",
+        ]
     )
     for line in lines:
         digest, name = re.fullmatch(r"([0-9a-f]{64})  (\S+)", line).groups()

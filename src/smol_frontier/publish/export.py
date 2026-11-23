@@ -4,13 +4,15 @@
 plus the ``series.json`` sha256 go in, ``{filename: bytes}`` comes out:
 ``series.csv`` (one row per scene), ``series_monthly.csv`` (the monthly
 medians), ``README.txt`` and its Spanish counterpart ``LEEME.txt`` (licence,
-disclaimer, citation, sources, provenance, column dictionary) and
-``SHA256SUMS`` over the other four.
+disclaimer, citation, sources, provenance, column dictionary),
+``reservoir_outline.zip`` (the AOI polygon as a shapefile) and
+``SHA256SUMS`` over the other five.
 ``export_publish`` reads a publish directory, verifies it against its own
 integrity index and the packaged schemas, and swaps the files into the
-output directory by rename. It reads only the published contract: no
-network, no scene cache, no run directory. The exports are outside the
-contract; nothing here changes the published files or their schemas.
+output directory by rename. It reads only the published contract and the
+committed AOI polygon: no network, no scene cache, no run directory. The
+exports are outside the contract; nothing here changes the published files
+or their schemas.
 """
 
 import csv
@@ -20,12 +22,15 @@ import json
 import shutil
 import tempfile
 import textwrap
+from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import NamedTuple
 
-from smol_frontier import __version__, paths
+from smol_frontier import __version__, aoi, paths
 from smol_frontier.publish.documents import validate
 from smol_frontier.publish.errors import ContractInvalid, PublishRefused
+from smol_frontier.publish.outline import OUTLINE_ZIP, outline_zip
 from smol_frontier.publish.writer import (
     INDEX_FILE,
     _debris,
@@ -39,11 +44,24 @@ from smol_frontier.publish.writer import (
 #   entries an existing ``--out`` may hold (anything else is someone else's
 #   data and is refused, never replaced). One set so later exports extend it.
 EXPORT_FILES = frozenset(
-    {"series.csv", "series_monthly.csv", "README.txt", "LEEME.txt", "SHA256SUMS"}
+    {
+        "series.csv",
+        "series_monthly.csv",
+        "README.txt",
+        "LEEME.txt",
+        OUTLINE_ZIP,
+        "SHA256SUMS",
+    }
 )
 
 # WHY: the files SHA256SUMS covers, in its (sorted) order; never itself.
-_SUMMED_FILES = ("LEEME.txt", "README.txt", "series.csv", "series_monthly.csv")
+_SUMMED_FILES = (
+    "LEEME.txt",
+    "README.txt",
+    OUTLINE_ZIP,
+    "series.csv",
+    "series_monthly.csv",
+)
 
 # WHY: every row says which run and which published file it came from, so a
 #   CSV copied out of its folder still traces back to the contract.
@@ -457,8 +475,10 @@ README_EN = ReadmeText(
         "classified from Sentinel-2 L2A scenes by smolf, with the exposed-bed "
         "correction behind the public figure. series.csv has one row per scene "
         "of the run (POOR scenes included, with empty figure cells); "
-        "series_monthly.csv has the monthly median of the corrected hectares. "
-        "To check the files, run `sha256sum -c SHA256SUMS` in this folder. "
+        "series_monthly.csv has the monthly median of the corrected hectares; "
+        "reservoir_outline.zip is the reservoir polygon as a shapefile, with "
+        "its own README. To check the files, run `sha256sum -c SHA256SUMS` "
+        "in this folder. "
         "README.txt (English) and LEEME.txt (Spanish) describe the same data; "
         "if they differ, LEEME.txt prevails."
     ),
@@ -712,7 +732,9 @@ README_ES = ReadmeText(
         "la corrección por lecho expuesto detrás de la cifra pública. "
         "series.csv tiene una fila por escena de la corrida (incluidas las "
         "escenas POOR, con las celdas de cifras vacías); series_monthly.csv "
-        "tiene la mediana mensual de las hectáreas corregidas. Para verificar "
+        "tiene la mediana mensual de las hectáreas corregidas; "
+        "reservoir_outline.zip es el polígono del vaso como shapefile, con su "
+        "propio README (en inglés). Para verificar "
         "los archivos, ejecute `sha256sum -c SHA256SUMS` en esta carpeta. "
         "Los nombres de columna y los códigos (GOOD, EXPOSED_BED, ...) están en "
         "inglés en los CSV; el diccionario de abajo los explica. LEEME.txt "
@@ -848,6 +870,24 @@ def _readme(
     return "\n".join(sections).encode(text.encoding)
 
 
+def _outline(latest_doc: dict[str, object]) -> bytes:
+    """The zipped AOI, refused unless it is the polygon the publish used.
+
+    WHY the area check: the zip is read from the committed AOI at export
+    time, so a polygon changed after the publish would ship an outline that
+    disagrees with every published percentage.
+    """
+    area = round(aoi.reservoir_area_ha(), 2)
+    if area != latest_doc["reservoir_area_ha"]:
+        msg = (
+            f"the AOI polygon ({area} ha) is not the one latest.json was "
+            f"published with ({latest_doc['reservoir_area_ha']} ha)"
+        )
+        raise PublishRefused(msg)
+    day = date.fromisoformat(str(latest_doc["date"]))
+    return outline_zip(day, _HOLDER, _LICENCE_URL)
+
+
 def _sha256sums(files: dict[str, bytes]) -> bytes:
     """``sha256sum -c`` lines (``<hex>  <name>``) for the summed files."""
     lines = [
@@ -866,9 +906,10 @@ def export_files(
     ``series.csv`` has one row per ``series.json`` scene, in its order, POOR
     scenes included; ``series_monthly.csv`` one row per ``monthly`` entry.
     Both carry the provenance columns. ``latest_doc`` supplies only the
-    README's year, ``reservoir_area_ha`` and ``constants``. Raises
-    PublishRefused when ``latest_doc`` belongs to another run.
-    Deterministic: no clock.
+    README's year, ``reservoir_area_ha`` and ``constants``, and dates the
+    outline zip. Raises PublishRefused when ``latest_doc`` belongs to
+    another run, or when the committed AOI is not the polygon it was
+    published with. Deterministic: no clock.
     """
     _require_same_run(series_doc, latest_doc, "latest.json")
     provenance = _provenance(series_doc, series_json_sha256)
@@ -881,6 +922,7 @@ def export_files(
     }
     for text in (README_EN, README_ES):
         files[text.filename] = _readme(series_doc, latest_doc, series_json_sha256, text)
+    files[OUTLINE_ZIP] = _outline(latest_doc)
     files["SHA256SUMS"] = _sha256sums(files)
     return files
 
@@ -940,12 +982,12 @@ def read_publish(
     return documents["series.json"], documents["latest.json"], hashes["series.json"]
 
 
-def _check_export_dir(out_dir: Path, given: Path) -> None:
+def _check_export_dir(out_dir: Path, given: Path, owns: Callable[[str], bool]) -> None:
     """Refuse an ``out_dir`` holding anything the export does not own.
 
     WHY: the swap renames ``out_dir`` away and deletes it, so it may only
-    hold earlier exports: a missing or empty directory, or allowlisted
-    regular files. A file, a symlink or a subdirectory is someone else's.
+    hold earlier exports: a missing or empty directory, or regular files
+    ``owns`` accepts. A file, a symlink or a subdirectory is someone else's.
     """
     if not out_dir.exists():
         return
@@ -954,23 +996,32 @@ def _check_export_dir(out_dir: Path, given: Path) -> None:
         msg = f"--out {shown} exists and is not a directory"
         raise PublishRefused(msg)
     for entry in sorted(out_dir.iterdir()):
-        owned = entry.name in EXPORT_FILES and entry.is_file()
+        owned = owns(entry.name) and entry.is_file()
         if not owned or entry.is_symlink():
             msg = f"--out {shown} holds a file the export does not own: {entry.name}"
             raise PublishRefused(msg)
 
 
-def _drop_stale_staging(out_dir: Path) -> None:
+def _drop_stale_staging(out_dir: Path, owns: Callable[[str], bool]) -> None:
     """Remove staging dirs a crashed export left, if they hold only its files."""
     for staging in _debris(out_dir, "staging"):
-        if all(entry.name in EXPORT_FILES for entry in staging.iterdir()):
+        if all(owns(entry.name) for entry in staging.iterdir()):
             shutil.rmtree(staging, ignore_errors=True)
 
 
-def write_export(out_dir: Path, files: dict[str, bytes], given: Path) -> None:
-    """Write allowlisted ``files`` into a sibling staging dir, then swap it in."""
+def write_export(
+    out_dir: Path,
+    files: dict[str, bytes],
+    given: Path,
+    owns: Callable[[str], bool] = EXPORT_FILES.__contains__,
+) -> None:
+    """Write ``files`` into a sibling staging dir, then swap it in.
+
+    ``owns`` is the export's allowlist: every file written, and every entry
+    an existing ``out_dir`` holds, must pass it.
+    """
     for name in files:
-        if name not in EXPORT_FILES:
+        if not owns(name):
             msg = f"refusing to export a file outside the allowlist: {name}"
             raise ValueError(msg)
     # WHY this order, as publish's ``_recover_out_dir`` + ``check_out_dir``:
@@ -980,8 +1031,8 @@ def write_export(out_dir: Path, files: dict[str, bytes], given: Path) -> None:
     #   refusal checks then run before anything is deleted: stale staging is
     #   dropped only once ``--out`` is known to be the export's own.
     _restore_previous(out_dir)
-    _check_export_dir(out_dir, given)
-    _drop_stale_staging(out_dir)
+    _check_export_dir(out_dir, given, owns)
+    _drop_stale_staging(out_dir, owns)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(
         tempfile.mkdtemp(prefix=_staging_prefix(out_dir.name), dir=out_dir.parent)
@@ -1008,11 +1059,19 @@ def export_publish(from_dir: Path | None = None, out_dir: Path | None = None) ->
     target = paths.downloads_dir() if out_dir is None else Path(out_dir)
     series_doc, latest_doc, series_json_sha256 = read_publish(source)
     files = export_files(series_doc, latest_doc, series_json_sha256)
+    real = resolve_export_dir(source, target)
+    write_export(real, files, target)
+    return target
+
+
+def resolve_export_dir(source: Path, target: Path) -> Path:
+    """The real ``--out`` path, refused when it is inside the publish dir.
+
+    WHY: an export is outside the contract; written inside the publish
+    directory it would become a foreign entry the next publish refuses.
+    """
     real = _resolve_out_dir(target)
-    # WHY: the bundle is outside the contract; written inside the publish
-    #   directory it would become a foreign entry the next publish refuses.
     if real.is_relative_to(source.resolve()):
         msg = f"--out {target} is inside the publish directory {source}"
         raise PublishRefused(msg)
-    write_export(real, files, target)
-    return target
+    return real

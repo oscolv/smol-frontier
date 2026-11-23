@@ -114,7 +114,7 @@ To classify a recent day, run `uv run smolf levels update` first.
 | `smolf series build` | Build the hyacinth time series. `--extend` adds scenes from 2026-10-13 on that the reference series lacks. `--resume <run_id>` continues an interrupted run. |
 | `smolf gate identity` | Compare a 30-scene sample with the reference series. `--all` compares every scene. `--baseline` turns the haze rescue off and compares with the earlier series v2026-10-22. |
 | `smolf publish --latest` | Publish the newest complete series run. `--run <run_id>` names a run instead. |
-| `smolf export series-csv` | Write the download bundle of the publish (CSV files, README and checksums) into `outputs/downloads/`. See [`docs/downloads.md`](docs/downloads.md). |
+| `smolf export series-csv` | Write the download bundle of the publish into `outputs/downloads/`: two CSV files, a README in English and in Spanish, and a checksum file. See [`docs/downloads.md`](docs/downloads.md). |
 | `smolf version` | Print the package version. |
 
 Prefix each command with `uv run`. Run `uv run smolf <command> --help` for
@@ -200,3 +200,20 @@ you reuse the data.
 
 [`docs/provenance.md`](docs/provenance.md) describes the author's prior
 research and how this project uses it.
+
+## Author and citation
+
+Oscar Olvera Neria (UAM Azcapotzalco) wrote smol-frontier and the reference
+series that the identity gate checks it against.
+
+To cite a figure, use the suggested citation in the `README.txt` of the
+download bundle. It names the series run that produced the figure:
+
+```text
+Oscar Olvera Neria (UAM Azcapotzalco) (<year>). Water hyacinth on Endho
+Reservoir: Sentinel-2 series, run <run_id>. smolf.
+https://github.com/oscolv/smol-frontier
+```
+
+To report a bug or a figure that looks wrong, open an issue at
+<https://github.com/oscolv/smol-frontier/issues>.

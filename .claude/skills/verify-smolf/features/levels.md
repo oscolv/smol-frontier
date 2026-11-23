@@ -31,6 +31,8 @@ Preconditions:
 
 ## Gotchas
 
+- The temp-file removal runs only after a download passes validation, and never with `--check`, so a failed or `--check` refresh leaves the `.tmp` files in place.
+- `levels show` also exits 1 with `no level for <day>` for a day whose level is NaN, not only for a day the record lacks.
 - Without `--log-level INFO` the removal still happens but stderr stays empty. The CLI configures no logging, so an operator sees no trace of it by default.
 - The SIH sits behind bot protection. The CLI makes 4 attempts (up to about 4.5 min) and then exits 1 with `error: SIH download failed after 4 attempts: <reason>` on stderr. Report that as unverified, not as a bug.
 - The SIH sometimes publishes the same day and sometimes days late. Don't hard-code an expected last day.

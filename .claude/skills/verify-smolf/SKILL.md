@@ -1,6 +1,6 @@
 ---
 name: verify-smolf
-description: Drive the real `smolf` CLI (smol-frontier, water-hyacinth series for the Endhó reservoir) end to end and capture proof — classify a day, refresh SIH levels, build the series, publish the contract, export the download bundle, or run the whole daily job from a read-only checkout. Use it to verify a change works in the real CLI, not just in pytest.
+description: Drive the real `smolf` CLI (smol-frontier, water-hyacinth series for the Endhó reservoir) end to end and capture proof — classify a day, refresh SIH levels, build the series, publish the contract, export the download bundle or the per-scene maps, or run the whole daily job from a read-only checkout. Use it to verify a change works in the real CLI, not just in pytest.
 ---
 
 # Verify smolf
@@ -40,7 +40,7 @@ Read-only. It needs `smolf: <version>` (the CLI validates `SMOLF_DATA_DIR` on ev
 
 ```bash
 $V run "$RUN" <feature-id> -- <smolf args>    # e.g. -- classify 2026-10-12
-$V hectares "$RUN" <classified.tif>           # per-class hectares of a written map
+$V hectares "$RUN" <classified.tif>           # per-class hectares of a written map (plus bed_removed_ha for a published one)
 ```
 
 `run` executes `$SMOLF <args>` from `/tmp` with the run's `SMOLF_DATA_DIR`, prints stdout, and records `<n>-<feature-id>.cmd/.out/.err/.rc` in `$RUN/evidence/`. Once smolf has run, `run` exits 0 whatever smolf returned, so read the recorded `.rc`. A usage error of the helper itself (unknown option, missing run dir, feature id or option value) exits 2 before smolf runs, in every subcommand.

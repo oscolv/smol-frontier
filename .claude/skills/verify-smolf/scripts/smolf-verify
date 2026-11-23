@@ -15,7 +15,7 @@
 #                                                       --block-host fails DNS for H in
 #                                                       Python (STAC API, PC signing, SIH);
 #                                                       --log-level shows smolf's log at L
-#   smolf-verify hectares <run> <geotiff>               per-class hectares of a classified map
+#   smolf-verify hectares <run> <geotiff>               per-class hectares of a map (class 5 too when published)
 #   smolf-verify cleanup <run>                          remove checkout and data, keep evidence
 set -euo pipefail
 
@@ -235,7 +235,12 @@ from smol_frontier.config import settings
 with rasterio.open(sys.argv[1]) as src:
     data = src.read(1)
     pixel_ha = abs(src.transform.a * src.transform.e) / 10_000
-for name in ("CLASS_WATER", "CLASS_DENSE_HYACINTH", "CLASS_INTERFACE", "CLASS_BARE_SOIL"):
+    # A published map (publish, export maps) also has class 5 in its legend.
+    published = "class_5" in src.tags(1)
+names = ["CLASS_WATER", "CLASS_DENSE_HYACINTH", "CLASS_INTERFACE", "CLASS_BARE_SOIL"]
+if published:
+    names.append("CLASS_BED_REMOVED")
+for name in names:
     code = getattr(settings, name)
     print(f"{name.removeprefix('CLASS_').lower()}_ha: {(data == code).sum() * pixel_ha:.2f}")
 PY

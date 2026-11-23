@@ -18,7 +18,7 @@ uv sync                                  # once, in the repo checkout
 RUN=$($V new --ref HEAD --shared-cache)  # prints the run dir
 ```
 
-- `--ref <commit>` checks the commit out into `$RUN/checkout` as a git worktree, runs `uv sync --frozen` there, and makes it read-only (`chmod -R a-w`). That is the production shape: code read-only, all writes under `SMOLF_DATA_DIR`. Without `--ref` the run uses the repo's own `.venv/bin/smolf` and checkout (writable). Commit first: `--ref` checks out committed code only.
+- `--ref <commit>` checks the commit out into `$RUN/checkout` as a git worktree, runs `uv sync --frozen` there, and makes it read-only (`chmod -R a-w`). That is the production shape: code read-only, all writes under `SMOLF_DATA_DIR`. Without `--ref` the run uses the repo's own `.venv/bin/smolf` and checkout (writable). Commit first: `--ref` checks out committed code only. A `--ref` that does not name a commit exits 2 and creates nothing.
 - `--shared-cache` symlinks `$RUN/data/cache` to the scene cache (about 480 scenes, ~1.4 MB each). It uses the current checkout's `data/cache`, or the main checkout's when you run from a git worktree without one. When neither exists, `new` exits 2 and creates nothing. Without it the first `series build` downloads every scene (about an hour). Never run two builds against the same shared cache at once: cache files are written in place.
 - Ready means `doctor` shows the healthy lines below, not only that it exits 0. No seed step: an empty data dir is valid. Readers fall back to the committed level record until `levels update` writes `$RUN/data/hydro/ENDHD.csv`.
 

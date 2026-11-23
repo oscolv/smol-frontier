@@ -46,6 +46,7 @@ from smol_frontier.hydro.levels import (
 )
 from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.publish.export import export_publish
+from smol_frontier.publish.map_export import export_maps
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     EXTEND_START,
@@ -580,10 +581,12 @@ def export_series_csv(
 
     series.csv (one row per series.json scene), series_monthly.csv (the
     monthly medians), README.txt (licence, citation, sources, provenance,
-    column dictionary), LEEME.txt (the same in Spanish) and SHA256SUMS (for
-    `sha256sum -c`).
+    column dictionary), LEEME.txt (the same in Spanish),
+    reservoir_outline.zip (the reservoir polygon as a shapefile) and
+    SHA256SUMS (for `sha256sum -c`).
 
-    Reads only the published contract: publish.json must validate, and
+    Reads the published contract and the committed AOI polygon (which must
+    give latest.json's reservoir area): publish.json must validate, and
     series.json and latest.json must hash to their publish.json entries,
     pass their schemas and belong to the same run. Refuses (exit 2) any
     failure, an --out that is a file or inside the publish directory, and an
@@ -592,6 +595,41 @@ def export_series_csv(
     """
     try:
         out_dir = export_publish(from_dir=from_dir, out_dir=out)
+    except PublishRefused as exc:
+        typer.echo(f"refused: {_one_line(exc)}", err=True)
+        raise typer.Exit(2)
+    typer.echo(f"exported: {out_dir}")
+
+
+@export_app.command("maps")
+def export_maps_command(
+    from_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--from", help="Publish directory to read (default: outputs/publish)."
+        ),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output directory (default: outputs/maps)."),
+    ] = None,
+) -> None:
+    """Write one classified GeoTIFF per scene of a finished publish.
+
+    <date>_<item_id>.tif (classes 0-5, the published map's format) for every
+    scene with figures in series.json, index.csv (scene, sha256, run_id,
+    series_sha256, series.json sha256), README.txt and SHA256SUMS.
+
+    Verifies the publish like `export series-csv`, then rebuilds each map
+    from the run behind it and the scene cache (a missing scene is
+    re-ingested by its exact item id). Refuses (exit 2) a missing or
+    incomplete run, a run that is not the publish's series, any map that
+    disagrees with the run or with series.json, and an --out holding files
+    the export does not own; a refusal writes nothing. The output directory
+    is replaced atomically.
+    """
+    try:
+        out_dir = export_maps(from_dir=from_dir, out_dir=out)
     except PublishRefused as exc:
         typer.echo(f"refused: {_one_line(exc)}", err=True)
         raise typer.Exit(2)

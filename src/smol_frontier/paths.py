@@ -22,6 +22,7 @@ __all__ = [
     "gate_dir",
     "levels_path",
     "levels_read_path",
+    "maps_dir",
     "outputs_dir",
     "publish_dir",
     "series_dir",
@@ -105,6 +106,14 @@ def downloads_dir() -> Path:
     if root is not None:
         return root / "outputs/downloads"
     return PROJECT_ROOT / "outputs/downloads"
+
+
+def maps_dir() -> Path:
+    """Default location of the per-scene map export of a publish."""
+    root = _data_root()
+    if root is not None:
+        return root / "outputs/maps"
+    return PROJECT_ROOT / "outputs/maps"
 
 
 def gate_dir() -> Path:

@@ -42,6 +42,14 @@ cmd_new() {
       *) die "new: unknown option $1" ;;
     esac
   done
+  if [ -n "$ref" ]; then
+    # Resolve the ref before creating anything, so a typo is a usage error
+    # (exit 2) and leaves no half-made run dir.
+    local sha
+    sha=$(git -C "$repo" rev-parse --verify --quiet "$ref^{commit}") \
+      || die "new: --ref is not a commit: $ref"
+    ref=$sha
+  fi
   local cache_src=""
   if [ "$shared" = 1 ]; then
     # Share this checkout's cache, else the main worktree's (a linked worktree

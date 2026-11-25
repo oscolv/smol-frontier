@@ -47,6 +47,7 @@ from smol_frontier.hydro.levels import (
 from smol_frontier.publish import ContractInvalid, PublishRefused, publish_run
 from smol_frontier.publish.export import export_publish
 from smol_frontier.publish.map_export import export_maps
+from smol_frontier.publish.viewer_export import export_viewer
 from smol_frontier.quality import assess_quality
 from smol_frontier.series import (
     EXTEND_START,
@@ -630,6 +631,45 @@ def export_maps_command(
     """
     try:
         out_dir = export_maps(from_dir=from_dir, out_dir=out)
+    except PublishRefused as exc:
+        typer.echo(f"refused: {_one_line(exc)}", err=True)
+        raise typer.Exit(2)
+    typer.echo(f"exported: {out_dir}")
+
+
+@export_app.command("viewer")
+def export_viewer_command(
+    from_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--from", help="Publish directory to read (default: outputs/publish)."
+        ),
+    ] = None,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="Output directory (default: outputs/viewer)."),
+    ] = None,
+) -> None:
+    """Write the per-date viewer archive of a finished publish.
+
+    One <date>_<item_id>/ folder per scene with figures in series.json
+    (photo.webp, classified.webp, figures.json with per-class hectares and
+    wet biomass), index.json (run_id, series_sha256, sha256 of every file),
+    README.txt and SHA256SUMS.
+
+    Verifies the publish and rebuilds each scene like `export maps`; the
+    photo is read from the item's COGs (network). Folders of an earlier
+    export of the same run that still verify are kept instead of rebuilt.
+    Refuses (exit 2) like `export maps`, and on any image that does not
+    decode to its classes; a refusal writes nothing. The output directory
+    is replaced atomically. Progress goes to stderr, one line per scene.
+    """
+    try:
+        out_dir = export_viewer(
+            from_dir=from_dir,
+            out_dir=out,
+            progress=lambda line: typer.echo(line, err=True),
+        )
     except PublishRefused as exc:
         typer.echo(f"refused: {_one_line(exc)}", err=True)
         raise typer.Exit(2)

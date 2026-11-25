@@ -116,6 +116,14 @@ def maps_dir() -> Path:
     return PROJECT_ROOT / "outputs/maps"
 
 
+def viewer_dir() -> Path:
+    """Default location of the per-date viewer export of a publish."""
+    root = _data_root()
+    if root is not None:
+        return root / "outputs/viewer"
+    return PROJECT_ROOT / "outputs/viewer"
+
+
 def gate_dir() -> Path:
     """Default location of the identity gate reports."""
     root = _data_root()

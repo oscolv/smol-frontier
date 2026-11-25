@@ -116,6 +116,7 @@ To classify a recent day, run `uv run smolf levels update` first.
 | `smolf publish --latest` | Publish the newest complete series run. `--run <run_id>` names a run instead. |
 | `smolf export series-csv` | Write the download bundle of the publish into `outputs/downloads/`: two CSV files, a README in English and in Spanish, the reservoir outline as a zipped shapefile, and a checksum file. See [`docs/downloads.md`](docs/downloads.md). |
 | `smolf export maps` | Write one classified GeoTIFF per scene of the publish into `outputs/maps/`, with an index and a checksum file. It needs the scene cache. See [`docs/downloads.md`](docs/downloads.md). |
+| `smolf export viewer` | Write the per-date viewer archive into `outputs/viewer/`: one folder per scene with the photo, the rendered class map and its figures, including wet biomass. It needs the scene cache and the network. See [`docs/downloads.md`](docs/downloads.md). |
 | `smolf version` | Print the package version. |
 
 Prefix each command with `uv run`. Run `uv run smolf <command> --help` for
@@ -150,6 +151,7 @@ With `SMOLF_DATA_DIR` set, every write goes under that folder:
 | `outputs/publish/` | The published JSON files, map, and photos. |
 | `outputs/downloads/` | The download bundle written by `smolf export series-csv`. |
 | `outputs/maps/` | The per-scene maps written by `smolf export maps`. |
+| `outputs/viewer/` | The per-date viewer archive written by `smolf export viewer`. |
 | `outputs/identity_gate/` | Identity gate reports. |
 | `hydro/ENDHD.csv` and `hydro/ENDHD.csv.json` | The refreshed SIH level record and its provenance file. |
 

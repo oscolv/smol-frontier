@@ -55,6 +55,12 @@ The pipeline in order, one line per stage:
   `build_map` from the publish's run and the scene cache, checked against
   `series.json`, plus `index.csv`, `README.txt`, `SHA256SUMS`; outside the
   contract, see `docs/downloads.md`)
+- Per-date viewer archive — `publish/viewer_export.py` (`smolf export
+  viewer`; one folder per scene with `photo.webp`, lossless
+  `classified.webp` and `figures.json` with per-class hectares and wet
+  biomass from `biomass.py`, plus `index.json`, `README.txt`,
+  `SHA256SUMS`; incremental within a run; outside the contract, see
+  `docs/downloads.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)
 - Experiments — `experiments/` (re-verification scripts + notes; per-scene
@@ -97,9 +103,12 @@ Method and design rules live in `docs/method.md` and `docs/decisions.md`.
 - `outputs/maps/` — the per-scene class maps of the publish
   (`<date>_<item_id>.tif`, `index.csv`, `README.txt`, `SHA256SUMS`;
   gitignored, regenerable via `smolf export maps`).
+- `outputs/viewer/` — the per-date viewer archive of the publish
+  (`<date>_<item_id>/`, `index.json`, `README.txt`, `SHA256SUMS`;
+  gitignored, regenerable via `smolf export viewer`).
 - `$SMOLF_DATA_DIR/` — when set (read at call time by `paths.py`), holds
   every write instead: `cache/`, `outputs/…` (same subfolders as above,
-  `outputs/downloads/` and `outputs/maps/` included) and
+  `outputs/downloads/`, `outputs/maps/` and `outputs/viewer/` included) and
   `hydro/ENDHD.csv[.json]` (the refreshed SIH record; readers fall back to
   the committed copy until it exists). Other inputs stay in the checkout.
 

@@ -996,10 +996,25 @@ def _check_export_dir(out_dir: Path, given: Path, owns: Callable[[str], bool]) -
         msg = f"--out {shown} exists and is not a directory"
         raise PublishRefused(msg)
     for entry in sorted(out_dir.iterdir()):
-        owned = owns(entry.name) and entry.is_file()
+        owned = owns(entry.name) and (entry.is_file() or _owned_folder(entry, owns))
         if not owned or entry.is_symlink():
             msg = f"--out {shown} holds a file the export does not own: {entry.name}"
             raise PublishRefused(msg)
+
+
+def _owned_folder(entry: Path, owns: Callable[[str], bool]) -> bool:
+    """True for a real directory of regular files ``owns`` accepts as
+    ``<dir>/<file>`` (the per-date viewer's scene folders)."""
+    return (
+        entry.is_dir()
+        and not entry.is_symlink()
+        and all(
+            child.is_file()
+            and not child.is_symlink()
+            and owns(f"{entry.name}/{child.name}")
+            for child in entry.iterdir()
+        )
+    )
 
 
 def _drop_stale_staging(out_dir: Path, owns: Callable[[str], bool]) -> None:
@@ -1041,7 +1056,10 @@ def write_export(
     staging.chmod(0o755)
     try:
         for name, data in files.items():
-            (staging / name).write_bytes(data)
+            path = staging / name
+            # WHY: only the viewer export names files inside a folder.
+            path.parent.mkdir(mode=0o755, exist_ok=True)
+            path.write_bytes(data)
         _swap_in(staging, out_dir)
     finally:
         if staging.exists():

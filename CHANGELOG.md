@@ -10,14 +10,19 @@ rules in `docs/decisions.md`.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-25
+
+Contract: schema 3.4.0, unchanged.
+
 ### Changed
 
 - `smolf export viewer` reuses the previous export's folders across runs
   (same smolf version and config): a scene whose map key and figures are
   unchanged is kept, and a rebuilt map keeps its photo when its photo key
   (item, backend, bounds, reservoir polygon) matches. A daily export after
-  a new run reads only the new photos. `index.json` gains `config_hash`
-  and, per scene, `map_key` and `photo_key`.
+  a new run reads only the new photos (#109). `index.json` gains
+  `config_hash` and, per scene, `map_key` and `photo_key`. The first
+  export after upgrading rebuilds every folder once.
 - The committed SIH level record runs through 2026-11-24 (#106).
 
 ## [0.12.0] - 2026-11-25
@@ -208,7 +213,8 @@ Contract: schema 1.0.0, first release.
   gate against the author's reference series (CC BY 4.0).
 - `smolf publish`, the versioned data contract (#11).
 
-[Unreleased]: https://github.com/oscolv/smol-frontier/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/oscolv/smol-frontier/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/oscolv/smol-frontier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/oscolv/smol-frontier/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/oscolv/smol-frontier/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/oscolv/smol-frontier/compare/v0.9.0...v0.10.0

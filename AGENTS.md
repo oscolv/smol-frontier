@@ -160,8 +160,8 @@ regression helper passes the day's water mirror, as `smolf classify` does:
 - With `mirror=None` (rescue off) the v2026-10-22 values still hold:
   2026-10-12 818.34 ha (dense 350.24, interface 468.10, 64.86 %);
   2024-06-09 raw 432.25 → corrected 13.74 ha (author 432.38 → 13.73).
-- `data/hydro/ENDHD.csv` sha256 `261180f6…` (committed refresh through
-  2026-11-18; `tests/test_levels.py` checks this prefix and day); `stage_area_curve.csv` and
+- `data/hydro/ENDHD.csv` sha256 `0bcfb0f0…` (committed refresh through
+  2026-11-24; `tests/test_levels.py` checks this prefix and day); `stage_area_curve.csv` and
   `flood_stage.tif` are guarded by golden tests.
 
 ## Glossary

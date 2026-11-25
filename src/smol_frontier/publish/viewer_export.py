@@ -15,13 +15,13 @@ endho gate) writes ``<date>_<item_id>/`` with:
 
 plus ``index.json``, ``README.txt`` and ``SHA256SUMS``. Outside the
 contract, like the other exports. Incremental across runs: the scene
-folders of the previous export (same smolf version, files still hashing to
+folders of the previous export (same smolf version and config, files still hashing to
 its ``index.json``) are reused. A folder whose map key (the scene record
 and the run inputs its map is built from) and figures are unchanged is
 kept, with the new ``run_id`` written into ``figures.json``; otherwise its
 map is rebuilt, and its photo is still reused when its photo key (item,
-backend, bounds) matches. The
-output directory is always swapped in whole, so it never mixes runs.
+backend, bounds, reservoir polygon) matches. The output directory is always
+swapped in whole, so it never mixes runs.
 """
 
 import hashlib
@@ -272,8 +272,9 @@ def map_key(record: dict[str, object], manifest: dict[str, object]) -> str:
     """Fingerprint of everything a scene's class map is built from (pure).
 
     The scene record (cache sha256, run row) and the run inputs in
-    ``_MAP_INPUTS``. Two runs with the same key and the same smolf version
-    rebuild the same map, so its classified.webp can be reused.
+    ``_MAP_INPUTS``. Two runs with the same key, exported by the same smolf
+    version and config, rebuild the same map, so its classified.webp can be
+    reused.
     """
     inputs = manifest.get("inputs")
     inputs = inputs if isinstance(inputs, dict) else {}
@@ -284,16 +285,21 @@ def map_key(record: dict[str, object], manifest: dict[str, object]) -> str:
     return _sha(_json_bytes(document))
 
 
-def photo_key(record: dict[str, object], bounds: list[list[float]]) -> str:
+def photo_key(
+    record: dict[str, object], bounds: list[list[float]], aoi_sha256: str | None
+) -> str:
     """Fingerprint of what a scene's photo is read from (pure).
 
-    The item and the backend whose COGs are read, and the display bounds
-    (the grid it is read onto); never the run.
+    The item and the backend whose COGs are read, the display bounds (the
+    grid it is read onto, itself pinned by the cached scene's grid) and the
+    reservoir polygon (the BOA-offset region and the alpha clip); never the
+    run.
     """
     document = {
         "item_id": record["item_id_used"],
         "backend": record["backend_used"],
         "bounds": bounds,
+        "aoi_polygon": aoi_sha256,
     }
     return _sha(_json_bytes(document))
 
@@ -303,24 +309,29 @@ class _Previous:
     """A scene folder of the previous export whose files hash to its index."""
 
     files: dict[str, bytes]
-    map_key: object
-    photo_key: object
+    map_key: str | None
+    photo_key: str | None
     run_id: str
     figures: dict[str, object]
 
 
-def _reusable(real: Path) -> dict[str, _Previous]:
+def _reusable(real: Path, config_hash: str) -> dict[str, _Previous]:
     """Scene folders of the previous export that still hash to its
     index.json, whatever its run (else nothing).
 
-    WHY the version must match: the map rebuild, the rendering and the
-    photo window are smolf's code, so another version rebuilds everything.
+    WHY version and config must match: the map rebuild, the rendering and
+    the photo window are smolf's code and settings, so another version or
+    config rebuilds everything.
     """
     try:
         index = json.loads((real / "index.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    if not isinstance(index, dict) or index.get("smolf_version") != __version__:
+    if (
+        not isinstance(index, dict)
+        or index.get("smolf_version") != __version__
+        or index.get("config_hash") != config_hash
+    ):
         return {}
     run_id = str(index.get("run_id"))
     found: dict[str, _Previous] = {}
@@ -431,10 +442,12 @@ def export_viewer(
         if record["status"] == "ok"
     ]
     scenes = {(s["date"], s["item_id"]): s for s in series_doc["scenes"]}
-    reusable = _reusable(real)
+    config_hash = series.config_hash()
+    aoi_sha256 = series.sha256_file(settings.AOI_PATH)
+    reusable = _reusable(real, config_hash)
     committed = committed_curve(manifest)
     built: dict[str, dict[str, bytes]] = {}
-    keys: dict[str, tuple[str, str]] = {}
+    keys: dict[str, dict[str, str]] = {}
     photos: dict[str, Future[bytes]] = {}
     # WHY threads for the photos only: a photo is a network read of three
     #   COG windows (I/O-bound, GDAL releases the GIL), ~10 s each, while
@@ -455,22 +468,26 @@ def export_viewer(
                 if scene["hyacinth_raw_ha"] is None:
                     continue
                 folder = f"{record['date']}_{record['item_id_used']}"
-                key = map_key(record, manifest)
+                scene_map_key = map_key(record, manifest)
                 old = reusable.get(folder)
                 figures = None
-                if old is not None and old.map_key == key:
+                if old is not None and old.photo_key and old.map_key == scene_map_key:
                     figures = _current_figures(old, scene, run_id)
-                if old is not None and figures is not None:
+                if old is not None and old.photo_key and figures is not None:
                     built[folder] = {**old.files, "figures.json": figures}
-                    keys[folder] = (key, str(old.photo_key))
+                    keys[folder] = {
+                        "map_key": scene_map_key,
+                        "photo_key": old.photo_key,
+                    }
                     _report(progress, f"kept {folder}")
                     continue
                 files, display = _build_scene(
                     record, scene, manifest, committed, run_id, Path(tmp)
                 )
                 built[folder] = files
-                keys[folder] = (key, photo_key(record, display.bounds))
-                if old is not None and old.photo_key == keys[folder][1]:
+                scene_photo_key = photo_key(record, display.bounds, aoi_sha256)
+                keys[folder] = {"map_key": scene_map_key, "photo_key": scene_photo_key}
+                if old is not None and old.photo_key == scene_photo_key:
                     files["photo.webp"] = old.files["photo.webp"]
                     _report(progress, f"built {folder} (photo kept)")
                     continue
@@ -495,8 +512,7 @@ def export_viewer(
                 "date": date,
                 "item_id": item_id,
                 "folder": folder,
-                "map_key": keys[folder][0],
-                "photo_key": keys[folder][1],
+                **keys[folder],
                 "files": {name: _sha(scene_files[name]) for name in SCENE_FILES},
             }
         )
@@ -505,6 +521,7 @@ def export_viewer(
         "series_sha256": series_doc["series_sha256"],
         "series_json_sha256": series_json_sha256,
         "smolf_version": __version__,
+        "config_hash": config_hash,
         "scenes": entries,
     }
     files["index.json"] = _json_bytes(index)

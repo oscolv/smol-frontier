@@ -59,7 +59,8 @@ The pipeline in order, one line per stage:
   viewer`; one folder per scene with `photo.webp`, lossless
   `classified.webp` and `figures.json` with per-class hectares and wet
   biomass from `biomass.py`, plus `index.json`, `README.txt`,
-  `SHA256SUMS`; incremental within a run; outside the contract, see
+  `SHA256SUMS`; incremental across runs, keyed by `map_key` and
+  `photo_key`; outside the contract, see
   `docs/downloads.md`)
 - Default write paths — `paths.py` (`SMOLF_DATA_DIR` relocates cache, outputs
   and the refreshed SIH level record)

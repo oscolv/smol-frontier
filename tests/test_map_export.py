@@ -163,7 +163,11 @@ def publish_run(tmp_path: Path, run_id: str, records: list[dict]) -> None:
         "status": "complete",
         "series_sha256": series_sha,
         "code": {"dirty": False},
-        "counts": {"ok": 3, "skipped": 1, "errors": 0},
+        "counts": {
+            "ok": sum(r["status"] == "ok" for r in records),
+            "skipped": sum(r["status"] == "skipped" for r in records),
+            "errors": 0,
+        },
         "inputs": {
             "stage_area_curve_csv": series.sha256_file(curve.DEFAULT_CURVE_CSV_PATH)
         },

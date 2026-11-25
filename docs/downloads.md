@@ -398,7 +398,8 @@ SHA256SUMS          sha256 of every other file, as <folder>/<file>
   - `pct_reservoir` and biomass are null on `LOWER_BOUND` scenes. The
     copied `series.json` fields stay verbatim there.
 - **`index.json`:** `run_id`, `series_sha256`, `series_json_sha256`,
-  `smolf_version` and one entry per folder, in series order: `date`,
+  `smolf_version`, `config_hash` (sha256 of the settings, as in a run
+  manifest) and one entry per folder, in series order: `date`,
   `item_id`, `folder`, `map_key` and `photo_key` (see Incremental) and
   `files`, the sha256 of each of the three files. A consumer refuses the archive unless `run_id` and
   `series_sha256` match the series it serves.
@@ -429,10 +430,13 @@ whatever its run, so a daily export after a new run only builds the
 new or changed scenes.
 
 - **Reusable folders:** a folder of the previous export is a candidate
-  when that export was written by the same smolf version
-  (`smolf_version` in its `index.json`) and its three files still hash
-  to that index. Another version rebuilds every folder, since the map
-  rebuild, the rendering and the photo window are smolf's code.
+  when that export was written by the same smolf version and settings
+  (`smolf_version` and `config_hash` in its `index.json`) and its three
+  files still hash to that index. Another version or config rebuilds
+  every folder, since the map rebuild, the rendering and the photo
+  window are smolf's code and settings. A development checkout that
+  changes code without bumping the version should start from an empty
+  `--out`.
 - **Kept:** a candidate is kept (`kept <folder>`) when both hold:
   - its `map_key` equals the scene's new one. The key is the sha256 of
     the scene's run record (cache sha256 and run row) and the run's
@@ -446,8 +450,9 @@ new or changed scenes.
 - **Map rebuilt, photo kept:** any other candidate has its map and
   figures rebuilt and checked. Its `photo.webp` is copied when its
   `photo_key` equals the new one: the sha256 of the item id, the backend
-  whose COGs are read and the display bounds, all the photo depends on
-  (`built <folder> (photo kept)`).
+  whose COGs are read, the display bounds and the reservoir polygon
+  (the BOA-offset region and the clip), which with the version and
+  config is all the photo depends on (`built <folder> (photo kept)`).
 - **Built:** a new scene, or a missing or tampered folder, is built
   from scratch, photo read included (`built <folder>`).
 - **Dropped scenes:** a folder whose scene is not in the new

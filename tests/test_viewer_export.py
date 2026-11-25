@@ -24,7 +24,7 @@ from test_map_export import (  # noqa: F401  (data_dir is a fixture)
 )
 from typer.testing import CliRunner
 
-from smol_frontier import paths
+from smol_frontier import paths, series
 from smol_frontier.biomass import wet_biomass
 from smol_frontier.classify.display import (
     decode_display_classes,
@@ -217,10 +217,6 @@ def test_only_a_missing_or_tampered_folder_is_rebuilt(
 NEW_RUN = "20240111T000000"
 
 
-def _second_run(tmp_path: Path, records: list[dict]) -> None:
-    publish_run(tmp_path, NEW_RUN, records)
-
-
 def test_a_new_run_with_the_same_figures_keeps_every_folder(
     data_dir: Path,  # noqa: F811
     fakes: dict,
@@ -228,7 +224,7 @@ def test_a_new_run_with_the_same_figures_keeps_every_folder(
 ) -> None:
     assert _export().exit_code == 0
     first = _tree(_out(data_dir))
-    _second_run(tmp_path, _records())
+    publish_run(tmp_path, NEW_RUN, _records())
     fakes["map"].clear()
     fakes["photo"].clear()
     result = _export()
@@ -259,28 +255,32 @@ def test_a_new_run_rebuilds_only_the_changed_scenes(
     tmp_path: Path,
 ) -> None:
     assert _export().exit_code == 0
+    first = _tree(_out(data_dir))
+    old_index = json.loads(first["index.json"])
     records = _records()
-    # a new cache file (map key) for one scene, a new valid_frac (figures)
-    # for another, and the third scene dropped from the run
+    # a new cache file (map key) for the first scene, the second untouched,
+    # and the third dropped from the run
     records[0]["cache_sha256"] = "0" * 64
-    records[2]["row"]["valid_frac"] = 0.97
-    records[2]["valid_frac"] = 0.97
     dropped = records.pop(3)
-    _second_run(tmp_path, records)
+    publish_run(tmp_path, NEW_RUN, records)
     fakes["map"].clear()
     fakes["photo"].clear()
     result = _export()
     assert result.exit_code == 0, result.output
-    assert fakes["map"] == [FOLDERS[0].split("_", 1)[1], FOLDERS[1].split("_", 1)[1]]
-    assert fakes["photo"] == []
+    assert fakes == {"map": [FOLDERS[0].split("_", 1)[1]], "photo": []}
     assert result.stderr.splitlines() == [
         f"built {FOLDERS[0]} (photo kept)",
-        f"built {FOLDERS[1]} (photo kept)",
+        f"kept {FOLDERS[1]}",
     ]
     out = _out(data_dir)
     assert not (out / f"{dropped['date']}_{dropped['item_id_used']}").exists()
     index = json.loads((out / "index.json").read_text(encoding="utf-8"))
     assert [e["folder"] for e in index["scenes"]] == FOLDERS[:2]
+    photo = f"{FOLDERS[0]}/photo.webp"
+    assert (out / photo).read_bytes() == first[photo]
+    old_entry, new_entry = old_index["scenes"][0], index["scenes"][0]
+    assert new_entry["photo_key"] == old_entry["photo_key"]
+    assert new_entry["map_key"] != old_entry["map_key"]
 
 
 def test_a_new_backend_reads_the_photo_again(
@@ -291,7 +291,7 @@ def test_a_new_backend_reads_the_photo_again(
     assert _export().exit_code == 0
     records = _records()
     records[0]["backend_used"] = "planetary-computer"
-    _second_run(tmp_path, records)
+    publish_run(tmp_path, NEW_RUN, records)
     fakes["map"].clear()
     fakes["photo"].clear()
     result = _export()
@@ -304,20 +304,113 @@ def test_a_new_backend_reads_the_photo_again(
     ]
 
 
-def test_another_smolf_version_rebuilds_every_folder(
+@pytest.mark.parametrize(
+    ("field", "value"), [("smolf_version", "0.0.0"), ("config_hash", "0" * 64)]
+)
+def test_another_version_or_config_rebuilds_every_folder(
     data_dir: Path,  # noqa: F811
     fakes: dict,
+    field: str,
+    value: str,
 ) -> None:
     assert _export().exit_code == 0
     path = _out(data_dir) / "index.json"
     index = json.loads(path.read_text(encoding="utf-8"))
-    index["smolf_version"] = "0.0.0"
+    assert field in index
+    index[field] = value
     path.write_text(json.dumps(index), encoding="utf-8")
     fakes["map"].clear()
     fakes["photo"].clear()
     assert _export().exit_code == 0
     assert len(fakes["map"]) == len(FOLDERS)
     assert len(fakes["photo"]) == len(FOLDERS)
+
+
+def test_an_index_without_keys_rebuilds_maps_and_photos(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+) -> None:
+    """A 0.12.0 archive: its entries have no map_key or photo_key."""
+    assert _export().exit_code == 0
+    path = _out(data_dir) / "index.json"
+    index = json.loads(path.read_text(encoding="utf-8"))
+    for entry in index["scenes"]:
+        del entry["map_key"], entry["photo_key"]
+    path.write_text(json.dumps(index), encoding="utf-8")
+    fakes["map"].clear()
+    fakes["photo"].clear()
+    assert _export().exit_code == 0
+    assert len(fakes["map"]) == len(fakes["photo"]) == len(FOLDERS)
+    index = json.loads(path.read_text(encoding="utf-8"))
+    assert all(len(e["photo_key"]) == 64 for e in index["scenes"])
+
+
+@pytest.mark.parametrize("figures", [b"[]", b"not json"])
+def test_a_malformed_figures_file_is_not_reused(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+    figures: bytes,
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    (out / FOLDERS[0] / "figures.json").write_bytes(figures)
+    path = out / "index.json"
+    index = json.loads(path.read_text(encoding="utf-8"))
+    index["scenes"][0]["files"]["figures.json"] = hashlib.sha256(figures).hexdigest()
+    path.write_text(json.dumps(index), encoding="utf-8")
+    assert sorted(viewer_export._reusable(out, series.config_hash())) == FOLDERS[1:]
+
+
+def test_changed_figures_under_the_same_map_key_are_not_current(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+) -> None:
+    assert _export().exit_code == 0
+    old = viewer_export._reusable(_out(data_dir), series.config_hash())[FOLDERS[0]]
+    scene = next(s for s in _series(data_dir)["scenes"] if s["item_id"] in FOLDERS[0])
+    current = viewer_export._current_figures(old, scene, NEW_RUN)
+    assert current is not None
+    assert json.loads(current) == {**old.figures, "run_id": NEW_RUN}
+    changed = {**scene, "level_m": scene["level_m"] + 0.01}
+    assert viewer_export._current_figures(old, changed, NEW_RUN) is None
+
+
+MANIFEST = {
+    "inputs": {
+        "aoi_polygon": "a" * 64,
+        "flood_stage_tif": "b" * 64,
+        "stage_area_curve_csv": "c" * 64,
+        "ENDHD_csv": "d" * 64,
+        "reference_csv": "e" * 64,
+    }
+}
+
+
+def test_map_key_follows_the_record_and_the_map_inputs() -> None:
+    record = _records()[0]
+    key = viewer_export.map_key(record, MANIFEST)
+    assert viewer_export.map_key(json.loads(json.dumps(record)), MANIFEST) == key
+    for name in ("aoi_polygon", "flood_stage_tif", "stage_area_curve_csv"):
+        inputs = {**MANIFEST["inputs"], name: "f" * 64}
+        assert viewer_export.map_key(record, {"inputs": inputs}) != key
+    for name in ("ENDHD_csv", "reference_csv"):
+        inputs = {**MANIFEST["inputs"], name: "f" * 64}
+        assert viewer_export.map_key(record, {"inputs": inputs}) == key
+    assert viewer_export.map_key({**record, "cache_sha256": "0" * 64}, MANIFEST) != key
+
+
+def test_photo_key_follows_item_backend_bounds_and_aoi() -> None:
+    record = _records()[0]
+    bounds = [[20.1, -99.3], [20.2, -99.2]]
+    key = viewer_export.photo_key(record, bounds, "a" * 64)
+    assert viewer_export.photo_key(record, [r[:] for r in bounds], "a" * 64) == key
+    others = {
+        viewer_export.photo_key({**record, "backend_used": "pc"}, bounds, "a" * 64),
+        viewer_export.photo_key(record, [[20.1, -99.3], [20.2, -99.1]], "a" * 64),
+        viewer_export.photo_key(record, bounds, "b" * 64),
+    }
+    assert len(others) == 3
+    assert key not in others
 
 
 def test_photo_read_is_retried(

@@ -5,9 +5,10 @@ covered by water hyacinth. It reads Sentinel-2 satellite scenes and reports
 the covered area in hectares for each scene. The pipeline is deterministic,
 and every input is public, so anyone can rerun it and get the same figures.
 
-The current release is smolf 0.11.0. A verification layer and an agent that
-explain change over time will run on top of these figures. They are not
-built yet.
+The current release is smolf 0.12.0. [`CHANGELOG.md`](CHANGELOG.md) lists
+what changed in each release and what happened to the data contract. A
+verification layer and an agent that explain change over time will run on
+top of these figures. They are not built yet.
 
 ## What you get for each scene
 
@@ -31,6 +32,18 @@ Sentinel-2 scene of the reservoir:
 `smolf publish` turns one complete series run into versioned JSON files, a
 map of the latest scene, and Sentinel-2 true-colour photos.
 [`docs/contract.md`](docs/contract.md) describes every field.
+
+Three exports read a finished publish and stay outside the contract:
+
+- `smolf export series-csv`: a download bundle of CSV files.
+- `smolf export maps`: a classified GeoTIFF for every scene.
+- `smolf export viewer`: a folder for every scene with its photo, its class
+  map and its figures.
+
+The viewer figures also estimate the wet biomass of the hyacinth: corrected
+hectares × 18.32 kg/m², with a range of 11.67–23.84 kg/m², from a 2025 field
+measurement at the reservoir. Read it as an order of magnitude.
+[`docs/downloads.md`](docs/downloads.md) describes all three exports.
 
 ## How the pipeline works
 
@@ -159,6 +172,12 @@ Until `hydro/ENDHD.csv` exists there, `smolf` reads the committed
 `data/hydro/ENDHD.csv`. The first `levels update` checks the download
 against that copy. The other inputs stay read-only in the checkout.
 
+The three steps do not run the exports. Run `smolf export series-csv`,
+`smolf export maps` or `smolf export viewer` after `smolf publish` to
+refresh each one. `export maps` and `export viewer` need the scene cache
+that the build filled, and `export viewer` also needs network access for
+the photos.
+
 `smolf series build` uses these exit codes, so a scheduler can decide what
 to do next:
 
@@ -197,6 +216,9 @@ you reuse the data.
   Information System (SIH).
 - Surface-water occurrence: JRC Global Surface Water v1.4 from the European
   Commission's Joint Research Centre.
+- Hyacinth wet-weight density: the author's field measurement at the
+  reservoir (UAM Azcapotzalco, 2025, 15 samples). It is used only for the
+  biomass estimate in the viewer export.
 - Reference series in `tests/reference/`: the author's data, under CC BY 4.0.
   See [`tests/reference/LICENSE`](tests/reference/LICENSE). Version
   v2026-11-19 has 468 scenes and includes the haze rescue. Version

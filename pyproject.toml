@@ -1,6 +1,6 @@
 [project]
 name = "smol-frontier"
-version = "0.11.0"
+version = "0.12.0"
 description = "Independent, auditable verification of water-hyacinth coverage change in Endhó Reservoir, Mexico."
 requires-python = ">=3.11"
 dependencies = [

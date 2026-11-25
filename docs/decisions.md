@@ -316,3 +316,27 @@ enforced in this repo. Anything not implemented yet says **planned**.
 - **Where in this repo:** `publish/export.py` (`README_EN`, `README_ES`,
   `COLUMN_DICTIONARY_ES`, `_readme()`), `docs/downloads.md`,
   `tests/test_export.py`.
+
+## 20. Wet biomass: corrected hectares × the 2025 field density, viewer only
+
+- **Rule:** wet biomass = corrected hyacinth hectares × 18.32 kg/m²,
+  with a range of 11.67–23.84. The density is the UAM-A 2025 field
+  measurement. Dense hyacinth and interface count alike, and no
+  monthly adjustment is made. The figure appears only in the
+  `smolf export viewer` archive (outside the contract), always with its
+  range, and is null on lower-bound scenes.
+- **Why:** endho's per-date viewer asked for it (#102). The author's
+  two earlier implementations use the same density. smol (Python
+  pipeline and GEE viewer 0.9.10) applies it to the bed-corrected
+  area. smol-gee (GEE viewer 0.9.9) applies it to the raw area, which
+  in the dry season inflates the tonnage about 28 times. smol was
+  chosen: a Jev-assisted comparison on 6 criteria scored it 6/6 and
+  smol-gee 3/6 (corrected area, classifier match, tests). No
+  measurement separates interface from dense density, so a factor for
+  it would be invented. The samples cover about 6 locations, and Oct
+  and Nov are the same site, so the value is an order of magnitude
+  that needs its range. It stays out of the contract and `series.csv`
+  until the method is published.
+- **Where in this repo:** `config.py` (`BIOMASS_WET_*`), `biomass.py`,
+  `publish/viewer_export.py`, `tests/test_biomass.py` (cross-check
+  against smol and smol-gee), `docs/downloads.md`.

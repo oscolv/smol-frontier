@@ -366,6 +366,27 @@ class Settings:
     #   the BOA offset sits above -0.1, so real pixels never reach it.
     TRUE_COLOUR_VALID_MIN: float = -0.15
 
+    # WHY: wet-weight density of the hyacinth mat, the one factor that turns
+    #   corrected hectares into tonnes for the per-date viewer (issue #102).
+    #   One value for every month and for dense and interface alike: there is
+    #   no local measurement of either difference, and the low-high range is
+    #   always published with the central value.
+    # HOW: field measurement at Endho, UAM-A 2025, 1 m2 quadrat, wet weight
+    #   (~91 % water), 15 samples: 2025-08 11.67 kg/m2 (5 sites), 2025-10-15
+    #   19.46 and 2025-11-20 23.84 kg/m2 (5 replicates each at one south-shore
+    #   site). Central = mean of the 15 samples, range = the campaign means.
+    #   Only ~6 locations, and Oct/Nov are the same point, so the Aug->Nov
+    #   doubling mixes season with site: an order-of-magnitude figure. Same
+    #   constant as the author's pipelines (smol, smol-gee); replaces their
+    #   earlier unmeasured 63 plants/m2 x 0.5 kg = 31.5 kg/m2.
+    BIOMASS_WET_KG_M2: float = 18.32
+    BIOMASS_WET_KG_M2_LOW: float = 11.67
+    BIOMASS_WET_KG_M2_HIGH: float = 23.84
+    BIOMASS_SOURCE: str = (
+        "Field measurement at Endho reservoir, UAM Azcapotzalco, 2025 "
+        "(1 m2 quadrat, wet weight, 15 samples)"
+    )
+
     def traffic_light(self, pct: float) -> str:
         """Classify reservoir-area percent into green/yellow/red bands."""
         if pct < self.GREEN_MAX_PCT:

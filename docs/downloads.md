@@ -320,3 +320,129 @@ Measured on 2026-11-23 for run `20261119T200232`:
 Re-measure on a smaller server. The export is not incremental: every run
 rebuilds every map, because a map depends on the cache bytes, code,
 config and committed inputs.
+
+## Per-date viewer archive (`smolf export viewer`)
+
+One folder per scene for endho's public "map by date" viewer (issue
+#102): the scene's photo, its rendered class map and its figures,
+including wet biomass. First released in smolf 0.12.0. Like the other
+exports it is **outside the contract**: not listed in `publish.json`,
+not versioned by `schema_version`, no JSON Schema. Field names stay
+stable across minor releases.
+
+```sh
+uv run smolf export viewer [--from <publish dir>] [--out <dir>]
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `--from` | `outputs/publish/` | Publish directory to read. |
+| `--out` | `outputs/viewer/` | Output directory, replaced as a whole. |
+
+With `SMOLF_DATA_DIR` set the defaults move under it. Progress goes to
+stderr, one line per scene (`built <folder>` or `kept <folder>`);
+stdout prints `exported: <dir>`.
+
+### Files
+
+```text
+<date>_<item_id>/
+  photo.webp        Sentinel-2 true colour of the scene
+  classified.webp   the published class map, same grid and bounds
+  figures.json      the scene's figures
+index.json          run, series and the sha256 of every scene file
+README.txt          layout, biomass method, licence (CC BY 4.0)
+SHA256SUMS          sha256 of every other file, as <folder>/<file>
+```
+
+- **Which scenes:** the same as `export maps`. That means every scene
+  with figures in `series.json`, DOUBTFUL and lower-bound ones included,
+  with no gate. endho selects what it shows. POOR scenes get no folder.
+- **`photo.webp`:** built exactly like `latest.image`:
+  - EPSG:3857 on the class map's display grid;
+  - RGBA, transparent outside the reservoir and on no-data pixels;
+  - fixed reflectance window 0–0.30, then gamma 1.6, the same for every
+    date.
+
+  It is read from the item's COGs at export time, so it needs the
+  network. A failed read is retried up to three times.
+- **`classified.webp`:** the published map, classes 0–5 with the
+  exposed-bed correction applied. It is painted with the published
+  colours, class 0 is transparent, and it is the same display image as
+  `latest.map.png`. It is **lossless**, so every pixel decodes to
+  exactly one class. The export decodes each file and refuses it unless
+  it matches the classes it was drawn from.
+- **`figures.json`** (canonical JSON, sorted keys):
+  - `date`, `item_id`, `run_id`, `bounds`
+    (`[[south, west], [north, east]]`, EPSG:4326, shared by both
+    images), `attribution` (`Copernicus Sentinel data <year>`).
+  - The scene's `series.json` fields, verbatim:
+    `hyacinth_corrected_ha`, `dense_corrected_ha`,
+    `interface_corrected_ha`, `display_ha`, `pct_reservoir_corrected`,
+    `cover_band`, `display_status`, `removed_ha`, `level_m`,
+    `valid_frac`, `cloud_frac`, `bed_applied`, `quality_light`,
+    `regime`. These are corrected figures only.
+  - `reservoir_ha` (1261.75) and `classes`: `{ha, pct_reservoir}` for
+    `water`, `dense_hyacinth`, `interface`, `bare_soil` and
+    `bed_removed`, counted on the published map, plus `no_data`, the
+    area the five classes leave.
+    - The pipeline cannot tell cloud or shadow from unclassified
+      pixels, so `no_data` is one figure.
+    - Classes sum to `reservoir_ha` to the hundredth.
+    - `dense_hyacinth`, `interface` and `bed_removed` equal the
+      `series.json` hectares.
+  - Wet biomass: `biomass_wet_t`, `biomass_wet_t_low` and
+    `biomass_wet_t_high` (tonnes of wet weight), plus
+    `biomass_density_kg_m2` (`{central, low, high}`) and
+    `biomass_source`.
+  - `pct_reservoir` and biomass are null on `LOWER_BOUND` scenes. The
+    copied `series.json` fields stay verbatim there.
+- **`index.json`:** `run_id`, `series_sha256`, `series_json_sha256`,
+  `smolf_version` and one entry per folder, in series order: `date`,
+  `item_id`, `folder`, and `files`, the sha256 of each of the three
+  files. A consumer refuses the archive unless `run_id` and
+  `series_sha256` match the series it serves.
+
+### Wet biomass
+
+```text
+t = hyacinth_corrected_ha × 10 000 m²/ha × density kg/m² / 1 000 kg/t
+```
+
+- **Rounding:** half up, to the tonne.
+- **Density:** 18.32 kg/m², range 11.67–23.84. This is the field
+  measurement at Endhó (UAM Azcapotzalco, 2025, wet weight, 15
+  samples); its provenance is in `config.py`.
+- **Interface:** counts at the full density.
+- **Area:** always the corrected area, never the raw one. On 2024-06-09
+  the raw area would give about 28 times the tonnage.
+- **Consistency:** it matches the author's two earlier implementations
+  (smol, smol-gee) to the tonne for the same hectares; see
+  `tests/test_biomass.py`.
+- **Reading it:** an order-of-magnitude estimate, always shown with its
+  range.
+
+### Incremental
+
+- **Reused folders:** a folder of an earlier export is copied instead
+  of rebuilt when all of these hold:
+  - the earlier export is of the same run (`run_id` in its
+    `index.json`);
+  - its three files still hash to that index;
+  - its `figures.json` rebuilds byte for byte from the current
+    `series.json`.
+- **Rebuilt folders:** anything else is built, which covers a new
+  scene, a missing or tampered folder, and a changed figure.
+- **New run:** every folder is rebuilt.
+- **Writing:** the directory is always swapped in whole, so an archive
+  never mixes runs.
+
+### Verification
+
+Each built folder passes every check `export maps` makes (run, cache,
+per-class hectares, class 5 against `removed_ha`, classes against
+`series.json`). On top of those, the export checks the decoded
+`classified.webp` and the class areas against the reservoir area. Any
+failure refuses (exit 2), and the previous archive is left as it was.
+The out-dir rules are those of `export maps`, with scene folders
+allowed when they hold only the three scene files.

@@ -398,9 +398,10 @@ SHA256SUMS          sha256 of every other file, as <folder>/<file>
   - `pct_reservoir` and biomass are null on `LOWER_BOUND` scenes. The
     copied `series.json` fields stay verbatim there.
 - **`index.json`:** `run_id`, `series_sha256`, `series_json_sha256`,
-  `smolf_version` and one entry per folder, in series order: `date`,
-  `item_id`, `folder`, and `files`, the sha256 of each of the three
-  files. A consumer refuses the archive unless `run_id` and
+  `smolf_version`, `config_hash` (sha256 of the settings, as in a run
+  manifest) and one entry per folder, in series order: `date`,
+  `item_id`, `folder`, `map_key` and `photo_key` (see Incremental) and
+  `files`, the sha256 of each of the three files. A consumer refuses the archive unless `run_id` and
   `series_sha256` match the series it serves.
 
 ### Wet biomass
@@ -424,18 +425,41 @@ t = hyacinth_corrected_ha × 10 000 m²/ha × density kg/m² / 1 000 kg/t
 
 ### Incremental
 
-- **Reused folders:** a folder of an earlier export is copied instead
-  of rebuilt when all of these hold:
-  - the earlier export is of the same run (`run_id` in its
-    `index.json`);
-  - its three files still hash to that index;
-  - its `figures.json` rebuilds byte for byte from the current
-    `series.json`.
-- **Rebuilt folders:** anything else is built, which covers a new
-  scene, a missing or tampered folder, and a changed figure.
-- **New run:** every folder is rebuilt.
-- **Writing:** the directory is always swapped in whole, so an archive
-  never mixes runs.
+The export reuses the folders of the previous export in `--out`,
+whatever its run, so a daily export after a new run only builds the
+new or changed scenes.
+
+- **Reusable folders:** a folder of the previous export is a candidate
+  when that export was written by the same smolf version and settings
+  (`smolf_version` and `config_hash` in its `index.json`) and its three
+  files still hash to that index. Another version or config rebuilds
+  every folder, since the map rebuild, the rendering and the photo
+  window are smolf's code and settings. A development checkout that
+  changes code without bumping the version should start from an empty
+  `--out`.
+- **Kept:** a candidate is kept (`kept <folder>`) when both hold:
+  - its `map_key` equals the scene's new one. The key is the sha256 of
+    the scene's run record (cache sha256 and run row) and the run's
+    `aoi_polygon`, `flood_stage_tif` and `stage_area_curve_csv` hashes,
+    everything the class map is built from;
+  - its `figures.json` rebuilds byte for byte from the new
+    `series.json` row under its old `run_id`.
+
+  `photo.webp` and `classified.webp` are copied; `figures.json` is
+  written again with the new `run_id`. No map rebuild, no photo read.
+- **Map rebuilt, photo kept:** any other candidate has its map and
+  figures rebuilt and checked. Its `photo.webp` is copied when its
+  `photo_key` equals the new one: the sha256 of the item id, the backend
+  whose COGs are read, the display bounds and the reservoir polygon
+  (the BOA-offset region and the clip), which with the version and
+  config is all the photo depends on (`built <folder> (photo kept)`).
+- **Built:** a new scene, or a missing or tampered folder, is built
+  from scratch, photo read included (`built <folder>`).
+- **Dropped scenes:** a folder whose scene is not in the new
+  `series.json` is not carried over.
+- **Writing:** the directory is always swapped in whole. `index.json`,
+  `README.txt`, `SHA256SUMS` and every `figures.json` name the current
+  run, so an archive never mixes runs.
 
 ### Verification
 

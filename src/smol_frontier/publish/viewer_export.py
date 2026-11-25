@@ -15,13 +15,13 @@ endho gate) writes ``<date>_<item_id>/`` with:
 
 plus ``index.json``, ``README.txt`` and ``SHA256SUMS``. Outside the
 contract, like the other exports. Incremental across runs: the scene
-folders of the previous export (same smolf version and config, files still hashing to
-its ``index.json``) are reused. A folder whose map key (the scene record
-and the run inputs its map is built from) and figures are unchanged is
-kept, with the new ``run_id`` written into ``figures.json``; otherwise its
-map is rebuilt, and its photo is still reused when its photo key (item,
-backend, bounds, reservoir polygon) matches. The output directory is always
-swapped in whole, so it never mixes runs.
+folders of the previous export (same smolf version and config, files still
+hashing to its ``index.json``) are reused. A folder whose map key (the
+scene record and the run inputs its map is built from) and figures are
+unchanged is kept, with the new ``run_id`` written into ``figures.json``;
+otherwise its map is rebuilt, and its photo is still reused when its photo
+key (item, backend, bounds, reservoir polygon) matches. The output
+directory is always swapped in whole, so it never mixes runs.
 """
 
 import hashlib
@@ -276,8 +276,7 @@ def map_key(record: dict[str, object], manifest: dict[str, object]) -> str:
     version and config, rebuild the same map, so its classified.webp can be
     reused.
     """
-    inputs = manifest.get("inputs")
-    inputs = inputs if isinstance(inputs, dict) else {}
+    inputs = manifest["inputs"]
     document = {
         "record": record,
         "inputs": {name: inputs.get(name) for name in _MAP_INPUTS},
@@ -470,17 +469,16 @@ def export_viewer(
                 folder = f"{record['date']}_{record['item_id_used']}"
                 scene_map_key = map_key(record, manifest)
                 old = reusable.get(folder)
-                figures = None
                 if old is not None and old.photo_key and old.map_key == scene_map_key:
                     figures = _current_figures(old, scene, run_id)
-                if old is not None and old.photo_key and figures is not None:
-                    built[folder] = {**old.files, "figures.json": figures}
-                    keys[folder] = {
-                        "map_key": scene_map_key,
-                        "photo_key": old.photo_key,
-                    }
-                    _report(progress, f"kept {folder}")
-                    continue
+                    if figures is not None:
+                        built[folder] = {**old.files, "figures.json": figures}
+                        keys[folder] = {
+                            "map_key": scene_map_key,
+                            "photo_key": old.photo_key,
+                        }
+                        _report(progress, f"kept {folder}")
+                        continue
                 files, display = _build_scene(
                     record, scene, manifest, committed, run_id, Path(tmp)
                 )

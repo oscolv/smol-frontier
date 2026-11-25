@@ -63,6 +63,7 @@ def _record(day: str, item_id: str, status: str, **overrides: object) -> dict:
         "date": day,
         "item_id_requested": item_id,
         "item_id_used": item_id,
+        "backend_used": "earth-search",
         "row": None,
         "status": status,
         "valid_frac": 0.3,
@@ -143,16 +144,22 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """SMOLF_DATA_DIR with a complete run and its publish."""
     root = tmp_path / "data"
     monkeypatch.setenv(paths.DATA_DIR_ENV, str(root))
-    run_dir = paths.series_dir() / RUN_ID
+    publish_run(tmp_path, RUN_ID, _records())
+    return root
+
+
+def publish_run(tmp_path: Path, run_id: str, records: list[dict]) -> None:
+    """Write a complete run of ``records`` and publish it (replacing any
+    earlier publish)."""
+    run_dir = paths.series_dir() / run_id
     (run_dir / "scenes").mkdir(parents=True)
-    records = _records()
     for record in records:
         name = f"{record['item_id_requested']}.json"
         (run_dir / "scenes" / name).write_text(json.dumps(record), encoding="utf-8")
     series.write_series_csv(run_dir / "series.csv", [r for r in records if r["row"]])
     series_sha = series.sha256_file(run_dir / "series.csv")
     manifest = {
-        "run_id": RUN_ID,
+        "run_id": run_id,
         "status": "complete",
         "series_sha256": series_sha,
         "code": {"dirty": False},
@@ -171,7 +178,7 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         encoding="utf-8",
     )
     pub = paths.publish_dir()
-    pub.mkdir(parents=True)
+    pub.mkdir(parents=True, exist_ok=True)
     series_doc = publish.series_document(
         records, manifest, publish.committed_curve(manifest)
     )
@@ -181,13 +188,12 @@ def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name, document in (("series.json", series_doc), ("latest.json", latest)):
         publish.validate(name.removesuffix(".json"), document)
         (pub / name).write_text(publish.canonical_json(document), encoding="utf-8")
-    _write_index(pub, series_sha)
-    return root
+    _write_index(pub, series_sha, run_id)
 
 
-def _write_index(pub: Path, series_sha: str) -> None:
+def _write_index(pub: Path, series_sha: str, run_id: str = RUN_ID) -> None:
     (pub / "publish.json").unlink(missing_ok=True)
-    index = publish_index(pub, RUN_ID, series_sha, GENERATED)
+    index = publish_index(pub, run_id, series_sha, GENERATED)
     (pub / "publish.json").write_text(publish.canonical_json(index), encoding="utf-8")
 
 

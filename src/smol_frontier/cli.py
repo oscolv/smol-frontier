@@ -658,8 +658,10 @@ def export_viewer_command(
     README.txt and SHA256SUMS.
 
     Verifies the publish and rebuilds each scene like `export maps`; the
-    photo is read from the item's COGs (network). Folders of an earlier
-    export of the same run that still verify are kept instead of rebuilt.
+    photo is read from the item's COGs (network). Folders of the previous
+    export (any run, same smolf version) that still verify are reused: kept
+    when their map key and figures are unchanged, else the map is rebuilt
+    and the photo kept when its item, backend and bounds match.
     Refuses (exit 2) like `export maps`, and on any image that does not
     decode to its classes; a refusal writes nothing. The output directory
     is replaced atomically. Progress goes to stderr, one line per scene.

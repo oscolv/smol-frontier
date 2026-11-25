@@ -18,7 +18,9 @@ from test_map_export import (  # noqa: F401  (data_dir is a fixture)
     RUN_ID,
     TRANSFORM,
     _fake_class_map,
+    _records,
     data_dir,
+    publish_run,
 )
 from typer.testing import CliRunner
 
@@ -212,18 +214,110 @@ def test_only_a_missing_or_tampered_folder_is_rebuilt(
     assert fakes["map"] == [f.split("_", 1)[1] for f in FOLDERS[:2]]
 
 
-def test_another_run_rebuilds_every_folder(
+NEW_RUN = "20240111T000000"
+
+
+def _second_run(tmp_path: Path, records: list[dict]) -> None:
+    publish_run(tmp_path, NEW_RUN, records)
+
+
+def test_a_new_run_with_the_same_figures_keeps_every_folder(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+    tmp_path: Path,
+) -> None:
+    assert _export().exit_code == 0
+    first = _tree(_out(data_dir))
+    _second_run(tmp_path, _records())
+    fakes["map"].clear()
+    fakes["photo"].clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    assert fakes == {"map": [], "photo": []}
+    assert result.stderr.splitlines() == [f"kept {f}" for f in FOLDERS]
+    out = _out(data_dir)
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert index["run_id"] == NEW_RUN
+    assert index["series_sha256"] == _series(data_dir)["series_sha256"]
+    assert NEW_RUN in (out / "README.txt").read_text(encoding="ascii")
+    for entry in index["scenes"]:
+        folder = out / entry["folder"]
+        figures = json.loads((folder / "figures.json").read_text(encoding="utf-8"))
+        assert figures["run_id"] == NEW_RUN
+        for name in ("photo.webp", "classified.webp"):
+            assert (folder / name).read_bytes() == first[f"{entry['folder']}/{name}"]
+        for name, digest in entry["files"].items():
+            assert hashlib.sha256((folder / name).read_bytes()).hexdigest() == digest
+    for line in (out / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+        digest, name = line.split("  ")
+        assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
+
+
+def test_a_new_run_rebuilds_only_the_changed_scenes(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+    tmp_path: Path,
+) -> None:
+    assert _export().exit_code == 0
+    records = _records()
+    # a new cache file (map key) for one scene, a new valid_frac (figures)
+    # for another, and the third scene dropped from the run
+    records[0]["cache_sha256"] = "0" * 64
+    records[2]["row"]["valid_frac"] = 0.97
+    records[2]["valid_frac"] = 0.97
+    dropped = records.pop(3)
+    _second_run(tmp_path, records)
+    fakes["map"].clear()
+    fakes["photo"].clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    assert fakes["map"] == [FOLDERS[0].split("_", 1)[1], FOLDERS[1].split("_", 1)[1]]
+    assert fakes["photo"] == []
+    assert result.stderr.splitlines() == [
+        f"built {FOLDERS[0]} (photo kept)",
+        f"built {FOLDERS[1]} (photo kept)",
+    ]
+    out = _out(data_dir)
+    assert not (out / f"{dropped['date']}_{dropped['item_id_used']}").exists()
+    index = json.loads((out / "index.json").read_text(encoding="utf-8"))
+    assert [e["folder"] for e in index["scenes"]] == FOLDERS[:2]
+
+
+def test_a_new_backend_reads_the_photo_again(
+    data_dir: Path,  # noqa: F811
+    fakes: dict,
+    tmp_path: Path,
+) -> None:
+    assert _export().exit_code == 0
+    records = _records()
+    records[0]["backend_used"] = "planetary-computer"
+    _second_run(tmp_path, records)
+    fakes["map"].clear()
+    fakes["photo"].clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    item_id = FOLDERS[0].split("_", 1)[1]
+    assert fakes == {"map": [item_id], "photo": [item_id]}
+    assert sorted(result.stderr.splitlines()) == [
+        f"built {FOLDERS[0]}",
+        *(f"kept {f}" for f in FOLDERS[1:]),
+    ]
+
+
+def test_another_smolf_version_rebuilds_every_folder(
     data_dir: Path,  # noqa: F811
     fakes: dict,
 ) -> None:
     assert _export().exit_code == 0
     path = _out(data_dir) / "index.json"
     index = json.loads(path.read_text(encoding="utf-8"))
-    index["run_id"] = "20000101T000000"
+    index["smolf_version"] = "0.0.0"
     path.write_text(json.dumps(index), encoding="utf-8")
     fakes["map"].clear()
+    fakes["photo"].clear()
     assert _export().exit_code == 0
     assert len(fakes["map"]) == len(FOLDERS)
+    assert len(fakes["photo"]) == len(FOLDERS)
 
 
 def test_photo_read_is_retried(

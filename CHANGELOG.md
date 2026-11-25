@@ -12,6 +12,11 @@ rules in `docs/decisions.md`.
 
 ### Changed
 
+- `smolf export viewer` reuses the previous export's folders across runs:
+  a scene whose map key (`map_key`, new in `index.json`) and figures are
+  unchanged is kept, and a rebuilt map keeps its photo when item, backend
+  and bounds match (`photo_key`), so a daily export after a new run reads only the new photos.
+
 - The committed SIH level record runs through 2026-11-24 (#106).
 
 ## [0.12.0] - 2026-11-25

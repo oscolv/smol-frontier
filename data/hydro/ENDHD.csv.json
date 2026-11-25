@@ -1,8 +1,8 @@
 {
   "url": "https://sih.conagua.gob.mx/basedatos/Presas/ENDHD.csv",
-  "downloaded_utc": "2026-11-19T05:25:18.687325+00:00",
-  "bytes": 1165388,
-  "sha256": "261180f64987db44a3a57f16636b49072474e4d00b43544a54c98f4a21eabc84",
-  "n_days": 26704,
-  "last_day_with_level": "2026-11-18"
+  "downloaded_utc": "2026-11-25T06:56:14.439161+00:00",
+  "bytes": 1165745,
+  "sha256": "0bcfb0f0501e86a2a8eb0df34ab51d636fc6ac64262d5452635eaef52e83f168",
+  "n_days": 26710,
+  "last_day_with_level": "2026-11-24"
 }

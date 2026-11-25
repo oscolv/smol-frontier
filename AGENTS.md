@@ -202,6 +202,10 @@ The author's prior research and the SIH data are in Spanish:
 - Run `ruff check .`, `ruff format --check .`, and `pytest -q`.
 - Commits: create a commit only when the user asks; conventional commit
   messages; no trailers.
+- Changelog: a PR that changes what users or consumers observe adds a line
+  under `## [Unreleased]` in `CHANGELOG.md`. A release bump turns that
+  section into `## [x.y.z] - <date>`, opened by a `Contract:` line (the
+  schema version and whether it changed).
 
 ## Agent skills
 

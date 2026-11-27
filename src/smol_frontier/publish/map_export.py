@@ -1,7 +1,7 @@
 """Map export: one classified GeoTIFF per scene of a finished publish.
 
 ``export_maps`` reads a verified publish, resolves the series run it came
-from, rebuilds every ``ok`` scene's published class map (classes 0-5)
+from, builds every ``ok`` scene's published class map (classes 0-5)
 through ``map.build_map`` (cache hash, per-class and haze hectares, input
 hashes and removed hectares checked against the run), checks each map's
 pixel counts against that scene's ``series.json`` figures (scenes without
@@ -10,16 +10,28 @@ figures, i.e. POOR, get no map), and swaps
 ``SHA256SUMS`` into the output directory. Like the CSV bundle it is outside
 the contract: nothing here changes the published files or their schemas.
 It reads the scene cache (re-ingesting a missing scene by its exact id).
+
+The export is incremental across runs: a map of the previous export whose
+``index.csv`` row has the same file name and ``map_key``, was written by
+the same smolf version and config, and still hashes to its row is kept
+byte for byte (and re-checked against its new ``series.json`` scene;
+rebuilt if it disagrees). Only new or changed scenes are built. The rows,
+``README.txt`` and ``SHA256SUMS`` always describe the new run, and the
+maps equal those of a full export of that run into an empty directory.
 """
 
+import csv
 import hashlib
+import io
 import re
 import tempfile
 from pathlib import Path
 
 import numpy as np
+from rasterio.errors import RasterioError
+from rasterio.io import MemoryFile
 
-from smol_frontier import paths, series
+from smol_frontier import __version__, paths, series
 from smol_frontier.classify.geotiff import (
     PUBLISHED_CLASS_NAMES,
     PUBLISHED_COLORMAP,
@@ -37,6 +49,7 @@ from smol_frontier.publish.export import (
     write_export,
 )
 from smol_frontier.publish.map import build_map, committed_curve, map_path
+from smol_frontier.publish.map_key import map_key
 from smol_frontier.publish.select import _read_manifest
 
 __all__ = ["INDEX_COLUMNS", "export_maps", "owns"]
@@ -50,6 +63,12 @@ INDEX_COLUMNS = (
     "run_id",
     "series_sha256",
     "series_json_sha256",
+    # WHY: the reuse keys, after the eight original columns so readers of
+    #   those keep working; version and config repeat per row so the index
+    #   stays one self-contained file.
+    "map_key",
+    "smolf_version",
+    "config_hash",
 )
 _FIXED_FILES = frozenset({"index.csv", "README.txt", "SHA256SUMS"})
 # WHY: the published map's file name without its map/ directory.
@@ -119,6 +138,52 @@ def _check_scene(class_map: np.ndarray, scene: dict[str, object]) -> None:
         raise PublishRefused(msg)
 
 
+def _reusable(real: Path, config_hash: str) -> dict[str, tuple[str, bytes]]:
+    """Maps of the previous export that still hash to its index.csv, by
+    file name, with their ``map_key`` (else nothing).
+
+    WHY version and config must match: the map build is smolf's code and
+    settings, so another version or config rebuilds every map.
+    """
+    try:
+        text = (real / "index.csv").read_text(encoding="utf-8")
+        rows = list(csv.DictReader(io.StringIO(text)))
+    except (OSError, ValueError, csv.Error):
+        return {}
+    found: dict[str, tuple[str, bytes]] = {}
+    for row in rows:
+        if (
+            row.get("smolf_version") != __version__
+            or row.get("config_hash") != config_hash
+            or not row.get("map_key")
+        ):
+            continue
+        name = row.get("file")
+        if not isinstance(name, str) or _MAP_FILE.fullmatch(name) is None:
+            continue
+        try:
+            data = (real / name).read_bytes()
+        except OSError:
+            continue
+        if hashlib.sha256(data).hexdigest() == row.get("sha256"):
+            found[name] = (row["map_key"], data)
+    return found
+
+
+def _kept_agrees(data: bytes, scene: dict[str, object]) -> bool:
+    """True when a kept map's pixel counts still match its series.json scene."""
+    try:
+        with MemoryFile(data) as memory, memory.open() as src:
+            class_map = src.read(1)
+    except RasterioError:
+        return False
+    try:
+        _check_scene(class_map, scene)
+    except PublishRefused:
+        return False
+    return True
+
+
 def _readme(run_id: str, series_json_sha256: str, count: int, year: str) -> bytes:
     """The map export's README: files, classes, licence."""
     classes = [
@@ -171,9 +236,9 @@ def export_maps(from_dir: Path | None = None, out_dir: Path | None = None) -> Pa
     """Export every scene map of a verified publish; return ``out_dir`` as given.
 
     Defaults resolve at call time: ``paths.publish_dir()`` and
-    ``paths.maps_dir()``. Every map is rebuilt and checked before anything
-    is written; a refusal (PublishRefused, exit 2) leaves ``out_dir`` as it
-    was.
+    ``paths.maps_dir()``. Every map is kept (see the module docstring) or
+    built, and checked, before anything is written; a refusal
+    (PublishRefused, exit 2) leaves ``out_dir`` as it was.
     """
     source = paths.publish_dir() if from_dir is None else Path(from_dir)
     target = paths.maps_dir() if out_dir is None else Path(out_dir)
@@ -189,6 +254,8 @@ def export_maps(from_dir: Path | None = None, out_dir: Path | None = None) -> Pa
     ]
     scenes = {(s["date"], s["item_id"]): s for s in series_doc["scenes"]}
     committed = committed_curve(manifest)
+    config_hash = series.config_hash()
+    reusable = _reusable(real, config_hash)
     files: dict[str, bytes] = {}
     rows = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -204,13 +271,16 @@ def export_maps(from_dir: Path | None = None, out_dir: Path | None = None) -> Pa
             #   checked against, and endho-web never shows it.
             if scenes[key]["hyacinth_raw_ha"] is None:
                 continue
-            layer = build_map(record, manifest, committed)
-            _check_scene(layer.class_map, scenes[key])
             name = _file_name(record)
-            path = write_published_geotiff(
-                Path(tmp) / name, layer.class_map, layer.transform, layer.crs
-            )
-            data = path.read_bytes()
+            scene_map_key = map_key(record, manifest)
+            old_key, data = reusable.get(name, (None, b""))
+            if old_key != scene_map_key or not _kept_agrees(data, scenes[key]):
+                layer = build_map(record, manifest, committed)
+                _check_scene(layer.class_map, scenes[key])
+                path = write_published_geotiff(
+                    Path(tmp) / name, layer.class_map, layer.transform, layer.crs
+                )
+                data = path.read_bytes()
             files[name] = data
             rows.append(
                 [
@@ -222,6 +292,9 @@ def export_maps(from_dir: Path | None = None, out_dir: Path | None = None) -> Pa
                     str(series_doc["run_id"]),
                     str(series_doc["series_sha256"]),
                     series_json_sha256,
+                    scene_map_key,
+                    __version__,
+                    config_hash,
                 ]
             )
     files["index.csv"] = _csv_bytes(INDEX_COLUMNS, rows)

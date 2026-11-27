@@ -291,6 +291,9 @@ def _previous(out: Path) -> dict[str, bytes]:
 
 
 def _map_disagrees(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # another version keeps nothing, so every map is built (and disagrees)
+    monkeypatch.setattr(map_export, "__version__", "0.0.0")
+
     def build(record: dict, manifest: dict, committed: object) -> _Layer:
         class_map = _fake_class_map(record["row"])
         class_map[class_map == 5] = 1
@@ -377,3 +380,192 @@ def test_explicit_from_and_out_win_over_the_defaults(
     assert result.exit_code == 0, result.output
     assert sorted(p.name for p in out.iterdir() if p.suffix == ".tif") == OK_FILES
     assert not (data_dir / "outputs/maps").exists()
+
+
+NEW_RUN = "20240111T000000"
+KEY_COLUMNS = ("map_key", "smolf_version", "config_hash")
+
+
+def _out(data_dir: Path) -> Path:
+    return data_dir / "outputs/maps"
+
+
+def _index(out: Path) -> list[dict[str, str]]:
+    text = (out / "index.csv").read_text(encoding="utf-8")
+    return list(csv.DictReader(io.StringIO(text)))
+
+
+def _write_rows(out: Path, rows: list[dict[str, str]], columns: tuple) -> None:
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, columns, extrasaction="ignore", lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    (out / "index.csv").write_text(buffer.getvalue(), encoding="utf-8")
+
+
+def _item(file: str) -> str:
+    return file.removesuffix(".tif").split("_", 1)[1]
+
+
+def test_index_header_is_the_old_columns_then_the_keys(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    assert _export().exit_code == 0
+    header = (_out(data_dir) / "index.csv").read_text(encoding="utf-8").split("\n")[0]
+    assert tuple(header.strip().split(",")) == (
+        "date",
+        "item_id",
+        "file",
+        "sha256",
+        "bytes",
+        "run_id",
+        "series_sha256",
+        "series_json_sha256",
+        *KEY_COLUMNS,
+    )
+    for row in _index(_out(data_dir)):
+        assert len(row["map_key"]) == 64
+        assert row["smolf_version"] == map_export.__version__
+        assert row["config_hash"] == series.config_hash()
+
+
+def test_a_second_export_of_the_same_run_builds_nothing(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    assert _export().exit_code == 0
+    first = _previous(_out(data_dir))
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == []
+    assert _previous(_out(data_dir)) == first
+
+
+def test_a_new_run_with_the_same_scenes_keeps_every_map(
+    data_dir: Path, fake_build: list[str], tmp_path: Path
+) -> None:
+    assert _export().exit_code == 0
+    publish_run(tmp_path, NEW_RUN, _records())
+    fake_build.clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    assert fake_build == []
+    out = _out(data_dir)
+    pub = data_dir / "outputs/publish"
+    series_doc = json.loads((pub / "series.json").read_text(encoding="utf-8"))
+    series_json_sha = hashlib.sha256((pub / "series.json").read_bytes()).hexdigest()
+    for row in _index(out):
+        assert row["run_id"] == NEW_RUN
+        assert row["series_sha256"] == series_doc["series_sha256"]
+        assert row["series_json_sha256"] == series_json_sha
+    assert NEW_RUN in (out / "README.txt").read_text(encoding="ascii")
+    for line in (out / "SHA256SUMS").read_text(encoding="ascii").splitlines():
+        digest, name = line.split("  ")
+        assert hashlib.sha256((out / name).read_bytes()).hexdigest() == digest
+    full = tmp_path / "full"
+    assert _export("--out", str(full)).exit_code == 0
+    assert _previous(full) == _previous(out)
+
+
+def test_a_new_run_builds_only_the_changed_scene(
+    data_dir: Path, fake_build: list[str], tmp_path: Path
+) -> None:
+    assert _export().exit_code == 0
+    records = _records()
+    records[0]["cache_sha256"] = "0" * 64
+    publish_run(tmp_path, NEW_RUN, records)
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == [_item(OK_FILES[0])]
+    assert [row["file"] for row in _index(_out(data_dir))] == OK_FILES
+
+
+def test_a_scene_dropped_from_the_run_loses_its_map_and_row(
+    data_dir: Path, fake_build: list[str], tmp_path: Path
+) -> None:
+    assert _export().exit_code == 0
+    records = _records()
+    records.pop(3)
+    publish_run(tmp_path, NEW_RUN, records)
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == []
+    out = _out(data_dir)
+    assert not (out / OK_FILES[2]).exists()
+    assert [row["file"] for row in _index(out)] == OK_FILES[:2]
+    assert OK_FILES[2] not in (out / "SHA256SUMS").read_text(encoding="ascii")
+
+
+def test_only_a_missing_or_tampered_map_is_rebuilt(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    first = _previous(out)
+    (out / OK_FILES[0]).unlink()
+    (out / OK_FILES[1]).write_bytes(b"tampered")
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == [_item(OK_FILES[0]), _item(OK_FILES[1])]
+    assert _previous(out) == first
+
+
+@pytest.mark.parametrize(
+    ("field", "value"), [("smolf_version", "0.0.0"), ("config_hash", "0" * 64)]
+)
+def test_another_version_or_config_rebuilds_every_map(
+    data_dir: Path, fake_build: list[str], field: str, value: str
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    rows = [{**row, field: value} for row in _index(out)]
+    _write_rows(out, rows, map_export.INDEX_COLUMNS)
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == [_item(f) for f in OK_FILES]
+
+
+def test_an_index_without_keys_rebuilds_every_map(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    """A 0.13.0 export: index.csv has only the first eight columns."""
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    old_columns = map_export.INDEX_COLUMNS[: -len(KEY_COLUMNS)]
+    _write_rows(out, _index(out), old_columns)
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == [_item(f) for f in OK_FILES]
+    assert all(len(row["map_key"]) == 64 for row in _index(out))
+
+
+def test_an_unreadable_index_rebuilds_every_map(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    (out / "index.csv").write_bytes(b"\xff\xfe not a csv \x00")
+    fake_build.clear()
+    assert _export().exit_code == 0
+    assert fake_build == [_item(f) for f in OK_FILES]
+
+
+def test_a_kept_map_that_disagrees_with_series_json_is_rebuilt(
+    data_dir: Path, fake_build: list[str]
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    first = _previous(out)
+    path = out / OK_FILES[0]
+    with rasterio.open(path) as src:
+        class_map = src.read(1)
+    class_map[class_map == 5] = 1
+    map_export.write_published_geotiff(path, class_map, TRANSFORM, CRS)
+    rows = _index(out)
+    rows[0]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    rows[0]["bytes"] = str(path.stat().st_size)
+    _write_rows(out, rows, map_export.INDEX_COLUMNS)
+    fake_build.clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    assert fake_build == [_item(OK_FILES[0])]
+    assert _previous(out) == first

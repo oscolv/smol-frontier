@@ -10,6 +10,10 @@ rules in `docs/decisions.md`.
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-27
+
+Contract: schema 3.4.0, unchanged.
+
 ### Changed
 
 - `smolf export maps` reuses the previous export's maps across runs (same
@@ -222,7 +226,8 @@ Contract: schema 1.0.0, first release.
   gate against the author's reference series (CC BY 4.0).
 - `smolf publish`, the versioned data contract (#11).
 
-[Unreleased]: https://github.com/oscolv/smol-frontier/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/oscolv/smol-frontier/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/oscolv/smol-frontier/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/oscolv/smol-frontier/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/oscolv/smol-frontier/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/oscolv/smol-frontier/compare/v0.10.0...v0.11.0

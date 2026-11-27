@@ -51,10 +51,11 @@ The pipeline in order, one line per stage:
   and `SHA256SUMS` from a verified publish; outside the contract, see
   `docs/downloads.md`)
 - Per-scene maps — `publish/map_export.py` (`smolf export maps`; one
-  published-format class map per scene with figures, rebuilt with
-  `build_map` from the publish's run and the scene cache, checked against
-  `series.json`, plus `index.csv`, `README.txt`, `SHA256SUMS`; outside the
-  contract, see `docs/downloads.md`)
+  published-format class map per scene with figures, built with
+  `build_map` or kept from the previous export when its `map_key`, smolf
+  version and config hash match, checked against `series.json`, plus
+  `index.csv`, `README.txt`, `SHA256SUMS`; incremental across runs, keyed
+  by `map_key`; outside the contract, see `docs/downloads.md`)
 - Per-date viewer archive — `publish/viewer_export.py` (`smolf export
   viewer`; one folder per scene with `photo.webp`, lossless
   `classified.webp` and `figures.json` with per-class hectares and wet

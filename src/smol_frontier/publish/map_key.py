@@ -2,7 +2,7 @@
 
 ``map_key`` says whether a scene's published class map may have changed
 between two runs, so ``export maps`` and ``export viewer`` agree on when a
-map can be reused.
+map (GeoTIFF or classified.webp) can be reused.
 """
 
 import hashlib

@@ -269,10 +269,10 @@ SHA256SUMS             sha256 of every other file
   hash, the series id) and `series_json_sha256` (the sha256 of the
   publish's `series.json`), then the reuse keys `map_key` (the scene's
   map fingerprint, the same as the viewer export's), `smolf_version` and
-  `config_hash` (repeated on every row; added in the release after
-  0.13.0). Rows are in series order. A consumer checks `run_id`,
-  `series_sha256` and `series_json_sha256` against the `series.json` it
-  serves before serving the maps.
+  `config_hash` (repeated on every row; added in 0.14.0). Rows are in
+  series order. A consumer checks `run_id`, `series_sha256` and
+  `series_json_sha256` against the `series.json` it serves before serving
+  the maps.
 - **Deterministic:** the same publish, run and cache give byte-identical
   files, whether each map was kept or built (see Reuse across runs).
 
@@ -328,7 +328,9 @@ disagrees refuses. A kept scene's row keeps its `sha256` and `bytes` and
 gets the new `run_id`, `series_sha256` and `series_json_sha256`;
 `README.txt` and `SHA256SUMS` are rebuilt, and a scene dropped from the
 series disappears with the whole-folder swap. The output is
-byte-identical to a full export of the same run into an empty `--out`.
+byte-identical to a full export of the same run into an empty `--out`;
+this also relies on the pinned dependencies (GDAL and zlib via the locked
+rasterio wheel), which the smolf version pins through `uv.lock`.
 The first export after upgrading from 0.13.0 or earlier rebuilds every
 map once, because the old `index.csv` has no keys.
 

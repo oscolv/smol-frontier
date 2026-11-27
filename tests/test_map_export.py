@@ -569,3 +569,38 @@ def test_a_kept_map_that_disagrees_with_series_json_is_rebuilt(
     assert result.exit_code == 0, result.output
     assert fake_build == [_item(OK_FILES[0])]
     assert _previous(out) == first
+
+
+@pytest.mark.parametrize(
+    ("count", "dtype"), [(1, "float32"), (2, "uint8")], ids=["float32", "two-band"]
+)
+def test_a_kept_map_that_is_not_single_band_uint8_is_rebuilt(
+    data_dir: Path, fake_build: list[str], count: int, dtype: str
+) -> None:
+    assert _export().exit_code == 0
+    out = _out(data_dir)
+    first = _previous(out)
+    path = out / OK_FILES[0]
+    with rasterio.open(path) as src:
+        height, width = src.height, src.width
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=height,
+        width=width,
+        count=count,
+        dtype=dtype,
+        crs=CRS,
+        transform=TRANSFORM,
+    ) as dst:
+        dst.write(np.ones((count, height, width), dtype=dtype))
+    rows = _index(out)
+    rows[0]["sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+    rows[0]["bytes"] = str(path.stat().st_size)
+    _write_rows(out, rows, map_export.INDEX_COLUMNS)
+    fake_build.clear()
+    result = _export()
+    assert result.exit_code == 0, result.output
+    assert fake_build == [_item(OK_FILES[0])]
+    assert _previous(out) == first

@@ -174,6 +174,8 @@ def _kept_agrees(data: bytes, scene: dict[str, object]) -> bool:
     """True when a kept map's pixel counts still match its series.json scene."""
     try:
         with MemoryFile(data) as memory, memory.open() as src:
+            if src.count != 1 or src.dtypes[0] != "uint8":
+                return False
             class_map = src.read(1)
     except RasterioError:
         return False

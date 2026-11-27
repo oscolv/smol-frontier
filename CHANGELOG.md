@@ -10,6 +10,15 @@ rules in `docs/decisions.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- `smolf export maps` reuses the previous export's maps across runs (same
+  smolf version and config): a scene whose map key is unchanged and whose
+  file still hashes to its row is kept and re-checked against
+  `series.json`; only new or changed scenes are built (#111). `index.csv`
+  gains `map_key`, `smolf_version` and `config_hash` after its eight
+  columns. The first export after upgrading rebuilds every map once.
+
 ## [0.13.0] - 2026-11-25
 
 Contract: schema 3.4.0, unchanged.

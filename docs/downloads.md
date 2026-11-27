@@ -267,11 +267,14 @@ SHA256SUMS             sha256 of every other file
 - **`index.csv`** columns are `date`, `item_id`, `file`, `sha256`,
   `bytes`, `run_id`, `series_sha256` (the run's internal `series.csv`
   hash, the series id) and `series_json_sha256` (the sha256 of the
-  publish's `series.json`). Rows are in series order. A consumer checks
-  `run_id`, `series_sha256` and `series_json_sha256` against the
-  `series.json` it serves before serving the maps.
+  publish's `series.json`), then the reuse keys `map_key` (the scene's
+  map fingerprint, the same as the viewer export's), `smolf_version` and
+  `config_hash` (repeated on every row; added in 0.14.0). Rows are in
+  series order. A consumer checks `run_id`, `series_sha256` and
+  `series_json_sha256` against the `series.json` it serves before serving
+  the maps.
 - **Deterministic:** the same publish, run and cache give byte-identical
-  files.
+  files, whether each map was kept or built (see Reuse across runs).
 
 ### Verification
 
@@ -281,14 +284,15 @@ Before writing, the export:
 2. Resolves its run under the series directory, by `run_id`. The run
    must be complete, and its manifest's `series_sha256` and its
    `series.csv` sha256 must equal the publish's `series_sha256`.
-3. Rebuilds every map through the publish's own map builder. That
-   builder checks:
+3. Keeps or builds every map (see Reuse across runs); a built map goes
+   through the publish's own map builder. That builder checks:
    - the cache sha256;
    - per-class and haze hectares against the run row;
    - the flood-stage map and stage–area curve hashes against the run
      manifest;
    - class-5 area against `removed_ha`.
-4. Checks each map against its `series.json` scene, to the hundredth:
+4. Checks each map, kept or built, against its `series.json` scene, to
+   the hundredth:
    - class 2 × 0.01 ha = `dense_corrected_ha`, and class 3 × 0.01 ha =
      `interface_corrected_ha` (when `bed_applied` is false, `dense_ha`
      and `interface_ha` instead);
@@ -302,6 +306,33 @@ export is left as it was. The out-dir rules are those of `series-csv`:
 staging plus a swap by rename, and refusal of an `--out` inside the
 publish directory or holding anything other than the export's own
 files.
+
+### Reuse across runs
+
+The export is incremental: it keeps the previous export's GeoTIFF for
+every scene whose map inputs are unchanged, whatever run it came from,
+and builds only new or changed scenes. A previous map is kept only when:
+
+- the previous `index.csv` parses and has the three key columns;
+- its row's `smolf_version` and `config_hash` equal the running smolf
+  version and config hash (otherwise every map is rebuilt);
+- its `file` is a map file name, the file hashes to the row's `sha256`
+  (a missing, tampered or truncated file is rebuilt), and the row's
+  `map_key` equals the scene's current one (the scene record, with its
+  cache sha256 and run row, plus the run's AOI polygon, flood-stage map
+  and stage–area curve hashes).
+
+A kept map is decoded and checked against its new `series.json` scene
+(step 4); if it disagrees it is rebuilt, and only a built map that
+disagrees refuses. A kept scene's row keeps its `sha256` and `bytes` and
+gets the new `run_id`, `series_sha256` and `series_json_sha256`;
+`README.txt` and `SHA256SUMS` are rebuilt, and a scene dropped from the
+series disappears with the whole-folder swap. The output is
+byte-identical to a full export of the same run into an empty `--out`;
+this also relies on the pinned dependencies (GDAL and zlib via the locked
+rasterio wheel), which the smolf version pins through `uv.lock`.
+The first export after upgrading from 0.13.0 or earlier rebuilds every
+map once, because the old `index.csv` has no keys.
 
 ### Cost
 
@@ -317,9 +348,11 @@ Measured on 2026-11-23 for run `20261119T200232`:
 - 7.6 MB in total (11–22 KB per map);
 - about 400 MB peak memory.
 
-Re-measure on a smaller server. The export is not incremental: every run
-rebuilds every map, because a map depends on the cache bytes, code,
-config and committed inputs.
+That is the cost of a full export (the first one, or after a version or
+config change). Re-measure on a smaller server. A later export keeps the
+unchanged maps (see Reuse across runs), so it costs a few seconds of
+hashing and checking plus about 1.3 s per built map. Only built maps
+need their scene in the cache.
 
 ## Per-date viewer archive (`smolf export viewer`)
 

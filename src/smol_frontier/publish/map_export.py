@@ -158,8 +158,8 @@ def _reusable(real: Path, config_hash: str) -> dict[str, tuple[str, bytes]]:
             or not row.get("map_key")
         ):
             continue
-        name = row.get("file")
-        if not isinstance(name, str) or _MAP_FILE.fullmatch(name) is None:
+        name = row.get("file") or ""
+        if _MAP_FILE.fullmatch(name) is None:
             continue
         try:
             data = (real / name).read_bytes()

@@ -22,8 +22,7 @@ def map_key(record: dict[str, object], manifest: dict[str, object]) -> str:
 
     The scene record (cache sha256, run row) and the run inputs in
     ``_MAP_INPUTS``. Two runs with the same key, exported by the same smolf
-    version and config, rebuild the same map, so its classified.webp can be
-    reused.
+    version and config, rebuild the same map, so it can be reused.
     """
     inputs = manifest["inputs"]
     document = {

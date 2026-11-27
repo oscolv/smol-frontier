@@ -58,6 +58,7 @@ from smol_frontier.publish.export import (
 )
 from smol_frontier.publish.map import build_map, committed_curve
 from smol_frontier.publish.map_export import _check_scene, _run_dir
+from smol_frontier.publish.map_key import map_key
 from smol_frontier.publish.truecolour import (
     attribution,
     build_true_colour,
@@ -69,7 +70,6 @@ __all__ = [
     "COPIED_FIELDS",
     "SCENE_FILES",
     "export_viewer",
-    "map_key",
     "owns",
     "photo_key",
     "scene_figures",
@@ -260,28 +260,6 @@ def _sha(data: bytes) -> str:
 def _report(progress: Callable[[str], None] | None, line: str) -> None:
     if progress is not None:
         progress(line)
-
-
-# WHY: the run inputs build_map reads besides the scene record (the cache
-#   file is pinned by the record's cache_sha256); a change to any of them
-#   may move the class map, so it is part of the map key.
-_MAP_INPUTS = ("aoi_polygon", "flood_stage_tif", "stage_area_curve_csv")
-
-
-def map_key(record: dict[str, object], manifest: dict[str, object]) -> str:
-    """Fingerprint of everything a scene's class map is built from (pure).
-
-    The scene record (cache sha256, run row) and the run inputs in
-    ``_MAP_INPUTS``. Two runs with the same key, exported by the same smolf
-    version and config, rebuild the same map, so its classified.webp can be
-    reused.
-    """
-    inputs = manifest["inputs"]
-    document = {
-        "record": record,
-        "inputs": {name: inputs.get(name) for name in _MAP_INPUTS},
-    }
-    return _sha(_json_bytes(document))
 
 
 def photo_key(

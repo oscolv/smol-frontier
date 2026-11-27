@@ -33,6 +33,7 @@ from smol_frontier.classify.display import (
 from smol_frontier.cli import app
 from smol_frontier.publish import viewer_export
 from smol_frontier.publish.errors import PublishRefused
+from smol_frontier.publish.map_key import map_key
 from smol_frontier.publish.truecolour import TrueColour
 
 FOLDERS = [
@@ -388,15 +389,15 @@ MANIFEST = {
 
 def test_map_key_follows_the_record_and_the_map_inputs() -> None:
     record = _records()[0]
-    key = viewer_export.map_key(record, MANIFEST)
-    assert viewer_export.map_key(json.loads(json.dumps(record)), MANIFEST) == key
+    key = map_key(record, MANIFEST)
+    assert map_key(json.loads(json.dumps(record)), MANIFEST) == key
     for name in ("aoi_polygon", "flood_stage_tif", "stage_area_curve_csv"):
         inputs = {**MANIFEST["inputs"], name: "f" * 64}
-        assert viewer_export.map_key(record, {"inputs": inputs}) != key
+        assert map_key(record, {"inputs": inputs}) != key
     for name in ("ENDHD_csv", "reference_csv"):
         inputs = {**MANIFEST["inputs"], name: "f" * 64}
-        assert viewer_export.map_key(record, {"inputs": inputs}) == key
-    assert viewer_export.map_key({**record, "cache_sha256": "0" * 64}, MANIFEST) != key
+        assert map_key(record, {"inputs": inputs}) == key
+    assert map_key({**record, "cache_sha256": "0" * 64}, MANIFEST) != key
 
 
 def test_photo_key_follows_item_backend_bounds_and_aoi() -> None:
